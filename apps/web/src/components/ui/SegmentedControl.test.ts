@@ -168,12 +168,33 @@ describe("SegmentedControl, with the keyboard", () => {
     expect(radios()[1].getAttribute("aria-checked")).toBe("true");
   });
 
+  /**
+   * Where a `translate` puts the face, in px, for a face one segment wide
+   * (`segment` px) with `gap` px between segments. The component sets
+   * `calc(N * (100% + 2px)) 0`; jsdom 31 serializes the same value simplified
+   * (`calc(200% + 4px)`, the default second 0 dropped), so the test reads the
+   * position and not the string. The percentage is of the face's own width.
+   */
+  const offset = (translate: string, segment: number) => {
+    const first = translate.trim().replace(/\s+0(px|%)?$/, "");
+    const expr = first.replace(/calc/g, "").replace(/(-?[\d.]+)%/g, (_, n) => `(${n}/100*${segment})`).replace(/px/g, "");
+    if (!/^[\d\s.+\-*/()]+$/.test(expr)) throw new Error(`unreadable translate: ${translate}`);
+    return Function(`return (${expr})`)() as number;
+  };
+
   it("slides the face to the new segment", () => {
     const container = mount(createElement(Controlled, { onChange: () => {} }));
     const thumb = () => container.querySelector<HTMLElement>("[data-segment-thumb]")!;
-    expect(thumb().style.translate).toBe("calc(0 * (100% + 2px)) 0");
-    act(() => container.querySelectorAll<HTMLButtonElement>('[role="radio"]')[2].click());
-    expect(thumb().style.translate).toBe("calc(2 * (100% + 2px)) 0");
+    const radios = () => container.querySelectorAll<HTMLButtonElement>('[role="radio"]');
+    // Face of 100px, 2px gaps: segment N sits N * 102px along.
+    const at = () => offset(thumb().style.translate, 100);
+    expect(at()).toBe(0);
+    act(() => radios()[2].click());
+    expect(at()).toBe(204);
+    act(() => radios()[1].click());
+    expect(at()).toBe(102);
+    act(() => radios()[0].click());
+    expect(at()).toBe(0);
   });
 
   it("does nothing while disabled", () => {
