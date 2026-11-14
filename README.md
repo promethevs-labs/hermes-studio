@@ -42,8 +42,8 @@ A third part, the `tools/manimkc/` submodule, renders narrated animations for co
 ```
 
 <p align="center">
-  <img src="apps/web/public/screenshot.png" alt="The Hermes Today page: a top bar with Today, Courses, Learn, Library and Review, the next concept on the path with Continue teaching, a list of reviews due with Start review, recent study activity, and a right column with today's target, a seven-day streak strip and courses in progress" width="900"><br>
-  <em>Today, the home page, live at <a href="https://hermes-one.vercel.app">hermes-one.vercel.app</a>.</em>
+  <img src="apps/web/public/screenshot.png" alt="The Hermes Home page: an Ask box, Pick up where you left off, next-up suggestions, recall cards and courses in progress" width="900"><br>
+  <em>Home at <code>/home</code>, live at <a href="https://hermes-one.vercel.app/home">hermes-one.vercel.app</a>; <code>/today</code> redirects here.</em>
 </p>
 
 ## Hosting, now and next
@@ -77,15 +77,28 @@ Ten courses are covered (CS2111, CS4263, CP4281 through CP4285, CS3216, CS3227, 
 | `/sign-in` | The owner password (docs/DEPLOYMENT.md, "Signing in"); everything below needs the session |
 | `/home` | Home: pick up where you left off (course modules, unfinished videos, studio drafts, concepts), what that opens up next, a few cards worth a quick recall, and an Ask box that finds a concept, course or video by title or opens a tutor chat on anything else. `/today` redirects here |
 | `/courses` | The course catalog and overall progress |
-| `/courses/[slug]` | The course path: units of topic nodes coloured by mastery, with each topic's checklist, notes, recaps and resources in its panel |
+| `/courses/[slug]` | Course home: a module sidebar, the current module chosen from the learner's ticks, and a rail of course cards |
+| `/courses/[slug]/[module]` | One named module in the same course layout, with its topic checklist and learning path |
+| `/courses/[slug]/[module]/check` | The module's week check: questions over its concepts, with answers recorded as mastery evidence |
 | `/learn` | Knowledge base: mastery per concept, the frontier, the dependency graph |
 | `/learn/[concept]` | One concept's workspace: its note and sources, a tutor grounded in the note, checks, assets |
 | `/learn/[concept]/session` | Focus-mode session: probe, teach, check, close, each graded answer recorded as evidence |
 | `/review` | Spaced-repetition review of what is due |
 | `/library`, `/library/[id]` | Every indexed asset (videos, diagrams, notes), searchable, with the concepts each explains |
-| `/settings` | Theme (palette Classic or Hermes, appearance Light, Dark or System), tutor style; export and reset |
+| `/ask?q=…` | An open tutor chat on a subject outside the notebook; the chat is not saved and records no mastery |
+| `/settings?tab=…` | General (theme and shortcuts), Profile, Models (Providers, custom providers, model selection and tutor style, plus Studio BYOK when Studio is on), and Data (export and reset) |
+| `/studio` | Conversations for making diagrams and videos, with the asset corpus below; available when Studio is enabled |
+| `/studio/d/[name]` | A live diagram canvas, its details and jobs; available when Studio is enabled |
 | `/courses/[slug]/[module]/session?topic=…` | The older Socratic micro-session for one topic |
-| `POST /api/agent/chat`, `POST /api/agent/summarize` | Server proxy to the free provider cascade (system prompt injected server-side), and transcript to structured topic recap |
+| `POST /api/agent/chat`, `POST /api/agent/summarize` | Tutor chat through the owner's configured model chain (system prompt injected server-side), and transcript to structured topic recap |
+| `POST /api/agent/check-options`, `POST /api/agent/judge`, `POST /api/agent/session` | Wrong options for note checks, verdicts on chat answers, and structured session questions through the same model chain |
+| `/api/auth/*` | Password sign-in, sign-out and the desktop shell's local-token sign-in |
+| `/api/learner/*` | Learner state and preferences, profile, progress, notes and recaps, observations and session close, Home and Ask reads, recent items, library state, export, browser import and course reset; provider keys, custom providers and the tutor's model chain, including tests and model lists |
+| `GET /api/review/due`, `POST /api/review/grade` | The due review queue and recording a grade |
+| `GET /api/assets/[id]/file`, `GET /api/assets/[id]/poster`, `GET /api/assets/[id]/pdf`, `GET /api/assets/[id]/status` | Asset bytes, stored video posters and PDFs, and file or poster availability |
+| `GET /api/courses/[slug]/cover` | A course's cover image from the blob store |
+| `GET /studio/made/[draft]` | Assets a Studio conversation made, read from the catalog; available when Studio is enabled |
+| `/studio/api/[...segments]` | The Studio runner proxy for GET, POST, PUT and DELETE; available when Studio is enabled |
 
 [FEATURES.md](FEATURES.md) is the full inventory of user-facing features, grouped by area, each with its status, surface, entry point and the tests that cover it.
 
@@ -302,18 +315,21 @@ flowchart LR
 | `apps/web/.env.local` | `OWNER_PASSWORD`, `AUTH_SECRET`, provider keys; read from `apps/web/`, never the root. The catalog's file is set in `services/catalog/.env`, if anywhere | gitignored |
 | `tools/manimkc/out/`, `tools/manimkc/cache/` | Rendered videos and the TTS cache | gitignored |
 
-Tutoring chat tries three free providers in order and falls through on errors and rate limits. Every variable is optional: with no keys the site still works, and Launch Agent falls back to **Copy system prompt** and **Copy terminal launch pack**.
+The tutor calls only the owner's provider and model chain, configured in Settings' Models tab, in order, moving on when a call fails or times out within the turn's deadline. Each entry uses the owner's saved key when it decrypts, otherwise that provider's server environment key; entries with no key are skipped. An empty chain calls nothing, even when server keys are set. Add a provider key and pick a model in Settings to use the tutor; there is no built-in fallback chain.
+
+The environment keys below are optional alternatives to saved keys. They supply credentials only for providers the owner adds to the chain.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `NEXT_PUBLIC_SITE_URL` | Vercel domain in production, `http://localhost:3000` locally | Canonical origin that social preview images resolve against |
-| `NVIDIA_API_KEY` | unset | Provider 1, NVIDIA NIM |
-| `GEMINI_API_KEY` | unset | Provider 2, Google AI Studio free tier |
-| `OPENROUTER_API_KEY` | unset | Provider 3, OpenRouter free models |
-| `NVIDIA_MODEL` · `GEMINI_MODEL` · `OPENROUTER_MODEL` | `google/gemma-4-31b-it` · `gemini-2.5-flash` · `openrouter/free` | Model override per provider |
-| `OPENROUTER_HTTP_REFERER`, `OPENROUTER_APP_TITLE` | unset | Attribution headers sent to OpenRouter |
+| `NVIDIA_API_KEY` | unset | Server key for NVIDIA NIM |
+| `GEMINI_API_KEY` | unset | Server key for Google AI Studio |
+| `OPENROUTER_API_KEY` | unset | Server key for OpenRouter |
+| `TUTOR_<ID>_API_KEY` | unset | Server key for other built-in providers, such as `TUTOR_OPENAI_API_KEY` or `TUTOR_ANTHROPIC_API_KEY`; custom providers use saved keys only |
+| `NVIDIA_MODEL` · `GEMINI_MODEL` · `OPENROUTER_MODEL` | `google/gemma-4-31b-it` · `gemini-2.5-flash` · `openrouter/free` | Default model for a provider key test when that provider has no chain entry; tutor calls use the model IDs saved in the chain |
+| `OPENROUTER_HTTP_REFERER`, `OPENROUTER_APP_TITLE` | Resolved site URL, `Hermes` | Attribution headers sent to OpenRouter |
 
-Keys are read server-side only (`packages/tutor/src/providers.ts`); the browser never sees them. Production also needs them set in the Vercel project's environment variables. Deployment details are in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md), and editing the curriculum is covered in [docs/CURRICULUM.md](docs/CURRICULUM.md).
+Saved keys are never returned to the browser, and provider calls read keys server-side only (`packages/tutor/src/providers.ts`). When using server environment keys on Vercel, set them in the project's environment variables. Deployment details are in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md), and editing the curriculum is covered in [docs/CURRICULUM.md](docs/CURRICULUM.md).
 
 ## Development
 
