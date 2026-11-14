@@ -7,6 +7,7 @@ import { DIALOG_CLOSE_MS } from "@/components/ui/Dialog";
 import { rowMenuItems } from "@/lib/row-menu";
 
 import { RowMenu, rowMenuOwnsKey } from "./RowMenu";
+import { removeFakeClock } from "@/test/fake-clock";
 
 /**
  * The Library row's menu doing what its items say: Copy link writes the asset
@@ -57,7 +58,7 @@ beforeEach(() => {
 afterEach(() => {
   while (mounted.length) mounted.pop()?.();
   vi.unstubAllGlobals();
-  vi.useRealTimers();
+  removeFakeClock();
 });
 
 const ID = "note:learn/concepts/os/tlb.md";

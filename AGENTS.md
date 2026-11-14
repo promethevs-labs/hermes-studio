@@ -1532,6 +1532,20 @@ not have to be worked out again.
   12 runs in 100 under load (0 in 100 after). Something new that `Drafts`
   starts without awaiting goes through `tracked`, or `drain` stops
   covering it.
+- **Remove a fake clock with `removeFakeClock()`, not a bare
+  `vi.useRealTimers()`, in a jsdom suite.** jsdom 31 runs
+  `requestAnimationFrame` and its focus fix-up from one 16ms interval, started
+  with whatever `setInterval` is global at the time and cleared once nothing
+  waits on it. A frame or a focus change under the fake clock starts it there,
+  and removing the clock before it has moved a frame strands it: jsdom never
+  starts another, so no later test in that file gets an animation frame, and
+  the failure reads as an unrelated timeout in whichever test next needs one.
+  Ten files were in that state after the jsdom 31 upgrade and passed only
+  because nothing after needed a frame. `removeFakeClock` in
+  `apps/web/src/test/fake-clock.ts` moves the clock three frames first, and
+  `vitest.setup.ts` fails a test file that ends with jsdom stranded. The same
+  interval is counted by `vi.getTimerCount()`, so count the app's own timers
+  by call site, as `ExtendStart.test.ts` does.
 - **A studio test that runs planner turns must set `STUDIO_CLAUDE_BIN`
   before anything imports `services/studio/src/config.ts`.** `CLAUDE_BIN` is
   read once, at import, and a static import that reaches it (the video

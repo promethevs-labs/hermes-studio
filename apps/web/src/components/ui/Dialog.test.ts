@@ -5,6 +5,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 
 import { Dialog, DIALOG_CLOSE_MS, dialogClasses, type DialogProps } from "./Dialog";
 import { usePresence } from "./use-presence";
+import { removeFakeClock } from "@/test/fake-clock";
 
 /**
  * The kit dialog every modal in the app is drawn with: shown while mounted,
@@ -32,7 +33,7 @@ beforeEach(() => vi.useFakeTimers());
 const mounted: Array<() => void> = [];
 afterEach(() => {
   while (mounted.length) mounted.pop()?.();
-  vi.useRealTimers();
+  removeFakeClock();
   delete document.documentElement.dataset.motion;
   document.body.replaceChildren();
 });

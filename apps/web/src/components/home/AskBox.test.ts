@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ASK_START_KEY, askTutorHref, type AskEntry } from "@/lib/ask-core";
+import { removeFakeClock } from "@/test/fake-clock";
 
 const push = vi.hoisted(() => vi.fn());
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
@@ -44,7 +45,7 @@ afterEach(() => {
   if (root !== null) act(() => root!.unmount());
   root = null;
   vi.unstubAllGlobals();
-  vi.useRealTimers();
+  removeFakeClock();
   document.body.replaceChildren();
 });
 

@@ -2,6 +2,7 @@
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { removeFakeClock } from "@/test/fake-clock";
 
 const learner = {
   state: { userResources: {} as Record<string, { id: string; title: string; url: string }[]> },
@@ -34,7 +35,7 @@ afterEach(() => {
   learner.addResource.mockClear();
   learner.removeResource.mockClear();
   learner.state.userResources = {};
-  vi.useRealTimers();
+  removeFakeClock();
 });
 
 function mount() {

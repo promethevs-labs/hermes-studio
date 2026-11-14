@@ -6,6 +6,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { FilterMenu } from "./FilterMenu";
 import { LiveStatus } from "./LiveStatus";
 import { Select } from "./Select";
+import { removeFakeClock } from "@/test/fake-clock";
 
 /**
  * The kit's moving parts: a FilterMenu's list stays for its way out (inert,
@@ -24,7 +25,7 @@ beforeEach(() => vi.useFakeTimers());
 const mounted: Array<() => void> = [];
 afterEach(() => {
   while (mounted.length) mounted.pop()?.();
-  vi.useRealTimers();
+  removeFakeClock();
   delete document.documentElement.dataset.motion;
 });
 
