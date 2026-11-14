@@ -987,6 +987,14 @@ describe("the shortcuts", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(200);
     });
+    // jsdom 31 keeps one 16ms rendering interval of its own, scheduled with
+    // whatever `setInterval` is global at the time. Left pending when the fake
+    // clock is removed, it is never cleared, and jsdom then never runs another
+    // animation frame, so the next test's `requestAnimationFrame` hangs.
+    // Another frame's worth lets it run and stop itself first.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(50);
+    });
     vi.useRealTimers();
 
     act(() => container.querySelector<HTMLButtonElement>('button[aria-label="Open the sidebar"]')!.click());

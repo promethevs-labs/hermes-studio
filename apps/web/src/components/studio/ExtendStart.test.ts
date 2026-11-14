@@ -208,6 +208,20 @@ describe("focus, with a composer that loads late", () => {
     // picks, and any poll for the composer would have had to fire by the
     // last advance rather than merely not having fired in 300 real ms.
     vi.useFakeTimers();
+    // The timers the app itself schedules, by call site: jsdom 31 schedules
+    // a 16ms rendering interval of its own whenever a style or the focus
+    // changes, and under a fake clock `vi.getTimerCount()` counts it too.
+    const scheduled: Array<{ kind: "setInterval" | "setTimeout"; ms: unknown }> = [];
+    const spies: Array<{ mockRestore: () => void }> = [];
+    for (const kind of ["setInterval", "setTimeout"] as const) {
+      const real = globalThis[kind] as (...args: unknown[]) => unknown;
+      const spy = vi.spyOn(globalThis, kind).mockImplementation(((...args: unknown[]) => {
+        if (!(new Error().stack ?? "").includes("/node_modules/jsdom/")) scheduled.push({ kind, ms: args[1] });
+        return real(...args);
+      }) as never);
+      spies.push(spy);
+    }
+    const appTimers = () => scheduled.filter((t) => !(t.kind === "setTimeout" && t.ms === 0));
     const host = document.createElement("div");
     document.body.append(host);
     const root = createRoot(host);
@@ -233,13 +247,14 @@ describe("focus, with a composer that loads late", () => {
       // The clock stays fake through the chunk's landing: a focus poll would
       // show up as a scheduled timer, where the only legitimate one is the
       // age line's one-second tick.
-      expect(vi.getTimerCount()).toBe(1);
+      expect(appTimers()).toEqual([{ kind: "setInterval", ms: 1000 }]);
       await act(async () => mocks.release());
       await act(async () => {
         await vi.advanceTimersByTimeAsync(0);
       });
-      expect(vi.getTimerCount()).toBe(1);
+      expect(appTimers()).toEqual([{ kind: "setInterval", ms: 1000 }]);
     } finally {
+      for (const spy of spies) spy.mockRestore();
       vi.useRealTimers();
     }
     expect(mocks.composer).not.toBeNull();
