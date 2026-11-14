@@ -74,7 +74,7 @@ import {
 } from "./composer-keys";
 import { Glyph } from "./Glyph";
 import { IconButton } from "./IconButton";
-import { $createMentionNode, $mentionNodes, MentionNode } from "./mention-node";
+import { $createMentionNode, $isMentionNode, $mentionNodes, MentionNode } from "./mention-node";
 import { $insertChip, $placeAfter, $queryAtCaret, $selectionOffsets, $selectOffsets } from "./mention-selection";
 import { MentionMenu } from "./MentionMenu";
 import { moveActive } from "./roving";
@@ -371,8 +371,10 @@ function Field<K extends string>({
         if (updateTags.has(EXTERNAL)) return;
         for (const [key, mutation] of nodes) {
           if (mutation !== "destroyed") continue;
-          const gone = prevEditorState.read(() => $getNodeByKey<MentionNode>(key));
-          const name = gone === null ? null : prevEditorState.read(() => gone.__name);
+          const name = prevEditorState.read(() => {
+            const gone = $getNodeByKey(key);
+            return $isMentionNode(gone) ? gone.__name : null;
+          });
           if (name !== null) setAnnouncement(`${name} tag removed.`);
         }
       },
