@@ -5,6 +5,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 
 import type { ChainEntry } from "@hermes/tutor/providers";
 import type { ProviderRowView, ProvidersView } from "@/lib/providers/view";
+import { removeFakeClock } from "@/test/fake-clock";
 
 /**
  * The Providers card folds its controls in and out rather than swapping
@@ -63,7 +64,7 @@ const mounted: Array<() => void> = [];
 afterEach(() => {
   while (mounted.length) mounted.pop()?.();
   vi.unstubAllGlobals();
-  vi.useRealTimers();
+  removeFakeClock();
 });
 
 function mount(element: ReturnType<typeof createElement>) {

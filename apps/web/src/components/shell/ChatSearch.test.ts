@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { DraftSummary } from "@/lib/studio-drafts";
+import { removeFakeClock } from "@/test/fake-clock";
 
 /**
  * The conversation search in the app's sidebar (D87 of
@@ -48,7 +49,7 @@ beforeEach(() => {
 const mounted: Array<() => void> = [];
 afterEach(() => {
   while (mounted.length) mounted.pop()?.();
-  vi.useRealTimers();
+  removeFakeClock();
   document.cookie = "hermes-sidebar=; Max-Age=0; Path=/";
 });
 

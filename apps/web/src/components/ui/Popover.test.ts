@@ -8,6 +8,7 @@ import { FilterMenu } from "./FilterMenu";
 import { Menu as KitMenu, MenuItem } from "./Menu";
 import { Popover, type PopoverCloseReason } from "./Popover";
 import { Select } from "./Select";
+import { removeFakeClock } from "@/test/fake-clock";
 
 /**
  * The kit `Popover`: shown in the top layer, closed by a press outside, by
@@ -39,7 +40,7 @@ beforeEach(() => {
 const mounted: Array<() => void> = [];
 afterEach(() => {
   while (mounted.length) mounted.pop()?.();
-  vi.useRealTimers();
+  removeFakeClock();
   delete document.documentElement.dataset.motion;
 });
 

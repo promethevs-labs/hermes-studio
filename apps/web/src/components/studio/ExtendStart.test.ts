@@ -5,6 +5,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 
 import { openerSend, openerValue } from "@/lib/studio-cards";
 import { EXTEND_OPENER, leavePrefill, takeOpener } from "@/lib/studio-extend";
+import { removeFakeClock } from "@/test/fake-clock";
 
 /**
  * The Extend panel's wiring, in a DOM, against a mocked client module: what a
@@ -119,7 +120,7 @@ beforeEach(() => {
 
 const mounted: Array<() => void> = [];
 afterEach(() => {
-  vi.useRealTimers();
+  removeFakeClock();
   while (mounted.length) mounted.pop()?.();
   document.querySelectorAll("[data-test-focus]").forEach((element) => element.remove());
 });
@@ -255,7 +256,7 @@ describe("focus, with a composer that loads late", () => {
       expect(appTimers()).toEqual([{ kind: "setInterval", ms: 1000 }]);
     } finally {
       for (const spy of spies) spy.mockRestore();
-      vi.useRealTimers();
+      removeFakeClock();
     }
     expect(mocks.composer).not.toBeNull();
     expect(mocks.focus).toHaveBeenCalledTimes(1);

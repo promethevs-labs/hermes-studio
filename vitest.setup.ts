@@ -248,3 +248,42 @@ afterAll(() => {
     rmSync(ffmpegHome, { recursive: true, force: true });
   }
 });
+
+/**
+ * A test file must not leave jsdom unable to run an animation frame.
+ *
+ * jsdom 31 drives `requestAnimationFrame` and its focus fix-up from one 16ms
+ * interval, which it starts with whatever `setInterval` is global at that
+ * moment and clears once it has nothing left to run. Start it under a fake
+ * clock and call `vi.useRealTimers()` before the clock has moved a frame, and
+ * the interval is left on a clock that no longer exists: jsdom still believes
+ * it is running, so it never starts another, and every later
+ * `requestAnimationFrame` and focus fix-up in that file waits for good. Which
+ * test then fails depends on which one next needs a frame, so the cause reads
+ * as an unrelated timeout (AppSidebar.test.ts did this on the jsdom 31
+ * upgrade).
+ *
+ * The fix in the test is to move the fake clock one more frame before
+ * removing it: `await vi.advanceTimersByTimeAsync(50)` ahead of
+ * `vi.useRealTimers()`. A file that ends on a fake clock is left alone, since
+ * no later test can be waiting on it.
+ */
+afterAll(async () => {
+  // The root tsconfig has no DOM types, so the frame request is read off the global by name.
+  const frame = (globalThis as { requestAnimationFrame?: (callback: () => void) => number }).requestAnimationFrame;
+  if (typeof frame !== "function") return;
+  if (vi.isFakeTimers()) return;
+  const ran = await new Promise<boolean>((resolve) => {
+    const giveUp = setTimeout(() => resolve(false), 1_000);
+    frame(() => {
+      clearTimeout(giveUp);
+      resolve(true);
+    });
+  });
+  expect(
+    ran,
+    "this test file left jsdom unable to run an animation frame: a test called vi.useRealTimers() while jsdom's 16ms " +
+      "rendering interval was still pending on the fake clock. Advance the fake clock a frame first " +
+      "(await vi.advanceTimersByTimeAsync(50)), then remove it",
+  ).toBe(true);
+});

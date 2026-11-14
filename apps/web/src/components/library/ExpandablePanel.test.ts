@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { CLOSE_MS, ExpandablePanel } from "./ExpandablePanel";
+import { removeFakeClock } from "@/test/fake-clock";
 
 beforeAll(() => {
   (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -29,7 +30,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   while (mounted.length) mounted.pop()?.();
-  vi.useRealTimers();
+  removeFakeClock();
   delete document.documentElement.dataset.motion;
 });
 
