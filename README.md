@@ -92,7 +92,7 @@ Ten courses are covered (CS2111, CS4263, CP4281 through CP4285, CS3216, CS3227, 
 | `/courses/[slug]/[module]/session?topic=…` | The older Socratic micro-session for one topic |
 | `POST /api/agent/chat`, `POST /api/agent/summarize` | Tutor chat through the owner's configured model chain (system prompt injected server-side), and transcript to structured topic recap |
 | `POST /api/agent/check-options`, `POST /api/agent/judge`, `POST /api/agent/session` | Wrong options for note checks, verdicts on chat answers, and structured session questions through the same model chain |
-| `/api/auth/*` | Password sign-in, sign-out and the desktop shell's local-token sign-in |
+| `/api/auth/*` | Public, no session needed: password sign-in, sign-out and the desktop shell's local-token sign-in |
 | `/api/learner/*` | Learner state and preferences, profile, progress, notes and recaps, observations and session close, Home and Ask reads, recent items, library state, export, browser import and course reset; provider keys, custom providers and the tutor's model chain, including tests and model lists |
 | `GET /api/review/due`, `POST /api/review/grade` | The due review queue and recording a grade |
 | `GET /api/assets/[id]/file`, `GET /api/assets/[id]/poster`, `GET /api/assets/[id]/pdf`, `GET /api/assets/[id]/status` | Asset bytes, stored video posters and PDFs, and file or poster availability |
