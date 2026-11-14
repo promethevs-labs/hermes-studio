@@ -87,6 +87,8 @@ Ten courses are covered (CS2111, CS4263, CP4281 through CP4285, CS3216, CS3227, 
 | `/courses/[slug]/[module]/session?topic=…` | The older Socratic micro-session for one topic |
 | `POST /api/agent/chat`, `POST /api/agent/summarize` | Server proxy to the free provider cascade (system prompt injected server-side), and transcript to structured topic recap |
 
+[FEATURES.md](FEATURES.md) is the full inventory of user-facing features, grouped by area, each with its status, surface, entry point and the tests that cover it.
+
 ```
 apps/web/         The Next.js app: src/app · src/components · src/data · src/lib · public/
 packages/content/ One reader for the export format's content/, and the content types
