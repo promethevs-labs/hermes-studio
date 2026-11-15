@@ -11,7 +11,8 @@ when" held in a narrower reading, stated there, and the other three held.
 Numbers marked *measured* were taken on this machine on 2026-09-27, or on
 2026-09-29 where a section says so, against the installed CLI
 (`claude` 2.1.274, `claude-sonnet-5`) and the installed tldrawkc build; every
-other number is a guess and says so.
+other number is a guess and says so. **Phase 3 (polish) is built too:** inline
+edits on the card, the drafts list, pruning and the vocabulary-changed note.
 
 **Amended 2026-09-29 by [`STUDIO-MENTIONS.md`](STUDIO-MENTIONS.md)**, with the
 owner's answers the same day. A person tags Diagram, Video or both with `@`,
