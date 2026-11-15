@@ -15,9 +15,9 @@ allowed one brief per message and one Draw on screen.
 answers below; built as video phase 2 (2a, the runner, #207; 2b, the web app
 and `MentionComposer`, #204; 2c, the video screens), 2026-09-29 and
 2026-09-30, with the `svg` tag (D105, #512) added 2026-10-25. "Add from
-library" (D63) is not built, and the phase 2 done-when items its measured
-section leaves open (phones, VoiceOver, the `/studio` bundle size) are still
-open.** Every number is a guess and says so,
+library" (D63) is not built, and the phase 2 checks on phones and with
+VoiceOver are still open. The `/studio` bundle sizes are recorded under
+"Measured (2b)" below.** Every number is a guess and says so,
 except where it is quoted from the two documents above, which say where theirs
 were measured.
 
