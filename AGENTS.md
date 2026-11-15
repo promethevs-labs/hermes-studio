@@ -20,7 +20,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 | [services/catalog/SCHEMA.md](services/catalog/SCHEMA.md) | The catalog: every table, why the links are typed, how `event` stays append-only, how to run migrations |
 | [seed/README.md](seed/README.md) | The export format (the layout `catalog export` writes and `catalog import` reads), and the seed, which is all the content a fresh clone has |
 | [seed/COURSES.md](seed/COURSES.md) | The course YAML of the export format: the shape of a file and what the reader refuses |
-| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | How production deploys, secrets, the Vercel CLI |
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Production is closed since 2026-11-15 (the Vercel project is deleted until the runner's compute is decided); then how production deployed and will again, secrets, the Vercel CLI |
 | [docs/HOMESERVER.md](docs/HOMESERVER.md) | Running the app on an Ubuntu homeserver behind Tailscale with a copy of the laptop's data: the catalog file copied with SQLite's backup API, the blob store re-claimed, the two env files, systemd units for the app, the studio (diagrams only, V4) and the nightly export. Decisions S1 to S7 |
 | [docs/BYOK.md](docs/BYOK.md) | Bring your own key: the owner's model provider keys, saved in Settings and stored AES-256-GCM encrypted in `provider_key` under a key derived from `AUTH_SECRET`, with the env keys as the fallback. The decisions, the threat model, rotation, and what is out of scope |
 | [docs/TUTOR-MODELS.md](docs/TUTOR-MODELS.md) | The tutor's model chain: the owner's ordered provider and model list in `tutor_model`, edited in Settings' Providers card (each provider's key and its models together), tried top to bottom, with the built-in defaults when there is none, a per-call limit and a turn deadline. Decisions T1 to T11 |
@@ -1425,9 +1425,10 @@ not have to be worked out again.
   `services/catalog/src/env.ts`) and refuses to open the owner's real
   catalog file, on every run, local and CI alike (#578), so a test that opens
   the default catalog instead of a scratch file fails everywhere. CI sets the
-  same `DATABASE_URL` too. CI does not build on a pull request: `npm run
-  build` runs in `deploy.yml` when a release is published, so the local
-  build is the one a PR gets. `node_modules` and the ESLint cache are
+  same `DATABASE_URL` too. CI does not build on a pull request, and
+  since production closed (2026-11-15, docs/DEPLOYMENT.md) no release build
+  runs either: `ci.yml` builds only on a manual run, so the local build is
+  the one a PR gets. `node_modules` and the ESLint cache are
   restored from `main`'s caches, which `.github/workflows/cache.yml` refills
   only when `package-lock.json`, a `package.json` or `eslint.config.mjs`
   changes. Wait for both before merging. What differs between
