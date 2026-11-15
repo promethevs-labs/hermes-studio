@@ -10,9 +10,10 @@ import wordmarkInk from "../../../public/brand/wordmark-ink.png";
  * light grounds and cream on dark ones. The mark copy under `public/brand/`
  * is the charcoal hat at 1024px, so it reads on cream and white.
  *
- * The original letter art is an alpha mask: CSS changes its colour without
- * redrawing the owner's letterforms. A screen reader hears "Hermes" once.
- * The mark is decorative beside it.
+ * The letter art is the word Hermes in Fraunces SemiBold, the brand kit's
+ * name typeface, used as an alpha mask: CSS gives it its colour and no font
+ * loads for six letters. A screen reader hears "Hermes" once. The mark is
+ * decorative beside it.
  */
 function Letters({ className }: { className?: string }) {
   return (
