@@ -10,11 +10,12 @@ import reading from "../../../public/brand/mascot/reading.png";
 import sleepy from "../../../public/brand/mascot/sleepy.png";
 
 /**
- * The mascot: the hooded tome with the glowing crescent eyes. Each pose is
- * one of the owner's renders, drawn on a transparent ground, trimmed to the
- * art and scaled to 900px on its longest side under `public/brand/mascot/`.
- * The full 1254px renders are in docs/design/brand/mascot/, and the mascot
- * sheet (docs/design/brand/mascot-sheet.png) stays as the reference.
+ * The mascot: the courier, a small rounded messenger in clay, cream and
+ * earth, with a winged traveller's hat. Each pose is one of the renders,
+ * drawn on a transparent ground. The 666px copies live under
+ * `public/brand/mascot/`. The 1254px masters are in
+ * docs/design/brand/mascot/, and the mascot sheet
+ * (docs/design/brand/mascot-sheet.png) stays as the reference.
  *
  * Always decorative (`alt=""`). Size it by height with a class
  * (`h-[200px] lg:h-[400px]`); the width follows the pose's own proportions.
