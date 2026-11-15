@@ -395,8 +395,9 @@ Exit codes:
      says how many are outstanding and to run migrate.
 
 Environment:
-  CATALOG_DB     The catalog, one SQLite file. Defaults to
-                 $HERMES_HOME/catalog.db, else ~/.hermes/catalog.db.
+  CATALOG_DB     The catalog, one SQLite file. Defaults to catalog.db in
+                 $HERMES_HOME, else $GNOSIA_HOME, else ~/.hermes, or an
+                 existing ~/.gnosia from before the rename.
   DATABASE_URL   Read after CATALOG_DB, and only when it names a file path.
                  A postgres:// value is refused.
   MANIMKC_ROOT   The manimkc checkout. Defaults to <repo>/tools/manimkc.
