@@ -9,8 +9,11 @@ pull request gets no preview and a merge to `main` changes nothing that is
 live. Every PR and every merge used to build a deployment, and on the free
 plan's 100 deployments a day the busy days ran out (2026-10-04).
 
-- **Production alias:** https://hermes-one.vercel.app
-- **Project:** `kaichen/hermes`, linked to `https://github.com/promethevs-labs/hermes-studio`
+- **Production alias:** https://self-learn-one.vercel.app. The Vercel project
+  kept the name it had before the rename, so this is its one production
+  domain. `hermes-one.vercel.app` was never attached to it and is another
+  account's site (#686); do not link to it.
+- **Project:** `kaichen/self-learn`, linked to `https://github.com/promethevs-labs/hermes-studio`
 - **Root Directory:** `apps/web`, with **Include source files outside of the
   Root Directory in the Build Step** on
 
@@ -81,7 +84,7 @@ works and builds nothing.
 To see what is live and what produced it:
 
 ```bash
-vercel ls hermes --prod            # recent production deployments
+vercel ls self-learn --prod        # recent production deployments
 vercel inspect <deployment-url>        # target, aliases, build output
 ```
 
