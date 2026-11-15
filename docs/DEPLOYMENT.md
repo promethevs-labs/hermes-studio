@@ -1,6 +1,37 @@
 # Deployment
 
-Production deploys when a GitHub release is published, and at no other time.
+## Production is closed
+
+**There is no production deployment since 2026-11-15.** The owner deleted the
+Vercel project (`kaichen/self-learn`, at `self-learn-one.vercel.app`), with
+every deployment it held. The hosted app could serve the pages but not the
+agent runner (`services/studio`), which needs a machine that can spawn
+`claude` and render video, and what compute that takes is not decided. Until
+it is, Hermes runs where its owner runs it: the desktop shell, `npm run
+dev:up`, or the homeserver in [HOMESERVER.md](HOMESERVER.md).
+
+What changed with the deletion:
+
+- `.github/workflows/deploy.yml` no longer runs when a release is published.
+  It can still be started by hand, and would fail: the project and org ids
+  in it name a project that is gone.
+- `.env.example` no longer sets `NEXT_PUBLIC_SITE_URL` or
+  `OPENROUTER_HTTP_REFERER`, which pointed at the deleted site.
+- The `VERCEL_TOKEN` repository secret is still set and has nothing to
+  deploy to.
+
+To bring production back: decide the compute for the runner and the catalog
+("The database" below), create a Vercel project with the Root Directory
+setting this page describes, put its ids in `deploy.yml`, restore the
+`release` trigger there, and set the Production environment variables again
+(they were deleted with the project).
+
+The rest of this page describes production as it worked until then, and as
+it is meant to work again.
+
+## How it worked
+
+Production deployed when a GitHub release was published, and at no other time.
 `.github/workflows/deploy.yml` runs `vercel deploy --prod` from the repository
 root on the release's tag, and Vercel builds it with the project's Production
 environment variables. Vercel's Git integration is still connected but builds
@@ -9,11 +40,10 @@ pull request gets no preview and a merge to `main` changes nothing that is
 live. Every PR and every merge used to build a deployment, and on the free
 plan's 100 deployments a day the busy days ran out (2026-10-04).
 
-- **Production alias:** https://self-learn-one.vercel.app. The Vercel project
-  kept the name it had before the rename, so this is its one production
-  domain. `hermes-one.vercel.app` was never attached to it and is another
-  account's site (#686); do not link to it.
-- **Project:** `kaichen/self-learn`, linked to `https://github.com/promethevs-labs/hermes-studio`
+- **Production alias:** none. It was https://self-learn-one.vercel.app until
+  the project was deleted. `hermes-one.vercel.app` was never attached to it
+  and is another account's site (#686); do not link to it.
+- **Project:** none. It was `kaichen/self-learn`, linked to `https://github.com/promethevs-labs/hermes-studio`
 - **Root Directory:** `apps/web`, with **Include source files outside of the
   Root Directory in the Build Step** on
 

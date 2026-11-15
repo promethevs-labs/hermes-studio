@@ -1,9 +1,9 @@
 name: CI
 
 # Every pull request aimed at the default branch, and by hand from the Actions
-# tab. This workflow only checks the code; production deploys when a release
-# is published (deploy.yml), and that workflow is where the production build
-# is a gate.
+# tab. This workflow only checks the code. Production is closed (2026-11-15,
+# docs/DEPLOYMENT.md); when it deployed, on a published release (deploy.yml),
+# that workflow was where the production build was a gate.
 #
 # A push to main does not run it. Every change reaches main through a pull
 # request that already ran this exact job, so the push run checked the same

@@ -1,6 +1,14 @@
 name: Deploy
 
-# Production deploys when a GitHub release is published, and only then.
+# Production is closed (2026-11-15, the owner's call): the Vercel project was
+# deleted, because the hosted app cannot include the agent runner and the
+# compute for that is not decided. Nothing triggers this workflow on its own
+# any more: the release trigger is removed, so publishing a release deploys
+# nothing. What follows is how production worked, kept for the day it comes
+# back; before then the project has to be created again and its ids below
+# replaced (docs/DEPLOYMENT.md, "Production is closed").
+#
+# Production deployed when a GitHub release was published, and only then.
 # Vercel's Git integration builds nothing: apps/web/vercel.json sets
 # git.deploymentEnabled to false, so neither a pull request (preview) nor a
 # merge to main starts a deployment. Before that, every PR and every merge
@@ -12,8 +20,6 @@ name: Deploy
 # a retry without cutting a new release; it refuses a branch or an unreleased
 # tag.
 on:
-  release:
-    types: [published]
   workflow_dispatch:
 
 permissions:
