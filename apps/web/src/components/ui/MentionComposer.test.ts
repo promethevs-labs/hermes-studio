@@ -157,8 +157,17 @@ describe("MentionComposer", () => {
     await key(field(), "ArrowDown");
     expect(active()).toBe(0);
     expect(rows(container)[1]!.getAttribute("aria-disabled")).toBe("true");
+    // The reason is held to two lines, with all of it in the text and on hover.
+    const reason = rows(container)[1]!.querySelector("[title]")!;
+    expect(reason.getAttribute("title")).toBe("Videos are off");
+    expect(reason.textContent).toBe("Videos are off");
+    expect(reason.className).toContain("line-clamp-2");
     await act(async () => rows(container)[1]!.click());
     expect(chips(field())).toHaveLength(0);
+    // A press on the disabled row shows the whole reason, and a second folds it again.
+    expect(reason.className).not.toContain("line-clamp-2");
+    await act(async () => rows(container)[1]!.click());
+    expect(reason.className).toContain("line-clamp-2");
   });
 
   it("keeps one chip per kind: a second pick of the same kind takes the query away and adds nothing", async () => {

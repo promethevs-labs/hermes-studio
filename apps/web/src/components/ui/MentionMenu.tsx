@@ -57,6 +57,10 @@ export function MentionMenu<K extends string>({
   const [kept, setKept] = useState(menu);
   if (open && kept !== menu) setKept(menu);
   const drawn = menu ?? kept;
+  // The disabled row whose whole reason is showing. A phone has no hover, so
+  // a press on the row is how the rest of a clamped reason is read.
+  const [unfolded, setUnfolded] = useState<K | null>(null);
+  if (!open && unfolded !== null) setUnfolded(null);
 
   return (
     <Popover
@@ -89,7 +93,10 @@ export function MentionMenu<K extends string>({
                   onMouseEnter={() => {
                     if (usable && open) onHover(at);
                   }}
-                  onClick={() => onPick(option)}
+                  onClick={() => {
+                    if (usable) onPick(option);
+                    else setUnfolded(unfolded === option.id ? null : option.id);
+                  }}
                   className={menuRowClasses({ active, disabled: !usable, className: "pointer-coarse:min-h-12" })}
                 >
                   {option.icon && (
@@ -101,7 +108,21 @@ export function MentionMenu<K extends string>({
                       were laid out two ways. */}
                   <span className="flex min-w-0 flex-1 flex-col">
                     <span className={cx("leading-5", !usable && "text-text3")}>{option.name}</span>
-                    <span className="min-w-0 text-[13px] leading-5 font-normal text-text2">{usable ? option.description : option.disabledReason}</span>
+                    {usable ? (
+                      <span className="min-w-0 text-[13px] leading-5 font-normal text-text2">{option.description}</span>
+                    ) : (
+                      // A reason can be a doctor's whole report (every missing
+                      // tool, with its path), which once filled a phone's menu
+                      // and pushed the next entry out of it. Two lines here,
+                      // the whole of it on hover or on a press of the row; a
+                      // screen reader reads the full text either way.
+                      <span
+                        title={option.disabledReason ?? undefined}
+                        className={cx("min-w-0 break-words text-[13px] leading-5 font-normal text-text2", unfolded !== option.id && "line-clamp-2")}
+                      >
+                        {option.disabledReason}
+                      </span>
+                    )}
                   </span>
                   {tagged.has(option.id) && (
                     <>
