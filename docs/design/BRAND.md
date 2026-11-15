@@ -124,7 +124,7 @@ reduction of it, and where the two disagree the art wins.
 | [apps/web/src/app/icon.png](../../apps/web/src/app/icon.png) (512), `icon.svg`, `favicon.ico` | Copies of `brand/png/icon-512.png`, `brand/svg/mark-color-on-bg.svg` and `brand/png/favicon.ico` | Favicon and PWA icon |
 | [apps/web/src/app/apple-icon.png](../../apps/web/src/app/apple-icon.png) (180) | Copy of `brand/png/apple-touch-icon-180.png`; opaque, because iOS fills a transparent home-screen icon with black, and square, because iOS rounds the corners itself | Home-screen icon |
 | [apps/desktop/Resources/AppIcon.png](../../apps/desktop/Resources/AppIcon.png) (1024) | Copy of `brand/png/avatar-1024.png`; `scripts/bundle-app.sh` renders the `.icns` from it | macOS app icon |
-| [apps/web/public/brand/mascot/](../../apps/web/public/brand/mascot/) `{neutral,happy,reading,curious,excited,sleepy}.png` | 666px square copies of the 1254px masters in `docs/design/brand/mascot/` | `HermesMascot` |
+| [apps/web/public/brand/mascot/](../../apps/web/public/brand/mascot/) `{neutral,happy,reading,curious,excited,sleepy}.png` | Cut from the 1254px masters in `docs/design/brand/mascot/`: trimmed to the art plus 8px and scaled to 900px on the longest side (747 to 900px wide) | `HermesMascot` |
 | [apps/web/public/opengraph-image.png](../../apps/web/public/opengraph-image.png) (1280 by 640) | Copy of `brand/banners/social-preview-name-1280x640.png` | The social card |
 | Historical banner (`brand/world-staircase.png`) | The old teal world art is retained as a reference; `public/banner.png` is removed | Repaint before restoring it to the repository, campaigns or landing page |
 
@@ -195,8 +195,11 @@ around the whole figure.
 Each pose is its own render, 1254px square on a transparent
 ground, kept in [docs/design/brand/mascot/](brand/mascot/). The renders have
 no background, no fringe and no baked shadow, so the same file works on
-cream and on earth. The copies the app ships are 666px squares in
-[apps/web/public/brand/mascot/](../../apps/web/public/brand/mascot/).
+cream and on earth. The copies the app ships, in
+[apps/web/public/brand/mascot/](../../apps/web/public/brand/mascot/), are
+trimmed to the art plus 8px and scaled to 900px on the longest side, which
+covers the 400px hero at 2x. A square copy with the master's margins drew
+the character at about half the height its box asked for.
 [HermesMascot](../../apps/web/src/components/brand/HermesMascot.tsx) renders
 a pose from `public/brand/mascot/` with `next/image`, `alt=""`, sized by
 height with a class. The poses are static imports, so each ships under a

@@ -12,8 +12,8 @@ import sleepy from "../../../public/brand/mascot/sleepy.png";
 /**
  * The mascot: the courier, a small rounded messenger in clay, cream and
  * earth, with a winged traveller's hat. Each pose is one of the renders,
- * drawn on a transparent ground. The 666px copies live under
- * `public/brand/mascot/`. The 1254px masters are in
+ * drawn on a transparent ground, trimmed to the art and scaled to 900px on
+ * its longest side under `public/brand/mascot/`. The 1254px masters are in
  * docs/design/brand/mascot/, and the mascot sheet
  * (docs/design/brand/mascot-sheet.png) stays as the reference.
  *
