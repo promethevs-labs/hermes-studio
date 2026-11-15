@@ -12,7 +12,7 @@ This project is continuously deployed and not versioned; entries are grouped by 
 - **The catalog's learner tables moved to SQLite** (`24b5cec0`). What was
   stored in Postgres under the `self-learn` line now lives in
   `<data home>/catalog.db` (the mirrored catalog) and `<data
-  home>/learner.db` (the learner's own writes). The schema migrates legacy
+  home>/learner.db` (the app's own writes). The schema migrates legacy
   `self-learn*` preference values to `gnosia*`, and `source_repo` reads both
   `"gnosia"` and `"self-learn"` so pre-rename clones keep working.
 
@@ -545,9 +545,10 @@ This project is continuously deployed and not versioned; entries are grouped by 
 ### Removed
 
 - **The native macOS app, `apps/macos`, and the sidecar server that served
-  it, both built and removed within this release.** The SwiftUI app
+  it, both added and removed since the last dated entry.** The SwiftUI app
   (`Gnosia.app`) and its Node sidecar (`services/sidecar`) existed during
-  development and never shipped; the owner removed the app on 2026-11-07,
+  development, so this section has no Added entry for them; the owner
+  removed the app on 2026-11-07,
   with its catalog snapshot script, its Swift ports and their contract
   tests, and the loopback tutor API in `services/sidecar` that only it
   called, along with three turns nothing else used (`preferenceTurn`,
