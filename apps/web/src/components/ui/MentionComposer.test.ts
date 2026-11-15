@@ -164,6 +164,10 @@ describe("MentionComposer", () => {
     expect(reason.className).toContain("line-clamp-2");
     await act(async () => rows(container)[1]!.click());
     expect(chips(field())).toHaveLength(0);
+    // A press on the disabled row shows the whole reason, and a second folds it again.
+    expect(reason.className).not.toContain("line-clamp-2");
+    await act(async () => rows(container)[1]!.click());
+    expect(reason.className).toContain("line-clamp-2");
   });
 
   it("keeps one chip per kind: a second pick of the same kind takes the query away and adds nothing", async () => {
