@@ -40,8 +40,8 @@ use none; Duolingo uppercases only its buttons, and Masterclass only its one
 hero headline. Labels, kickers and card headings on the public pages are
 sentence case. Since 2026-09-29 the same holds on every page of the app,
 and a label that only repeats the heading or the layout is left out
-([DESIGN.md](DESIGN.md#sentence-case-2026-09-29)). The one exception is the
-wordmark, whose spaced capitals are the logo's own lettering.
+([DESIGN.md](DESIGN.md#sentence-case-2026-09-29)). The wordmark follows the
+same rule: it reads Hermes, with one capital.
 
 ## Palette
 
@@ -119,8 +119,8 @@ reduction of it, and where the two disagree the art wins.
 | [docs/design/brand/composite.png](brand/composite.png) | The lockup, the mascot and the icons on one board | Reference only |
 | [docs/design/brand/world-staircase.png](brand/world-staircase.png) | The world: a staircase of books into a sky city, the mascot beside it | Historical banner source; withheld until repainted |
 | [docs/design/brand/pixel-art-sheet.png](brand/pixel-art-sheet.png) | A pixel-art take on the book, the wordmark and the world | **Campaign art only, never product UI.** It uses its own palette (royal blue, red ribbon) and its own letterforms, so it must not leak into the app or the landing page. The [avatar sprites](#avatar-sprites) are pixel art too, but their own, in the brand palette |
-| [docs/design/brand/logo/](brand/logo/) `mark.png`, `wordmark-ink.png`, `wordmark-cream.png` | The owner's logo art, 2026-09-27: the mark alone (1254px), and the GNOSIA letters in deep teal (for light grounds) and in cream (for dark grounds), 2172 by 724, all on transparent grounds | Source of the four files below |
-| [apps/web/public/brand/](../../apps/web/public/brand/) `mark.png` (1024), `mark.svg` | The hat mark from [brand/](../../brand/brand.md). `mark.png` is `brand/mono/mono-charcoal.png` and `mark.svg` is `brand/svg/mark-mono-charcoal.svg`, so the hat reads on cream and white. The cream mark stays in the kit for dark grounds. The ring paths in `HermesMark.ts` are the older in-app drawing. `wordmark-ink.png` is retained as the alpha-mask source for CSS-coloured lettering | `HermesWordmark` and `HermesLockup` |
+| [docs/design/brand/logo/](brand/logo/) `mark.png`, `wordmark-ink.png`, `wordmark-cream.png` | The owner's logo art, 2026-09-27: the mark alone (1254px), and the GNOSIA letters in deep teal (for light grounds) and in cream (for dark grounds), 2172 by 724, all on transparent grounds | History: the letters from before the rename. Nothing ships from them since #696 |
+| [apps/web/public/brand/](../../apps/web/public/brand/) `mark.png` (1024), `mark.svg` | The hat mark from [brand/](../../brand/brand.md). `mark.png` is `brand/mono/mono-charcoal.png` and `mark.svg` is `brand/svg/mark-mono-charcoal.svg`, so the hat reads on cream and white. The cream mark stays in the kit for dark grounds. The ring paths in `HermesMark.ts` are the older in-app drawing. `wordmark-ink.png` is the word Hermes in Fraunces SemiBold (1477 by 288), the alpha mask for the CSS-coloured lettering, and `wordmark-cream.png` the same letters in the kit's cream | `HermesWordmark` and `HermesLockup` |
 | [apps/web/src/app/icon.png](../../apps/web/src/app/icon.png) (512), `icon.svg`, `favicon.ico` | Copies of `brand/png/icon-512.png`, `brand/svg/mark-color-on-bg.svg` and `brand/png/favicon.ico` | Favicon and PWA icon |
 | [apps/web/src/app/apple-icon.png](../../apps/web/src/app/apple-icon.png) (180) | Copy of `brand/png/apple-touch-icon-180.png`; opaque, because iOS fills a transparent home-screen icon with black, and square, because iOS rounds the corners itself | Home-screen icon |
 | [apps/desktop/Resources/AppIcon.png](../../apps/desktop/Resources/AppIcon.png) (1024) | Copy of `brand/png/avatar-1024.png`; `scripts/bundle-app.sh` renders the `.icns` from it | macOS app icon |
@@ -156,11 +156,16 @@ Leave clear space of at least a quarter of its width on every side.
 
 ### The wordmark and the lockup
 
-The owner's GNOSIA letterforms remain unchanged: a light geometric sans with
-an open G and an A without a crossbar. `HermesWordmark` uses the alpha channel
-of the existing letter art as a CSS mask, deep terracotta on light grounds
-and cream on dark ones. No font approximation or recoloured raster is needed.
-The static import keeps the mask URL content-hashed.
+The letters read **Hermes**, set in Fraunces SemiBold, the name typeface of
+the kit in [brand/](../../brand/brand.md) and the face its lockups outline.
+`public/brand/wordmark-ink.png` is those letters rendered from
+`brand/fonts/Fraunces-SemiBold.ttf`, cropped to the ink, 288px tall, on a
+transparent ground. `HermesWordmark` uses its alpha channel as a CSS mask,
+deep terracotta on light grounds and cream on dark ones, so the colour comes
+from the tokens and no font loads for six letters. The static import keeps
+the mask URL content-hashed. Until 2026-11-15 the mask was the old GNOSIA
+letter art, which a screen reader heard as Hermes while the page drew GNOSIA
+(#696); that art stays in `docs/design/brand/logo/` as history.
 
 The mark is decorative and the letters have one accessible name, Hermes.
 `HermesWordmark` places the mark beside the letters; `HermesLockup` stacks

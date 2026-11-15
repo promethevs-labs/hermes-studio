@@ -4,7 +4,7 @@
  * `services/catalog/src/learn/cli.ts`.
  *
  * The pipeline moved into the catalog workspace in bundle 5, because its state
- * moved into Postgres: `events.jsonl`, `model.json` and `reviews.json` are the
+ * moved into the catalog database: `events.jsonl`, `model.json` and `reviews.json` are the
  * `event`, `mastery` and `review` tables, and the code that reads them needs
  * the schema, the connection and drizzle — none of which belongs in a
  * dependency-free script.
