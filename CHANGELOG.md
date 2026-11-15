@@ -129,6 +129,12 @@ This project is continuously deployed and not versioned; entries are grouped by 
 
 ### Fixed
 
+- **A blob store that cannot open no longer breaks reads that only need the
+  catalog.** `seams()` in `apps/web/src/lib/asset-files.ts` resolves
+  `assetBlobStore()` on first use rather than when the seams are built, so a
+  bad `HERMES_HOME` is refused inside the read that touched the store, where
+  `blobStoreProblem` classifies it, and a catalog-only read is unaffected.
+
 - **The desktop shell (`apps/desktop`, Gnosia Web) no longer launches local
   apps from a link, and says why when its server does not come up.** A
   target=_blank link or `window.open` went to `NSWorkspace` whatever its
