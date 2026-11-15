@@ -209,7 +209,7 @@ class Session {
         throw new CliError(
           `cannot reach the database at ${redactUrl(databaseUrl())}\n` +
             `  ${message}\n` +
-            `  Start Postgres, or set DATABASE_URL. See services/catalog/.env.example.`,
+            `  Check that the catalog file exists and is readable, or set CATALOG_DB. See services/catalog/.env.example.`,
         );
       }
     }
@@ -1959,9 +1959,10 @@ commands.help = async () => {
 Notes and session logs are rows in the catalog; the repository has held no
 files for them since the cut-over, and LEARN_ROOT names a tree of files for
 tests only. Every command that writes them needs the database. Mastery, the
-schedule and the event log are tables; DATABASE_URL points at them and
-defaults to postgres://localhost:5432/hermes. --reason R names why, on
-any command that writes a note or a log.
+schedule and the event log are tables in one SQLite file: CATALOG_DB names
+it, and it defaults to catalog.db in $HERMES_HOME, else $GNOSIA_HOME, else
+~/.hermes, or an existing ~/.gnosia from before the rename. --reason R names
+why, on any command that writes a note or a log.
 
 Add --json to any command for machine-readable output.`,
     false,
