@@ -105,7 +105,7 @@ async function rowsFor(type: "concepts" | "sessions" | "courses", write: boolean
     const message = unreachable instanceof Error ? unreachable.message : String(unreachable);
     throw new FilesGoneError(
       `the catalog database could not be read (${message}), and ${type} are rows in it: the repository has had ` +
-        `no files for them since the cut-over. Start Postgres, or point DATABASE_URL at the catalog.`,
+        `no files for them since the cut-over. Check that the catalog file exists and is readable, or point CATALOG_DB at it.`,
     );
   }
   throw new FilesGoneError(

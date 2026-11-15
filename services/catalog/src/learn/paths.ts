@@ -7,7 +7,7 @@ import { databaseUrl, loadEnv, redactUrl, REPO_ROOT } from "../env";
 
 /**
  * Where the knowledge base's *files* live. The state that used to sit beside
- * them under `learn/state/` is in Postgres now; what is left here is what was
+ * them under `learn/state/` is in the catalog database now; what is left here is what was
  * always authored rather than derived — the notes, the session logs, the
  * diagrams and the generated map.
  *

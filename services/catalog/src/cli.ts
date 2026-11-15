@@ -229,7 +229,7 @@ Commands:
                              add --slug S --title T --domain D [--summary X]
                                [--alias A]... [--relate kind:slug]...
                                [--dry-run] [--owner ID]: --dry-run validates
-                               and lists near matches (pg_trgm) without
+                               and lists near matches (trigram similarity) without
                                writing. --owner writes the topic as that
                                owner (default: local), checked against their
                                topics and the commons'
@@ -395,7 +395,10 @@ Exit codes:
      says how many are outstanding and to run migrate.
 
 Environment:
-  DATABASE_URL   Defaults to postgres://localhost:5432/hermes.
+  CATALOG_DB     The catalog, one SQLite file. Defaults to
+                 $HERMES_HOME/catalog.db, else ~/.hermes/catalog.db.
+  DATABASE_URL   Read after CATALOG_DB, and only when it names a file path.
+                 A postgres:// value is refused.
   MANIMKC_ROOT   The manimkc checkout. Defaults to <repo>/tools/manimkc.
                  Same variable and same meaning as manimkc's own CLI.
   REMOTIONKC_ROOT
