@@ -7,7 +7,10 @@ D42). This document fills in the per-kind half for manimkc videos and decides
 the one question that table left open: who spawns the agent that writes and
 runs Python.
 
-**Status: proposed, 2026-09-29. Nothing here is built.** Numbers marked
+**Status: proposed 2026-09-29; phases 0 to 2 built and measured (the runner in
+#201, the chat and the panel from #204, 2026-09-29 and 2026-09-30). Phase 3,
+measured tightening of the sandbox, is not built, and was always conditional on
+what the first jobs showed.** Numbers marked
 *measured* were taken on 2026-09-29 on the owner's machine (Apple M4 Pro, 12
 cores, 24 GB, macOS 26.5.2) against manimkc 2e4172c, ManimGL 1.7.2 and
 `claude` 2.1.274, or read from manimkc's own timing log

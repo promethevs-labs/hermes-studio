@@ -7,7 +7,9 @@ only of a tagged kind. This document lets the planner propose — and, where the
 owner has said always, order — the same kinds itself. It is the studio half of
 issue #511; the concept tutor's side is a later phase below.
 
-**Status: proposed, 2026-10-25. Nothing here is built.** It amends D58 of
+**Status: proposed 2026-10-25; phases 1 (the runner) and 2 (the web app) built
+(#513, 2026-10-26), with `svg` asking for nothing as D110 says. Phase 3, the
+tutor's side, is not built: the tutor's prompt has no `svg` rule.** It amends D58 of
 [STUDIO-MENTIONS.md](STUDIO-MENTIONS.md): the suggestion no longer puts a chip
 in the composer for the person to send; it is a card the person answers, and
 an allow sends the tag itself.
