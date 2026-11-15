@@ -43,7 +43,7 @@ A third part, the `tools/manimkc/` submodule, renders narrated animations for co
 
 <p align="center">
   <img src="apps/web/public/screenshot.png" alt="The Hermes Home page: an Ask box, Pick up where you left off, next-up suggestions, recall cards and courses in progress" width="900"><br>
-  <em>Home at <code>/home</code>, live at <a href="https://hermes-one.vercel.app/home">hermes-one.vercel.app</a>; <code>/today</code> redirects here.</em>
+  <em>Home at <code>/home</code>; <code>/today</code> redirects here.</em>
 </p>
 
 ## Hosting, now and next
@@ -107,7 +107,7 @@ apps/web/         The Next.js app: src/app · src/components · src/data · src/
 packages/content/ One reader for the export format's content/, and the content types
 packages/schema/  Drizzle tables: the single source of the catalog's row shapes
 services/catalog/ Migrations, the database connection and the catalog CLI
-scripts/learn/    Pipeline CLI: bkt · graph · schedule · markdown · store · render
+scripts/learn/    Pipeline CLI entry point (cli.mjs); lib/: bkt · graph · schedule · markdown · render · session-log
 seed/             A small slice of the content in the export format: a fresh clone's data
 docs/             Long-form docs, the pipeline's among them (docs/LEARN.md)
 tools/manimkc/    Private submodule: narrated manim videos
@@ -349,7 +349,7 @@ Saved keys are never returned to the browser, and provider calls read keys serve
 | `npm run canvas -- <cmd>` | The `tools/tldrawkc/` diagram CLI. Needs `npm ci && npm run build` inside the submodule first |
 | `npm run catalog -- <cmd>` | The catalog CLI: `migrate`, `import` (`index` is its old name), `status`, `ls`, `show`, `path`, `search`. Works on the catalog's SQLite file, created by `migrate` on first use |
 
-Thirteen Vitest files cover the three halves. On the web side: curriculum integrity, progress counting, learner-state reducers, topic recaps and the v1 to v2 migration, the recap summariser, and agent prompt/provider/objective selection. On the pipeline side: BKT update formulas and information-gain ordering, DAG cycle detection and frontier advance, the SM-2 interval ladder and leech handling, frontmatter and wikilink parsing, and `scripts/learn/cli.test.mjs` over the command surface itself. On the catalog side: migrations applying from empty and staying idempotent, and the constraints that make the database worth having — an unknown foreign key, a prerequisite kind outside `requires|assumes`, a `collection_item` with zero or two targets, and an `UPDATE` on `event`. Each runs against a scratch SQLite file of its own under the OS temp directory (`services/catalog/test/scratch-database.ts`), so they need no database server and run everywhere.
+About 500 Vitest files cover the three halves, each next to the code it tests. The web side lives under `apps/` (about 280 files) and `packages/` (about 45): curriculum and progress logic, learner-state reducers, recaps, and agent prompt, provider and model-chain selection. The pipeline side is `scripts/learn/lib/`, with BKT update formulas and information-gain ordering, DAG cycle detection and frontier advance, the SM-2 interval ladder and leech handling, and frontmatter and wikilink parsing; the `learn` command surface itself is covered in `services/catalog/test/learn-cli*.test.ts`. The catalog side lives under `services/` (about 170 files): migrations applying from empty and staying idempotent, and the constraints that make the database worth having, such as an unknown foreign key, a prerequisite kind outside `requires|assumes`, a `collection_item` with zero or two targets, and an `UPDATE` on `event`. `scripts/` and `eslint-rules/` hold the rest. Each catalog suite runs against a scratch SQLite file of its own under the OS temp directory (`services/catalog/test/scratch-database.ts`), so they need no database server and run everywhere.
 
 `.github/workflows/ci.yml` runs `lint` → `typecheck` → `test:coverage` on every pull request (not on the push that merges it, which would test the same code twice), with two test files at a time, then uploads the lcov report to Codecov. `node_modules` and ESLint's per-file results come from a cache, which `.github/workflows/cache.yml` keeps on `main`. Production deploys only when a GitHub release is published (`.github/workflows/deploy.yml`), and that workflow runs `build` before it deploys; pull requests get no preview and a merge to `main` deploys nothing. See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
