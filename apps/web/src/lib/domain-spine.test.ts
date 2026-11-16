@@ -63,7 +63,11 @@ describe("the spine's order", () => {
       const from = topicOf.get(edge.from);
       const to = topicOf.get(edge.to);
       if (from === undefined || to === undefined || from === to) continue;
-      expect(at.get(from)).toBeLessThan(at.get(to));
+      const fromAt = at.get(from);
+      const toAt = at.get(to);
+      expect(fromAt).toBeDefined();
+      expect(toAt).toBeDefined();
+      expect(fromAt!).toBeLessThan(toAt!);
     }
   });
 
