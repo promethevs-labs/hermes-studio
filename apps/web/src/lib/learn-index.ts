@@ -123,15 +123,16 @@ export function parseScope(value: string | null | undefined): GraphScope {
 }
 
 /**
- * How a domain's picture is arranged (D11 of docs/proposals/domain-map.md):
- * in a group per topic, the default, or on axes, each concept by when it is
- * learnt and by how many concepts need it. A topic is always in groups.
+ * How a domain's picture is arranged (D11 and D12 of docs/proposals/domain-map.md):
+ * as a path, the default, topics on one vertical spine with each topic's
+ * concepts branching off; in a group per topic; or on axes, each concept by
+ * when it is learnt and by how many concepts need it. A topic is always in groups.
  */
 export type MapLayout = "groups" | "axes" | "path";
 
-/** Or as a path (D12): the topics on one vertical spine, each topic's concepts branching off it. */
+/** A missing or unknown value is the path. `layout=groups` and `layout=axes` are the other two pictures. */
 export function parseLayout(value: string | null | undefined): MapLayout {
-  return value === "axes" || value === "path" ? value : "groups";
+  return value === "groups" || value === "axes" ? value : "path";
 }
 
 /**
@@ -139,8 +140,9 @@ export function parseLayout(value: string | null | undefined): MapLayout {
  * there. The map is the default view, so only the table writes `view`; the
  * map writes its domain and topic (D2 of docs/proposals/domain-map.md) and
  * the table only a scope other than its own default, so a reload or a shared
- * link shows exactly what was on the screen. A domain on axes writes
- * `layout=axes` (D11) or `layout=path` (D12); a topic, the cards and the table have no layout to say.
+ * link shows exactly what was on the screen. A domain writes `layout=groups`
+ * or `layout=axes` when it is not on the path, the default (D12); a topic,
+ * the cards and the table have no layout to say.
  */
 export function indexSearch(
   state: {
@@ -162,7 +164,7 @@ export function indexSearch(
   set("scope", map || state.scope === "neighbourhood" ? null : state.scope);
   set("domain", map ? state.domain : null);
   set("topic", map && state.domain !== null ? state.topic : null);
-  set("layout", map && state.domain !== null && state.topic === null && state.layout !== undefined && state.layout !== "groups" ? state.layout : null);
+  set("layout", map && state.domain !== null && state.topic === null && state.layout !== undefined && state.layout !== "path" ? state.layout : null);
   set("filter", state.filter === "all" ? null : state.filter);
   return params.toString();
 }

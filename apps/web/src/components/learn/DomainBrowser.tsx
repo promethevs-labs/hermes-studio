@@ -38,11 +38,11 @@ import { LEECH_LABEL } from "@hermes/tutor/review-core";
 
 export type Place = { domain: string | null; topic: string | null };
 
-/** The ways to draw a domain: a group per topic, on axes (D11), or as a path down one spine (D12). */
+/** The ways to draw a domain. Path is the default (D12): topics on one spine. Groups and Axes stay reachable. */
 const LAYOUT_ITEMS: SegmentItem<MapLayout>[] = [
+  { id: "path", label: "Path" },
   { id: "groups", label: "Groups" },
   { id: "axes", label: "Axes" },
-  { id: "path", label: "Path" },
 ];
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -172,7 +172,7 @@ export function DomainView({
   onPick,
   panelFocus = 0,
   onPanelFocused,
-  arrangement = "groups",
+  arrangement = "path",
   onArrange,
 }: {
   domain: DomainSummary;

@@ -86,11 +86,11 @@ const longLayout = domainLayout(nodes, edges, longTopics, "algorithms");
 const longMap = { tree: domainTree(nodes, edges, longTopics), layouts: { algorithms: longLayout } };
 
 function mount(m: typeof map = map) {
-  window.history.replaceState(null, "", "/learn?domain=algorithms");
+  window.history.replaceState(null, "", "/learn?domain=algorithms&layout=groups");
   const host = document.createElement("div");
   document.body.append(host);
   const root = createRoot(host);
-  const initial = { selected: null, view: "graph" as const, scope: "neighbourhood" as const, filter: "all" as const, domain: "algorithms", topic: null };
+  const initial = { selected: null, view: "graph" as const, scope: "neighbourhood" as const, filter: "all" as const, domain: "algorithms", topic: null, layout: "groups" as const };
   act(() => root.render(createElement(LearnIndex, { rows, edges, map: m, initial })));
   mounted.push(() => {
     act(() => root.unmount());

@@ -201,13 +201,14 @@ the top left of the zone. At 1440 wide 23 of its 56 labels are drawn and
 and none under 11px. The glide each way and a hover across 30 concepts held
 every frame at 16.7 ms.
 
-**D12. A domain can be drawn as a path (2026-11-14).** The layout switch
-gains a third segment, "Path", after Groups and Axes. It draws the domain as
+**D12. A domain is drawn as a path (2026-11-14, default 2026-11-17).** The layout switch
+offers Path, then Groups, then Axes. Path draws the domain as
 roadmap.sh draws a roadmap: one vertical spine with a node per topic, and
-each topic's concepts branching off its node. It is a layout beside the other
-two, not a replacement: Groups stays the default, and the choice is in the URL
-as `layout=path`, kept in memory while the learner moves between domains,
-left out in a topic (always groups), on the cards and in the table. The path
+each topic's concepts branching off its node. It is the picture a domain opens on.
+Groups and Axes stay reachable from the switch. A missing layout means the path;
+`layout=groups` and `layout=axes` name the other two. The choice is kept in memory
+while the learner moves between domains, and left out in a topic (always groups),
+on the cards and in the table. The path
 is plain HTML (an ordered list, buttons, the kit's `Collapse`), not the SVG
 picture, so it reads at a phone's width with nothing to scale: the spine is a
 rail down the left, a node's title and its concepts sit to its right, and a

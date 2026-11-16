@@ -79,7 +79,7 @@ afterEach(() => {
 });
 
 /** The index as the page draws it for `search`, the picture one pixel per layout unit. */
-function mount(search = "?domain=algorithms") {
+function mount(search = "?domain=algorithms&layout=groups") {
   window.history.replaceState(null, "", `/learn${search}`);
   const params = new URLSearchParams(search);
   const initial = {
@@ -132,7 +132,7 @@ const state = (host: HTMLElement, id: string) => {
 const ids = spec.map(([id]) => id);
 
 describe("the axes layout", () => {
-  it("offers Groups and Axes beside the breadcrumb, Groups chosen, and Axes moves every concept to its place on the axes", () => {
+  it("offers Path, Groups and Axes beside the breadcrumb, and Axes moves every concept to its place on the axes", () => {
     const host = mount();
     // In the breadcrumb's row, after it.
     const row = (host.querySelector('nav[aria-label="Breadcrumb"]') as HTMLElement).parentElement as HTMLElement;
@@ -158,7 +158,7 @@ describe("the axes layout", () => {
     expect(axes.textContent).toContain("Foundational");
 
     act(() => option(host, "Groups").click());
-    expect(url().get("layout")).toBeNull();
+    expect(url().get("layout")).toBe("groups");
     for (const id of ids) expect(at(host, id)).toEqual(layout.positions[id]);
     expect((svgOf(host).querySelector("[data-groups]") as SVGGElement).getAttribute("class")).toContain("opacity-100");
     expect((svgOf(host).querySelector("[data-axes]") as SVGGElement).getAttribute("class")).toContain("opacity-0");
@@ -168,7 +168,7 @@ describe("the axes layout", () => {
     const host = mount("?domain=algorithms&layout=axes");
     expect(option(host, "Axes").getAttribute("aria-checked")).toBe("true");
     for (const id of ids) expect(at(host, id)).toEqual(layout.axes.positions[id]);
-    window.history.replaceState(window.history.state, "", "/learn?domain=algorithms");
+    window.history.replaceState(window.history.state, "", "/learn?domain=algorithms&layout=groups");
     act(() => void window.dispatchEvent(new PopStateEvent("popstate")));
     expect(option(host, "Groups").getAttribute("aria-checked")).toBe("true");
     expect(at(host, "dfs")).toEqual(layout.positions.dfs);

@@ -128,7 +128,7 @@ export function LearnIndex({
   const [scope, setScope] = useState(initial.scope);
   const [place, setPlace] = useState<Place>(() => placeOf(map, domainOf, initial));
   // Kept while the learner moves about, and written to the URL only where it shows: a domain with no topic.
-  const [layout, setLayout] = useState<MapLayout>(initial.layout ?? "groups");
+  const [layout, setLayout] = useState<MapLayout>(initial.layout ?? "path");
   const [selected, setSelected] = useState(() => shownIn(map, domainOf, placeOf(map, domainOf, initial), initial.selected));
   /** Asked when a pick moves to another place, which mounts a new panel: its heading takes the focus. */
   const [panelFocus, setPanelFocus] = useState(0);
