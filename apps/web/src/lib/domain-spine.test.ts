@@ -55,6 +55,22 @@ describe("the spine's order", () => {
     expect(Math.max(at("lists"), at("trees"))).toBeLessThan(at("sorting"));
   });
 
+  it("never places a topic before a topic its concepts require", () => {
+    const spine = spineOf(groups, edges, new Map(), "algorithms");
+    const at = new Map(spine.nodes.map((n) => [n.topic, n.index]));
+    const topicOf = new Map(groups.flatMap((group) => group.concepts.map((id) => [id, group.topic])));
+    for (const edge of edges) {
+      const from = topicOf.get(edge.from);
+      const to = topicOf.get(edge.to);
+      if (from === undefined || to === undefined || from === to) continue;
+      const fromAt = at.get(from);
+      const toAt = at.get(to);
+      expect(fromAt).toBeDefined();
+      expect(toAt).toBeDefined();
+      expect(fromAt!).toBeLessThan(toAt!);
+    }
+  });
+
   it("breaks a tie by the order the topics came in", () => {
     const spine = spineOf([g("b", "b1"), g("a", "a1"), g("c", "c1")], [], new Map(), "d");
     expect(topics(spine)).toEqual(["b", "a", "c"]);

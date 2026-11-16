@@ -7,7 +7,7 @@ import { LearnIndex } from "./LearnIndex";
 import type { GraphEdge } from "@hermes/tutor/concept-graph";
 import { domainLayout, domainTree, type DomainNode, type DomainTopic } from "@/lib/domain-map";
 import { viewBoxFor } from "@/lib/domain-view";
-import { parseFilter, parseScope, parseView, type IndexRow } from "@/lib/learn-index";
+import { parseFilter, parseLayout, parseScope, parseView, type IndexRow } from "@/lib/learn-index";
 
 /**
  * Written before the domain views (phase 2 of docs/proposals/domain-map.md,
@@ -81,6 +81,7 @@ function mountAtUrl() {
     filter: parseFilter(params.get("filter")),
     domain: params.get("domain"),
     topic: params.get("topic"),
+    layout: parseLayout(params.get("layout")),
   };
   const host = document.createElement("div");
   document.body.append(host);
@@ -123,10 +124,15 @@ describe("LearnIndex by domain", () => {
     expect(graph(host)).toBeNull();
   });
 
-  it("opens a domain from its card: its concepts only, in the URL and the breadcrumb", () => {
+  it("opens a domain from its card on the path, and Groups still draws its concepts", () => {
     const host = mountAtUrl();
     act(() => cards(host)[0].click());
     expect(url().get("domain")).toBe("algorithms");
+    expect(url().get("layout")).toBeNull();
+    expect(host.querySelector("ol[data-spine]")).not.toBeNull();
+    const groups = [...host.querySelectorAll<HTMLButtonElement>('[role="radio"]')].find((b) => b.textContent?.trim() === "Groups") as HTMLButtonElement;
+    act(() => groups.click());
+    expect(url().get("layout")).toBe("groups");
     const svg = graph(host) as SVGSVGElement;
     expect(svg.getAttribute("aria-label")).toBe("Algorithms map, 3 concepts in 2 topics");
     expect([...svg.querySelectorAll("[data-concept]")].map((g) => g.getAttribute("data-concept")).sort()).toEqual(["bfs", "merge", "quick"]);
@@ -137,7 +143,7 @@ describe("LearnIndex by domain", () => {
   });
 
   it("narrows to a topic and back up through the breadcrumb", () => {
-    window.history.replaceState(null, "", "/learn?domain=algorithms");
+    window.history.replaceState(null, "", "/learn?domain=algorithms&layout=groups");
     const host = mountAtUrl();
     const title = host.querySelector<HTMLElement>('[data-topic-title="sorting"]') as HTMLElement;
     act(() => title.dispatchEvent(new MouseEvent("click", { bubbles: true })));
@@ -162,13 +168,13 @@ describe("LearnIndex by domain", () => {
     window.history.replaceState(window.history.state, "", "/learn");
     act(() => void window.dispatchEvent(new PopStateEvent("popstate")));
     expect(graph(host)).toBeNull();
-    window.history.replaceState(window.history.state, "", "/learn?domain=foundations");
+    window.history.replaceState(window.history.state, "", "/learn?domain=foundations&layout=groups");
     act(() => void window.dispatchEvent(new PopStateEvent("popstate")));
     expect(graph(host)?.getAttribute("aria-label")).toBe("Foundations map, 1 concept in 1 topic");
   });
 
   it("selects a concept on the graph, and a pick in the panel crosses into its domain", () => {
-    window.history.replaceState(null, "", "/learn?domain=algorithms");
+    window.history.replaceState(null, "", "/learn?domain=algorithms&layout=groups");
     const host = mountAtUrl();
     const quick = graph(host)?.querySelector('[data-concept="quick"]') as SVGGElement;
     act(() => quick.dispatchEvent(new MouseEvent("click", { bubbles: true })));
@@ -185,7 +191,7 @@ describe("LearnIndex by domain", () => {
   });
 
   it("lets go of a selection the URL names outside the domain it opens", () => {
-    window.history.replaceState(null, "", "/learn?domain=foundations&concept=merge");
+    window.history.replaceState(null, "", "/learn?domain=foundations&layout=groups&concept=merge");
     const host = mountAtUrl();
     expect(graph(host)?.getAttribute("aria-label")).toMatch(/^Foundations map/);
     expect(host.querySelector('section[aria-label="Concept details"] h3')).toBeNull();
@@ -209,7 +215,7 @@ describe("LearnIndex by domain", () => {
   });
 
   it("leaves the topic titles in the picture to the pointer; the list's buttons are the keyboard's", () => {
-    window.history.replaceState(null, "", "/learn?domain=algorithms");
+    window.history.replaceState(null, "", "/learn?domain=algorithms&layout=groups");
     const host = mountAtUrl();
     const title = host.querySelector('[data-topic-title="sorting"]') as Element;
     expect(title.getAttribute("role")).toBeNull();
@@ -245,7 +251,7 @@ describe("LearnIndex by domain", () => {
   });
 
   it("opens a concept's domain when the URL names only the concept", () => {
-    window.history.replaceState(null, "", "/learn?concept=bfs");
+    window.history.replaceState(null, "", "/learn?concept=bfs&layout=groups");
     const host = mountAtUrl();
     expect(graph(host)?.getAttribute("aria-label")).toMatch(/^Algorithms map/);
     expect(url().get("domain")).toBe("algorithms");
@@ -264,7 +270,7 @@ describe("LearnIndex by domain", () => {
   });
 
   it("dims the concepts a filter hides inside a domain", () => {
-    window.history.replaceState(null, "", "/learn?domain=algorithms&filter=mastered");
+    window.history.replaceState(null, "", "/learn?domain=algorithms&layout=groups&filter=mastered");
     const host = mountAtUrl();
     const dim = (id: string) => graph(host)?.querySelector(`[data-concept="${id}"]`)?.getAttribute("data-dim");
     expect(dim("merge")).toBe("false");
@@ -272,7 +278,7 @@ describe("LearnIndex by domain", () => {
   });
 
   it("lists the domain's topics and concepts beside the graph, a press selecting", () => {
-    window.history.replaceState(null, "", "/learn?domain=algorithms");
+    window.history.replaceState(null, "", "/learn?domain=algorithms&layout=groups");
     const host = mountAtUrl();
     const list = host.querySelector('[aria-label="Concepts in Algorithms"]') as HTMLElement;
     expect([...list.querySelectorAll("[data-list-concept]")].map((b) => b.getAttribute("data-list-concept"))).toEqual([

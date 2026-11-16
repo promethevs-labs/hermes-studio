@@ -10,7 +10,7 @@ import { parseFilter, parseLayout, parseScope, parseView, type IndexRow } from "
 
 /**
  * Written before the Path layout (D12 to D16 of docs/proposals/domain-map.md):
- * a third segment beside Groups and Axes, held in the URL as `layout=path`;
+ * the first segment of the layout switch, and the picture a domain opens on;
  * the topics on one spine in the order they are learnt, each topic's concepts
  * under its node; a topic whose concepts are all mastered folded, one press
  * opening it; the view opening at the first topic with a concept ready to
@@ -91,7 +91,7 @@ afterEach(() => {
   window.history.replaceState(null, "", "/learn");
 });
 
-function mount(search = "?domain=algorithms&layout=path") {
+function mount(search = "?domain=algorithms") {
   window.history.replaceState(null, "", `/learn${search}`);
   const params = new URLSearchParams(search);
   const initial = {
@@ -132,26 +132,28 @@ const url = () => new URLSearchParams(window.location.search);
 const legend = (host: HTMLElement, key: string) => host.querySelector(`button[data-legend-chip="${key}"]`) as HTMLButtonElement;
 
 describe("the path layout", () => {
-  it("is the third choice of the layout switch, writes layout=path, and swaps the picture for the spine and back", () => {
+  it("is the default of the layout switch, writes nothing, and swaps the picture for Groups and back", () => {
     const host = mount("?domain=algorithms");
-    expect([...switcher(host).querySelectorAll('[role="radio"]')].map((b) => b.textContent?.trim())).toEqual(["Groups", "Axes", "Path"]);
-    expect(spine(host)).toBeNull();
-    expect(host.querySelector("svg[data-domain-graph]")).not.toBeNull();
-    act(() => option(host, "Path").click());
+    expect([...switcher(host).querySelectorAll('[role="radio"]')].map((b) => b.textContent?.trim())).toEqual(["Path", "Groups", "Axes"]);
     expect(option(host, "Path").getAttribute("aria-checked")).toBe("true");
-    expect(url().get("layout")).toBe("path");
+    expect(url().get("layout")).toBeNull();
     expect(spine(host)).not.toBeNull();
     expect(host.querySelector("svg[data-domain-graph]")).toBeNull();
     act(() => option(host, "Groups").click());
-    expect(url().get("layout")).toBeNull();
+    expect(option(host, "Groups").getAttribute("aria-checked")).toBe("true");
+    expect(url().get("layout")).toBe("groups");
     expect(spine(host)).toBeNull();
     expect(host.querySelector("svg[data-domain-graph]")).not.toBeNull();
+    act(() => option(host, "Path").click());
+    expect(url().get("layout")).toBeNull();
+    expect(spine(host)).not.toBeNull();
+    expect(host.querySelector("svg[data-domain-graph]")).toBeNull();
   });
 
   it("opens from the URL, follows Back to Groups, and a topic is always groups", () => {
     const host = mount();
     expect(spine(host)).not.toBeNull();
-    window.history.replaceState(window.history.state, "", "/learn?domain=algorithms");
+    window.history.replaceState(window.history.state, "", "/learn?domain=algorithms&layout=groups");
     act(() => void window.dispatchEvent(new PopStateEvent("popstate")));
     expect(spine(host)).toBeNull();
     const again = mount("?domain=algorithms&topic=sorting&layout=path");

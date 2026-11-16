@@ -6,7 +6,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { LearnIndex } from "./LearnIndex";
 import type { GraphEdge } from "@hermes/tutor/concept-graph";
 import { domainLayout, domainTree, type DomainNode, type DomainTopic } from "@/lib/domain-map";
-import { parseFilter, type IndexRow } from "@/lib/learn-index";
+import { parseFilter, parseLayout, type IndexRow } from "@/lib/learn-index";
 import type { MasteryBucket } from "@hermes/tutor/mastery-bucket";
 
 /**
@@ -74,7 +74,7 @@ afterEach(() => {
   window.history.replaceState(null, "", "/learn");
 });
 
-function mount(search = "?domain=algorithms") {
+function mount(search = "?domain=algorithms&layout=groups") {
   window.history.replaceState(null, "", `/learn${search}`);
   const params = new URLSearchParams(search);
   const initial = {
@@ -84,6 +84,7 @@ function mount(search = "?domain=algorithms") {
     filter: parseFilter(params.get("filter")),
     domain: params.get("domain"),
     topic: params.get("topic"),
+    layout: parseLayout(params.get("layout")),
   };
   const host = document.createElement("div");
   document.body.append(host);

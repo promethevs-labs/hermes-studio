@@ -124,11 +124,11 @@ describe("/learn", () => {
 
     // A domain draws its picture; a concept named in the URL opens its domain, selected.
     const domain = await render({ domain: "fixtures" });
-    expect(domain).toContain('aria-label="Fixtures map, 1 concept in 1 topic"');
-    expect(domain).toMatch(/data-concept="alpha"[^>]*aria-pressed="false"/);
+    expect(domain).toContain('aria-label="Fixtures as a path, 1 topic"');
+    expect(domain).toMatch(/data-spine-concept="alpha"[^>]*aria-pressed="false"/);
     const named = await render({ concept: "alpha" });
-    expect(named).toContain('aria-label="Fixtures map, 1 concept in 1 topic"');
-    expect(named).toMatch(/data-concept="alpha"[^>]*aria-pressed="true"/);
+    expect(named).toContain('aria-label="Fixtures as a path, 1 topic"');
+    expect(named).toMatch(/data-spine-concept="alpha"[^>]*aria-pressed="true"/);
     expect(named).toContain('href="/learn/alpha"');
 
     // The table is one press away, and `view=table` opens it: the row, its link
@@ -189,9 +189,9 @@ describe("/learn", () => {
     const html = await render({ concept: "beta", view: "graph" });
 
     // The map opens Beta's domain, Beta ringed on it (D2 of docs/proposals/domain-map.md).
-    expect(html).toContain('aria-label="Other map, 2 concepts in 1 topic"');
-    expect(html).toMatch(/data-concept="beta"[^>]*aria-pressed="true"/);
-    expect(html).toMatch(/data-concept="alpha"[^>]*aria-pressed="false"/);
+    expect(html).toContain('aria-label="Other as a path, 1 topic"');
+    expect(html).toMatch(/data-spine-concept="beta"[^>]*aria-pressed="true"/);
+    expect(html).toMatch(/data-spine-concept="alpha"[^>]*aria-pressed="false"/);
   });
 
   it("marks the ready concepts of the recent courses on the map, and only those", async () => {
@@ -225,9 +225,9 @@ describe("/learn", () => {
     });
     recentCourses.mockResolvedValueOnce(["cp4284"]);
     const html = await render({ concept: "loose" });
-    expect(html).toMatch(/data-concept="root"[^>]*data-ready="true"/);
-    expect(html).toMatch(/data-concept="next"[^>]*data-ready="false"/);
-    expect(html).toMatch(/data-concept="loose"[^>]*data-ready="false"/);
+    expect(html).toMatch(/data-spine-concept="root"[^>]*data-ready="true"/);
+    expect(html).toMatch(/data-spine-concept="next"[^>]*data-ready="false"/);
+    expect(html).toMatch(/data-spine-concept="loose"[^>]*data-ready="false"/);
 
     // With no recent course, nothing is marked.
     const none = await render({ concept: "loose" });
