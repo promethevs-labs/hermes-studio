@@ -120,13 +120,13 @@ reduction of it, and where the two disagree the art wins.
 | [docs/design/brand/world-staircase.png](brand/world-staircase.png) | The world: a staircase of books into a sky city, the mascot beside it | Historical banner source; withheld until repainted |
 | [docs/design/brand/pixel-art-sheet.png](brand/pixel-art-sheet.png) | A pixel-art take on the book, the wordmark and the world | **Campaign art only, never product UI.** It uses its own palette (royal blue, red ribbon) and its own letterforms, so it must not leak into the app or the landing page. The [avatar sprites](#avatar-sprites) are pixel art too, but their own, in the brand palette |
 | [docs/design/brand/logo/](brand/logo/) `mark.png`, `wordmark-ink.png`, `wordmark-cream.png` | The owner's logo art, 2026-09-27: the mark alone (1254px), and the GNOSIA letters in deep teal (for light grounds) and in cream (for dark grounds), 2172 by 724, all on transparent grounds | History: the letters from before the rename. Nothing ships from them since #696 |
-| [apps/web/public/brand/](../../apps/web/public/brand/) `mark.png` (1024), `mark.svg` | The hat mark from [brand/](../../brand/brand.md). `mark.png` is `brand/mono/mono-charcoal.png` and `mark.svg` is `brand/svg/mark-mono-charcoal.svg`, so the hat reads on cream and white. The cream mark stays in the kit for dark grounds. The ring paths in `HermesMark.ts` are the older in-app drawing. `wordmark-ink.png` is the word Hermes in Fraunces SemiBold (1477 by 288), the alpha mask for the CSS-coloured lettering, and `wordmark-cream.png` the same letters in the kit's cream | `HermesWordmark` and `HermesLockup` |
-| [apps/web/src/app/icon.png](../../apps/web/src/app/icon.png) (512), `icon.svg`, `favicon.ico` | Copies of `brand/png/icon-512.png`, `brand/svg/mark-color-on-bg.svg` and `brand/png/favicon.ico` | Favicon and PWA icon |
-| [apps/web/src/app/apple-icon.png](../../apps/web/src/app/apple-icon.png) (180) | Copy of `brand/png/apple-touch-icon-180.png`; opaque, because iOS fills a transparent home-screen icon with black, and square, because iOS rounds the corners itself | Home-screen icon |
-| [apps/desktop/Resources/AppIcon.png](../../apps/desktop/Resources/AppIcon.png) (1024) | Copy of `brand/png/avatar-1024.png`; `scripts/bundle-app.sh` renders the `.icns` from it | macOS app icon |
+| [apps/web/public/brand/](../../apps/web/public/brand/) `mark.png` (1024), `mark.svg` | The hat mark from [.brand/](../../.brand/brand.md). `mark.png` is `.brand/mono/mono-charcoal.png` and `mark.svg` is `.brand/svg/mark-mono-charcoal.svg`, so the hat reads on cream and white. The cream mark stays in the kit for dark grounds. The ring paths in `HermesMark.ts` are the older in-app drawing. `wordmark-ink.png` is the word Hermes in Fraunces SemiBold (1477 by 288), the alpha mask for the CSS-coloured lettering, and `wordmark-cream.png` the same letters in the kit's cream | `HermesWordmark` and `HermesLockup` |
+| [apps/web/src/app/icon.png](../../apps/web/src/app/icon.png) (512), `icon.svg`, `favicon.ico` | Copies of `.brand/png/icon-512.png`, `.brand/svg/mark-color-on-bg.svg` and `.brand/png/favicon.ico` | Favicon and PWA icon |
+| [apps/web/src/app/apple-icon.png](../../apps/web/src/app/apple-icon.png) (180) | Copy of `.brand/png/apple-touch-icon-180.png`; opaque, because iOS fills a transparent home-screen icon with black, and square, because iOS rounds the corners itself | Home-screen icon |
+| [apps/desktop/Resources/AppIcon.png](../../apps/desktop/Resources/AppIcon.png) (1024) | Copy of `.brand/png/avatar-1024.png`; `scripts/bundle-app.sh` renders the `.icns` from it | macOS app icon |
 | [apps/web/public/brand/mascot/](../../apps/web/public/brand/mascot/) `{neutral,happy,reading,curious,excited,sleepy}.png` | Cut from the 1254px masters in `docs/design/brand/mascot/`: trimmed to the art plus 8px and scaled to 900px on the longest side (747 to 900px wide) | `HermesMascot` |
-| [apps/web/public/opengraph-image.png](../../apps/web/public/opengraph-image.png) (1280 by 640) | Copy of `brand/banners/social-preview-name-1280x640.png` | The social card |
-| Historical banner (`brand/world-staircase.png`) | The old teal world art is retained as a reference; `public/banner.png` is removed | Repaint before restoring it to the repository, campaigns or landing page |
+| [apps/web/public/opengraph-image.png](../../apps/web/public/opengraph-image.png) (1280 by 640) | Copy of `.brand/banners/social-preview-name-1280x640.png` | The social card |
+| Historical banner (`docs/design/brand/world-staircase.png`) | The old teal world art is retained as a reference; `public/banner.png` is removed | Repaint before restoring it to the repository, campaigns or landing page |
 
 The icon files and historical banner are supplied or cut by hand from
 the art; do not regenerate them from code. Issue #662 authorizes the interim
@@ -145,7 +145,7 @@ around a centre, as knowledge does. The owner's supplied art wins wherever
 a reproduction disagrees with it.
 
 `public/brand/mark.svg` is the charcoal hat, copied from
-`brand/svg/mark-mono-charcoal.svg`, so it reads on cream and white. The cream
+`.brand/svg/mark-mono-charcoal.svg`, so it reads on cream and white. The cream
 hat stays in the kit for dark grounds. `HermesMark.ts` still exports the
 older ring paths; the preview kit reads those constants. The landing page's
 next-step cue is a ring.
@@ -157,9 +157,9 @@ Leave clear space of at least a quarter of its width on every side.
 ### The wordmark and the lockup
 
 The letters read **Hermes**, set in Fraunces SemiBold, the name typeface of
-the kit in [brand/](../../brand/brand.md) and the face its lockups outline.
+the kit in [.brand/](../../.brand/brand.md) and the face its lockups outline.
 `public/brand/wordmark-ink.png` is those letters rendered from
-`brand/fonts/Fraunces-SemiBold.ttf`, cropped to the ink, 288px tall, on a
+`.brand/fonts/Fraunces-SemiBold.ttf`, cropped to the ink, 288px tall, on a
 transparent ground. `HermesWordmark` uses its alpha channel as a CSS mask,
 deep terracotta on light grounds and cream on dark ones, so the colour comes
 from the tokens and no font loads for six letters. The static import keeps

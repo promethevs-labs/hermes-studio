@@ -1,6 +1,6 @@
 # Hermes Studio brand kit
 
-Mark 2-3. Kit folder: `hermes-studio/brand/`. Marks are letter-free; only the lockups and banners carry the name.
+Mark 2-3. Kit folder: `hermes-studio/.brand/`. Marks are letter-free; only the lockups and banners carry the name.
 
 ## Palette
 
