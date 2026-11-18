@@ -126,7 +126,7 @@ reduction of it, and where the two disagree the art wins.
 | [apps/desktop/Resources/AppIcon.png](../../apps/desktop/Resources/AppIcon.png) (1024) | Copy of `.brand/png/avatar-1024.png`; `scripts/bundle-app.sh` renders the `.icns` from it | macOS app icon |
 | [apps/web/public/brand/mascot/](../../apps/web/public/brand/mascot/) `{neutral,happy,reading,curious,excited,sleepy}.png` | Cut from the 1254px masters in `docs/design/brand/mascot/`: trimmed to the art plus 8px and scaled to 900px on the longest side (747 to 900px wide) | `HermesMascot` |
 | [apps/web/public/opengraph-image.png](../../apps/web/public/opengraph-image.png) (1280 by 640) | Copy of `.brand/banners/social-preview-name-1280x640.png` | The social card |
-| Historical banner (`.brand/world-staircase.png`) | The old teal world art is retained as a reference; `public/banner.png` is removed | Repaint before restoring it to the repository, campaigns or landing page |
+| Historical banner (`docs/design/brand/world-staircase.png`) | The old teal world art is retained as a reference; `public/banner.png` is removed | Repaint before restoring it to the repository, campaigns or landing page |
 
 The icon files and historical banner are supplied or cut by hand from
 the art; do not regenerate them from code. Issue #662 authorizes the interim
