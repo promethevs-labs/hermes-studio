@@ -237,6 +237,91 @@ file creating two tables and adding two columns, and rebuilding nothing; 0005's
 snapshot holds the schema as it is now, so the next generate starts from the
 truth.
 
+### Ingredients and the evaluation report
+
+`catalog ingredients scan` fills `asset_ingredients`, and `catalog eval report`
+reads it back with the ratings and the jobs.
+
+```
+catalog ingredients scan [--only manimkc|remotionkc|revideokc|blenderkc|studio] [--owner ID] [--force] [--json]
+catalog eval report [--owner ID] [--json]
+```
+
+**The scan** runs no import and writes no table but `asset_ingredients`. For
+each tool it runs `topics --json` through the same reader the import uses,
+reads each rendered video's scene source, and upserts one row through
+`upsertAssetIngredients`. manimkc and blenderkc read the files the report names
+under the topic folder. remotionkc and revideokc read every `.ts` and `.tsx` in
+the topic folder (not `node_modules`, `dist` or a dot folder). The topic
+folders are where the report's `topicsRoot` says (manimkc), else
+`$<TOOL>_TOPICS`, else the same line in the checkout's `.env`, else
+`<checkout>/topics`: the order the tools' own CLIs use. The studio's videos
+(`video:<slug>`) are read from `video.source.files`, with the brief's tool.
+
+It is safe on a real catalog. It is idempotent: a row is left alone when its
+`source_hash`, `scanner_version`, `duration_seconds` and `metrics.libraryHash`
+are the ones the scan just computed, and `--force` rewrites it anyway.
+`libraryHash` is twelve hex characters of the sorted library names the scan
+was given (manimkc's `lib/` names, read from the checkout), or `none` when it
+had none: a scan made while the library was missing counts no helper, so a
+later scan with the library back must not read that row as fresh. It lives
+in `metrics`, so it needed no migration. It never deletes: a row for a
+video that is gone went with the video through the foreign key, and a video
+whose source cannot be read keeps the row it had and is listed as skipped with
+the reason. A tool with no CLI on the machine, or whose CLI fails, is a note
+(`not run`), and the exit code is 0 unless the database is unreachable (3) or
+behind the journal (4). A wrong `--only` is exit 2.
+
+`catalog import` runs the same two steps for each video tool after its rows
+land, and `catalog video put` runs them for the video it just wrote. In both a
+failure is a note (`ingredients not recorded: ...`) and never fails or undoes
+the import or the put; the scan verb makes up what they missed. What makes a
+scan incomplete (a missing library, a topic cut off at 500 source files, a
+relative `*_TOPICS`) is forwarded to the import's notes as `ingredients: ...`,
+as the verb prints it.
+
+A studio scan reads every video's source first and writes second, each video
+in its own transaction that re-reads the stored `source_hash` and writes only
+when it still equals the one that was read. A `video put` that lands in
+between wins, and the scan lists that video as skipped (`changed during the
+scan`).
+
+The scanner counts a name under the one it is exported as, so `ramp as r` in
+one file and `ramp` in another are one helper (`scanner_version` 2): a named
+import counts under the exported name, a member of a library namespace under
+the member, an engine namespace keeps its qualifier (`THREE.Mesh`), and a
+default import uses its local name.
+
+**The report** is read-only. It groups the owner's videos by tool, by model and
+by prompt version (the first eight characters of the run's `manualHash`), and
+adds every other finished job (failed, discarded, cancelled, diagram jobs,
+and jobs a newer job replaced) so each finished job is counted once in the
+accept rate and the discard tags. A video's own columns (model, cost, turns)
+come from the newest job that wrote it.
+
+A rating that names its job (`asset_rating.job_id`) is counted under that
+job's model and prompt version, even after a newer job replaced the video; a
+rating with no job goes with the video's own row, and by tool a rating always
+counts under the video's tool. The `older` column, and the total on the Rated
+line, count ratings of an older version: the rated job is not the video's
+current one, or the rated hash differs from the asset's content hash now
+(when both are known). The model is the run record's
+resolved one, else the one the job passed; a job with no run record has none
+and is grouped as `unknown`.
+
+What the numbers mean:
+
+| Name | Meaning |
+| --- | --- |
+| Accept rate | Accepted jobs over accepted, discarded and failed ones. A cancelled job is left out. |
+| Helper top five share | Of the calls a video makes to its tool's library helpers, the share that go to its five most-called ones. 100% means five helpers do all the work. |
+| Fade share | Fade in and fade out calls over every animation call. High means the video mostly fades things in and out. |
+| Variety | How evenly the calls spread over the distinct helpers and animations the video uses, from 0 (one name does it all) to 1 (every name equally often). Empty with fewer than two names. |
+
+The three look numbers are averaged over videos that have a scan. Variety and
+the top five share are cheap signs of videos that look alike; none of them says
+a video is good.
+
 ### Curriculum items are their own table, not assets
 
 A course topic like `cs4263-m1-t1` could have been an `asset` row of kind

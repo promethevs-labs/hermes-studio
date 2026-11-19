@@ -34,6 +34,25 @@ This project is continuously deployed and not versioned; entries are grouped by 
   they follow. See [docs/STUDIO-VIDEOS.md](docs/STUDIO-VIDEOS.md), "The run
   record and the review".
 
+- **Ingredients and the evaluation report.** A static scan of each video's
+  scene source (`services/catalog/src/ingredients/scan.ts`: Python for manimkc
+  and blenderkc, TypeScript for remotionkc and revideokc) counts the library
+  helpers, animations and engine calls a video uses, and fills
+  `asset_ingredients`. `catalog ingredients scan [--only ...] [--owner ID]
+  [--force]` backfills it without running an import and writes no other table;
+  `catalog import` scans each tool's videos after its rows land and
+  `catalog video put` scans the studio video it writes, each reporting a
+  failure as a note. `catalog eval report` groups videos by tool, model and
+  prompt version with ratings, accept rate, cost, wall time and how varied the
+  videos look (helper top five share, fade share, variety). A name counts
+  under the one it is exported as, so an alias does not make a second helper;
+  a row scanned without manimkc's library is rescanned once the library is
+  there; a studio scan never overwrites a `video put` that landed while it
+  ran; an import forwards a scan's warnings to its notes; every finished job
+  is counted once in the accept rate; and a rating is counted under the job it
+  judged, with ratings of an older version of a video counted apart. See
+  [services/catalog/SCHEMA.md](services/catalog/SCHEMA.md), "Ingredients and
+  the evaluation report".
 - **Eval records in the catalog.**
   [`0005_eval_records.sql`](services/catalog/drizzle-sqlite/0005_eval_records.sql)
   adds `asset_rating`, a learner's thumbs up or down on an asset with tags

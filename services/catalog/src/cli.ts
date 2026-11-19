@@ -51,6 +51,8 @@ import {
   runShow as runJobShow,
   type JobResult,
 } from "./commands/job";
+import { formatEval, runEvalReport } from "./commands/eval";
+import { formatIngredientsScan, IngredientsUsage, runIngredientsScan } from "./commands/ingredients";
 import { formatRating, RatingUsage, runRatingAdd, runRatingList, type RatingResult } from "./commands/rating";
 import { formatLs, parseKinds, runLs } from "./commands/ls";
 import { formatDoctor, runDoctor } from "./commands/doctor";
@@ -178,6 +180,22 @@ Commands:
                            asset's current rating, or one asset's whole
                            history). --owner ID: whose ratings (default:
                            local).
+  ingredients scan         Record what each video was made of: the library
+                           helpers, animations and engine calls its scene
+                           source uses (table asset_ingredients). Reads each
+                           tool's \`topics --json\` and the studio's videos,
+                           runs no import, and writes no other table; a row
+                           is rewritten only when the source, the scanner or
+                           the duration changed. A tool with no CLI on this
+                           machine is skipped with a note. --only
+                           manimkc|remotionkc|revideokc|blenderkc|studio,
+                           --owner ID (default: local), --force (rewrite
+                           every row).
+  eval report              Per tool, model and prompt version: videos, ratings,
+                           accept rate, cost, wall time and how varied the
+                           videos look (helper top five share, fade share,
+                           variety), then the corpus's most called names.
+                           Read-only. --owner ID (default: local).
   draft <verb>             The studio's planner conversations: upsert --file
                            FILE (the runner's draft.json), show --id ID, ls
                            [--state S] [--limit N], delete --id ID (only when
@@ -445,6 +463,8 @@ Environment:
 `;
 
 type Command =
+  | "ingredients"
+  | "eval"
   | "rating"
   | "migrate"
   | "status"
@@ -474,6 +494,8 @@ type Command =
   | "item";
 
 const COMMANDS: readonly Command[] = [
+  "ingredients",
+  "eval",
   "rating",
   "migrate",
   "status",
@@ -607,6 +629,7 @@ export async function main(argv: string[]): Promise<number> {
         module: { type: "string" },
         source: { type: "string" },
         "dry-run": { type: "boolean", default: false },
+        force: { type: "boolean", default: false },
         "blob-root": { type: "string" },
         fix: { type: "boolean", default: false },
         slug: { type: "string" },
@@ -953,6 +976,20 @@ export async function main(argv: string[]): Promise<number> {
         emit(result, formatRating(result));
         break;
       }
+      case "ingredients": {
+        if (positionals[1] !== "scan" || positionals.length > 2) {
+          throw new Usage("usage: ingredients scan [--only manimkc|remotionkc|revideokc|blenderkc|studio] [--owner ID] [--force] [--json]");
+        }
+        const result = await runIngredientsScan({ only: values.only, owner: values.owner, force: values.force });
+        emit(result, formatIngredientsScan(result));
+        break;
+      }
+      case "eval": {
+        if (positionals[1] !== "report" || positionals.length > 2) throw new Usage("usage: eval report [--owner ID] [--json]");
+        const result = await runEvalReport({ owner: values.owner });
+        emit(result, formatEval(result));
+        break;
+      }
       case "draft": {
         const result = await draftCommand(positionals, values);
         emit(result, formatDraft(result));
@@ -1022,7 +1059,7 @@ export async function main(argv: string[]): Promise<number> {
     }
     return 0;
   } catch (error) {
-    if (error instanceof Usage || error instanceof RevisionUsage || error instanceof TopicUsage || error instanceof RatingUsage) {
+    if (error instanceof Usage || error instanceof RevisionUsage || error instanceof TopicUsage || error instanceof RatingUsage || error instanceof IngredientsUsage) {
       process.stderr.write(`${error.message}\n\n${USAGE}`);
       return 2;
     }
@@ -1094,7 +1131,7 @@ function reportFailure(error: unknown, command: string, verb: string | undefined
     );
     if (reason !== null) {
       const named =
-        command === "job" || command === "draft" || command === "session" || command === "diagram" || command === "video" || command === "preference" || command === "rating"
+        command === "job" || command === "draft" || command === "session" || command === "diagram" || command === "video" || command === "preference" || command === "rating" || command === "ingredients" || command === "eval"
           ? verb
           : undefined;
       process.stderr.write(`catalog ${named === undefined ? command : `${command} ${named}`} failed: ${reason}\n`);

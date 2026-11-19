@@ -6,6 +6,7 @@ import path from "node:path";
 import {
   asset,
   assetDerivation,
+  assetIngredients,
   assetJob,
   blobObject,
   contentRevision,
@@ -20,6 +21,8 @@ import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { runImportCommand } from "../src/commands/index-command";
+import { runIngredientsScan } from "../src/commands/ingredients";
+import { readStudioScan, writeStudioScan } from "../src/index/ingredients-scan";
 import { JobError, runClaim, runEnqueue, runFinish, runShow, type BriefDocument } from "../src/commands/job";
 import { BlobIntegrityError } from "@hermes/blob";
 import { runPreferenceGet, runPreferenceSet } from "../src/commands/preference";
@@ -309,6 +312,84 @@ describe.skipIf(!reachable.ok)("studio videos in the catalog", () => {
     const checked = await checkoutVideo(scratch.db, LOCAL, slug, out);
     expect(checked.files.map((f) => f.name).sort()).toEqual(["narration.json", "parts.ts", "scene.tsx", "topic.yml"]);
     expect(await readFile(path.join(out, "scene.tsx"), "utf8")).toBe(files["source/scene.tsx"]);
+  });
+
+  it("records what a studio video was made of when it lands, and a scan that fails is a note, not a failed put", async () => {
+    const scene = "class S1_Why(VoiceScene):\n    def construct(self):\n        self.play(FadeIn(Text('a')), Write(Text('b')))\n";
+    const slug = "scan-on-put";
+    const { job: queued } = await jobReady(slug);
+    const result = await put({ slug, dir: await candidate(slug, { scene }), jobId: queued.id, base: null });
+    expect(result.notes.some((n) => n.startsWith("ingredients"))).toBe(false);
+    const [row] = await scratch.db.select().from(assetIngredients).where(eq(assetIngredients.assetId, `video:${slug}`));
+    expect(row).toMatchObject({ tool: "manimkc", durationSeconds: 58.4, sceneCount: 1 });
+    expect(row?.calls).toMatchObject({ FadeIn: 1, Write: 1, Text: 2 });
+
+    // The same landing with the ingredients table out of reach: the video lands, the job is accepted.
+    const failing = "scan-fails";
+    const { job: second } = await jobReady(failing);
+    await scratch.db.run(sql`alter table asset_ingredients rename to asset_ingredients_away`);
+    let landed: Awaited<ReturnType<typeof put>>;
+    try {
+      landed = await put({ slug: failing, dir: await candidate(failing, { scene }), jobId: second.id, base: null });
+    } finally {
+      await scratch.db.run(sql`alter table asset_ingredients_away rename to asset_ingredients`);
+    }
+    expect(landed).toMatchObject({ ok: true, slug: failing, jobState: "accepted" });
+    expect(landed.notes.some((n) => n.startsWith("ingredients not recorded"))).toBe(true);
+    expect(await jobState(second.id)).toBe("accepted");
+    expect(await scratch.db.select().from(assetIngredients).where(eq(assetIngredients.assetId, `video:${failing}`))).toEqual([]);
+
+    // `ingredients scan --only studio` makes up the row the put missed, and leaves the first alone.
+    const scan = await runIngredientsScan({ only: "studio" });
+    const studio = scan.sources.find((x) => x.source === "studio");
+    expect(studio).toMatchObject({ ran: true, written: 1 });
+    expect(studio?.unchanged).toBeGreaterThanOrEqual(1);
+    expect(studio?.scanned).toBeGreaterThanOrEqual(2);
+  });
+
+  it("does not let a studio scan's older read overwrite what a put wrote while it ran", async () => {
+    const slug = "scan-race";
+    const scene = (call: string) => `class S1_Why(VoiceScene):\n    def construct(self):\n        self.play(${call})\n`;
+    const { job: first } = await jobReady(slug);
+    const landed = await put({ slug, dir: await candidate(slug, { scene: scene("FadeIn(a)") }), jobId: first.id, base: null });
+    const scope = ownerScope(LOCAL_LEARNER_ID);
+
+    // Step one reads the source as it is now.
+    const plan = await readStudioScan(scratch.db, scope, { slug });
+    expect(plan.entries.map((e) => e.slug)).toEqual([slug]);
+
+    // A put lands between the two steps, with a new source and its own scan.
+    const { job: change } = await jobReady(slug, briefOf(slug, { mode: "change" }), { parentJob: first.id });
+    await put({ slug, dir: await candidate(slug, { scene: scene("Write(a)") }), jobId: change.id, base: landed.revision });
+    const newer = async () =>
+      (await scratch.db.select().from(assetIngredients).where(eq(assetIngredients.assetId, `video:${slug}`)))[0]!;
+    expect((await newer()).calls).toMatchObject({ Write: 1 });
+
+    // Step two finds the source moved and writes nothing, even forced.
+    const written = await writeStudioScan(scratch.db, scope, plan, { force: true });
+    expect(written).toMatchObject({ written: 0, unchanged: 0 });
+    expect(written.skipped).toEqual([{ id: `video:${slug}`, reason: "changed during the scan" }]);
+    const row = await newer();
+    expect(row.calls).toMatchObject({ Write: 1 });
+    expect(row.calls).not.toHaveProperty("FadeIn");
+
+    // A scan whose read and write see the same source writes as before.
+    const fresh = await writeStudioScan(scratch.db, scope, await readStudioScan(scratch.db, scope, { slug }), { force: true });
+    expect(fresh).toMatchObject({ written: 1 });
+  });
+
+  it("scans a revideokc studio video's TypeScript with the brief's tool", async () => {
+    const slug = "scan-ts-on-put";
+    const source = {
+      "source/scene.tsx": 'import { defineTopic, ramp } from "#lib";\nimport { all } from "@revideo/core";\ndefineTopic(ramp(1));\nall();\n',
+      "source/narration.json": "[]\n",
+      "source/topic.yml": `topic: ${TOPIC}\n`,
+    };
+    const { job: queued } = await jobReady(slug, briefOf(slug, { tool: "revideokc" }));
+    await put({ slug, dir: await candidate(slug, { source }), jobId: queued.id, base: null });
+    const [row] = await scratch.db.select().from(assetIngredients).where(eq(assetIngredients.assetId, `video:${slug}`));
+    expect(row).toMatchObject({ tool: "revideokc", sceneCount: null });
+    expect(row?.metrics).toMatchObject({ helperCalls: 2, animationCalls: 1 });
   });
 
   it("lands a remotionkc video with its composition and narration as the source, and refuses one without its composition (phase 3)", async () => {
