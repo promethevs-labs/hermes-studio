@@ -15,9 +15,9 @@ import { parseEnv } from "node:util";
  * siblings, which Next loads itself. A studio runner started without them
  * reads every saved key as unreadable, or opens a different catalog file.
  *
- * The order is the web's in the desktop shell, highest first:
+ * The order is the web's in a desktop launcher, highest first:
  *
- * 1. the process's own environment (what the shell exported);
+ * 1. the process's own environment (what the launcher exported);
  * 2. `$HERMES_HOME/.env` (default `~/.hermes/.env`);
  * 3. the app's `.env` files, read by Next's own loader (`@next/env`) in
  *    development mode, as `scripts/lib/dev-env.mjs` reads them for
@@ -75,8 +75,8 @@ export function readEnvFile(file: string): Record<string, string> {
 }
 
 /**
- * How the desktop shell runs the web: `HERMES_WEB_MODE`, `dev` unless it
- * says `start` (WebServer.mode in apps/desktop). Next reads
+ * How a desktop launcher runs the web: `HERMES_WEB_MODE`, `dev` unless it
+ * says `start` (the launcher's server mode). Next reads
  * `.env.production*` under `next start` and `.env.development*` under
  * `next dev`, and a value this environment hands the server wins over its
  * files, so the files read here must be the ones that mode reads.
@@ -156,7 +156,7 @@ export async function pinCatalogFile(): Promise<string | null> {
 /**
  * The environment a launcher hands every service it spawns (S9-08): the
  * web's (`loadWebEnv`) with the catalog's file pinned (`pinCatalogFile`).
- * The desktop shell takes it from `child-env.ts` rather than re-deriving it,
+ * A desktop launcher takes it from `child-env.ts` rather than re-deriving it,
  * so the web and the studio runner it spawns cannot open two different
  * databases or run under two different spend caps.
  */

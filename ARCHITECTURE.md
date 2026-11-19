@@ -4,8 +4,7 @@ Hermes (renamed from self-learn) is
 a learning environment sharing one catalog. A
 Next.js app renders course roadmaps and progress; a CLI runs a Probe → Plan →
 Teach → Close tutoring loop over concept notes, which are rows in the catalog;
-a desktop shell (Hermes Web, a window around the web app) launches the web
-server and the studio runner; and the studio runner, a loopback service, draws
+and the studio runner, a loopback service, draws
 diagrams and makes videos. The catalog database,
 one SQLite file (`~/.hermes/catalog.db` by default,
 [docs/SQLITE-MIGRATION.md](docs/SQLITE-MIGRATION.md)), remains the one
@@ -49,7 +48,7 @@ instructions are not in this repo at all.
 | Layer | Where | What |
 | --- | --- | --- |
 | Instructions | `learning` plugin, `learning` marketplace | The `/learn` and `/review` skills, plus the `concept-mapper`, `fact-checker` and `diagram-maker` subagents |
-| Code | `scripts/learn/`, `apps/web/`, `apps/desktop/` | The pipeline CLI, the web app and the desktop shell around it |
+| Code | `scripts/learn/`, `apps/web/` | The pipeline CLI and the web app |
 | Data | SQLite, through `services/catalog/`; `~/.hermes/` for the local half | Courses, topics, tags, concept notes, session logs and diagrams, the event log and its projections in the catalog; the blob store under the data root. The repository holds only `seed/`, a small slice in the export format |
 | Assets | `tools/manimkc/` | A separate repo, wired in as a submodule, that renders narrated animation videos |
 | Assets | `tools/remotionkc/` | A separate repo, wired in as a submodule, that renders narrated explainer videos with Remotion; its `topics --json` is manimkc's report shape |
@@ -74,11 +73,10 @@ another repo.
 | Directory | What lives there | npm workspace |
 | --- | --- | --- |
 | `apps/web/` | The Next.js app, its `public/`, `next.config.ts`, `vercel.json` | `@hermes/web` |
-| `apps/desktop/` | Hermes Web, the desktop shell: a SwiftPM package (a WKWebView around the web app) that spawns the web server and the studio runner, plus the `.app` bundler and installer in `scripts/` | no (SwiftPM) |
 | `packages/content/`, `packages/schema/`, `packages/blob/`, `packages/tutor/` | The content reader, the table shapes, the blob store and the tutor core | yes |
 | `services/catalog/` | The connection, the migrations, the indexers, the `catalog` and `learn` CLIs | yes |
 | `services/studio/` | The diagram and video runner: its jobs, drafts, canvas verbs and loopback API on `127.0.0.1:7250` | yes |
-| `services/launch-env/` | The environment the desktop shell hands every service it spawns, so they open the same catalog file | yes |
+| `services/launch-env/` | The environment a desktop launcher hands every service it spawns, so they open the same catalog file | yes |
 | `scripts/learn/` | The pipeline's pure maths, and the `npm run learn` entry point | no |
 | `seed/` | A small slice of the content in the export format ([README](seed/README.md)): a fresh clone's database and the tests' fixture. Files, not code. | no |
 | `tools/manimkc/`, `tools/remotionkc/`, `tools/revideokc/`, `tools/blenderkc/`, `tools/tldrawkc/` | Git submodules with their own repos, lockfiles and toolchains | no, deliberately |
@@ -101,12 +99,6 @@ another repo.
 | `apps/web/src/data/content.ts` | Server-only `getTags()`: the cross-course themes |
 | `apps/web/src/data/topics.ts` | Server-only `getTopics()`: the shared vocabulary, and the pure maps and picker options the studio builds from the runner's copy of it |
 
-`apps/desktop/` is the desktop shell: a SwiftPM package, not a Next anything.
-It opens a window onto the web app and spawns `next dev` and the studio
-runner from the checkout, giving both the environment `services/launch-env`
-prints. `scripts/bundle-app.sh` turns the package into `Hermes Web.app` and
-`scripts/install-app.sh` installs it.
-
 `packages/` and `services/` are npm workspaces, Node-only, with their own
 tsconfigs.
 
@@ -118,7 +110,7 @@ tsconfigs.
 | `packages/tutor/` | The tutor's core: prompts, providers, BYOK credentials, the model chain, and the `*Turn` functions: the four agent turns, the provider-key and model-chain turns, and the learner writes in `src/server/learner-writes.ts` (progress, note, observe, review grade, session close and the rest), which the web routes call. Returns `TurnReply`s (status plus a JSON body), so nothing in it knows Next.js |
 | `services/catalog/` | The connection, the migrations, the indexers and the `catalog` CLI |
 | `services/studio/` | The studio's job runner and loopback API, on `127.0.0.1:7250`. Diagrams first, then video jobs through `src/video/` on the same surface (`POST /api/jobs` dispatches on the body's `kind`), and planner conversations (`src/drafts/`). It reads the topic vocabulary only through `catalog topic ls`, with the last good read cached under `$STUDIO_HOME/cache/topics.json` (D13), and opens no database connection of its own. Each job draws in its own workspace, `$STUDIO_HOME/jobs/<id>/candidate/`, never in the working tree, and Accept lands the candidate with `catalog diagram put --job`. Its repo root is where its code sits, not a walk up to `content/` ([docs/TLDRAWKC-INTEGRATION.md](docs/TLDRAWKC-INTEGRATION.md)) |
-| `services/launch-env/` | The environment the desktop shell hands every service it spawns. `src/env.ts` fills `process.env` as the web's own is filled (the exports, then `$HERMES_HOME/.env`, then `apps/web`'s `.env` files through `@next/env`) and pins `CATALOG_DB` at the file the catalog's own resolver names; `src/child-env.ts` prints that environment as one JSON object, which `apps/desktop`'s `Checkout.swift` reads once per launch so the web server and the studio runner open the same catalog file |
+| `services/launch-env/` | The environment a desktop launcher hands every service it spawns. `src/env.ts` fills `process.env` as the web's own is filled (the exports, then `$HERMES_HOME/.env`, then `apps/web`'s `.env` files through `@next/env`) and pins `CATALOG_DB` at the file the catalog's own resolver names; `src/child-env.ts` prints that environment as one JSON object, which a desktop launcher reads once per launch so the web server and the studio runner it starts open the same catalog file |
 
 `scripts/learn/` is what is left of the pipeline once its state moved into
 the catalog database: the maths, and the published entry point.
@@ -165,7 +157,7 @@ the seam and state through the store, never the database directly.
 | `packages/blob/` | `BlobStore`, `key()` and `fsStore()`: bytes under `$HERMES_HOME/blobs`, outside the repo. Imports nothing but Node. `catalog asset upload` writes it; the web's asset routes and the catalog commands read through it. |
 | `services/catalog/` | [`db.ts`](services/catalog/src/db.ts) (the connection: one `better-sqlite3` handle per connect, whose `pool` field is a shim kept from the Postgres pool), `migrations.ts`, `drizzle-sqlite/` (generated SQL; the old `drizzle/` is the Postgres journal, kept for reference while databases cross with `services/catalog/scripts/pg-to-sqlite.mjs`, and nothing applies it), `cli.ts`, `src/state/` (the learner store) and `src/learn/` (the `learn` CLI) |
 | `packages/tutor/` | Everything the tutor endpoints share, grown out of `apps/web/src/lib/` so the routes import it from one place: `src/` is the pure half (`providers.ts` with the provider configs, `keyFor`, `completeWithFallback`; `prompt.ts` and the per-shape builders; `session-core`, `judge`, `review-core`, `concept-graph`, the markdown and media helpers), `src/server/` is the half that touches things: `deps.ts` (`TutorDeps`/`TurnSeams`), `turns.ts` (the `*Turn` functions: four agent turns, then provider-key save/remove/test, the model-chain add/set/remove/move/provider moves/test and `modelList`), `credentials.ts`, `provider-keys.ts`, `tutor-models.ts`, `model-list.ts`, `asset-detail.ts`, `learner-writes.ts` (the learner writes, each a `*Turn` over the catalog's state functions) and friends. The pure half imports no I/O; the server half takes the database as a promise so a catalog that cannot be opened degrades per read |
-| `services/launch-env/` | `src/env.ts` (`loadWebEnv`, `pinCatalogFile`, `childEnvironment`) and `src/child-env.ts` (the entry the desktop shell runs) |
+| `services/launch-env/` | `src/env.ts` (`loadWebEnv`, `pinCatalogFile`, `childEnvironment`) and `src/child-env.ts` (the entry a desktop launcher runs) |
 
 `packages/schema`, `packages/content` and `packages/blob` are the bottom of
 that stack: the first imports `drizzle-orm`, the second `yaml`, the third only
@@ -699,9 +691,6 @@ One direction for content, one door for state.
    apps/web/src/app  ──► apps/web/src/lib/learner-store.ts ──► @hermes/catalog/state ┘
        │              (the connection, the degradation)
        └──► /api/learner/* ──► apps/web/src/lib/learner-api.ts ──► the same store
-
-   apps/desktop ──► apps/web (spawned: next dev, with services/launch-env's environment)
-       └──► services/studio (spawned the same way, or adopted when it is already up)
 ```
 
 Both web halves reach the same tables through the same module. That is the
@@ -912,9 +901,9 @@ anywhere; `--manimkc-root`, `--remotionkc-root`, `--revideokc-root` and
 `--blenderkc-root` are typed at a prompt and still resolve against the cwd.
 All six are in
 [services/catalog/.env.example](services/catalog/.env.example). The data
-root is a second family of variables: the desktop shell and the
+root is a second family of variables: a desktop launcher and the
 blob store's resolver both read `HERMES_HOME` then default to `~/.hermes`.
-`HERMES_REPO` names the repository path the desktop shell serves.
+`HERMES_REPO` names the repository path a desktop launcher serves.
 
 ### How agents read it
 

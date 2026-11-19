@@ -85,4 +85,3 @@ docs/design/research/assets/*
 docs/design/reference/*
 !docs/design/reference/LINKS
 !docs/design/reference/README.md
-**/.build/

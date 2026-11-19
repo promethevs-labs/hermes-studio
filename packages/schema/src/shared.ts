@@ -63,10 +63,10 @@ export const OWNER_PASSWORD_VAR = "OWNER_PASSWORD";
 export const AUTH_SECRET_VAR = "AUTH_SECRET";
 
 /**
- * The per-launch secret the desktop shell puts in the spawned server's
+ * The per-launch secret a desktop launcher puts in the spawned server's
  * environment and then redeems at `GET /api/auth/local` for a real session
  * cookie. A random value minted per launch — it is never written to an
- * `.env` file, so a deployment that never runs the shell simply has it
+ * `.env` file, so a deployment that never runs a launcher simply has it
  * unset, and the route refuses everyone.
  */
 export const LOCAL_TOKEN_VAR = "HERMES_LOCAL_TOKEN";

@@ -177,9 +177,9 @@ describe("the web's environment", () => {
     expect(env).toEqual({});
   });
 
-  it("reads the data home's file as the desktop shell does", () => {
-    // The same fixture apps/desktop's CheckoutTests holds Checkout.parseDotenv
-    // to: the shell hands the web the AUTH_SECRET it reads, and this read
+  it("reads the data home's file as a desktop launcher does", () => {
+    // A fixture a launcher's own dotenv parser can be held to: the launcher
+    // hands the web the AUTH_SECRET it reads, and this read
     // must open what that secret sealed.
     const fixture = JSON.parse(readFileSync(resolve(__dirname, "fixtures/dotenv.json"), "utf8")) as {
       text: string;

@@ -14,8 +14,7 @@ fresh clone starts from, and `.studio/` is generated state, never source.
 ```
 hermes/                           the checkout
 ├── apps/
-│   ├── web/                      the Next.js app, @hermes/web
-│   └── desktop/                  Hermes Web, the desktop shell, a SwiftPM package
+│   └── web/                      the Next.js app, @hermes/web
 ├── packages/                     schema · content · blob · tutor
 ├── services/                     catalog · studio · launch-env
 ├── tools/                        five git submodules (another repo each)
@@ -126,35 +125,6 @@ content source (the database, or a refusal naming `catalog flip <type>`),
 `courses/` the course lookups every page calls, `content.ts` the tags,
 `topics.ts` the vocabulary. All `import "server-only"`.
 
-## apps/desktop: the desktop shell
-
-A SwiftPM executable package, `Package.swift` at its root: Hermes Web, one
-window with a WKWebView on the web app. It adds no second interface. It spawns
-`next dev` and the studio runner from the checkout, so the window always
-serves the checkout's current code. `scripts/bundle-app.sh` builds
-`Hermes Web.app` and `scripts/install-app.sh` installs it.
-
-```
-apps/desktop/
-├── Package.swift                 the executable target and its tests
-├── Sources/HermesWeb/            the app, one file per job
-├── Resources/AppIcon.png         the icon `bundle-app.sh` turns into the bundle's
-├── Tests/HermesWebTests/         the launchers' pure rules
-└── scripts/
-    ├── bundle-app.sh             the .app bundle
-    └── install-app.sh            quit, rebuild and replace the installed copy
-```
-
-| File | Owns |
-| --- | --- |
-| `HermesWebApp.swift` | The entry point and the window |
-| `WebView.swift` | The WKWebView: it shows only the app server's origin, other web pages go to the real browser and other schemes are dropped; cookies persist across launches. Also the extra windows a new-window request opens |
-| `FindBar.swift` | The window's find bar: Cmd+F finds in the page through `window.find` |
-| `NotificationBridge.swift` | The page's `Notification`: a script-message bridge to `UNUserNotificationCenter`, in the bundled app only |
-| `WebServer.swift` | The lifecycle of the Next server the window loads |
-| `StudioRunner.swift` | The lifecycle of the studio runner, adopted when one already answers on its port |
-| `Checkout.swift` | Where the repository and the data home are, and the environment each child starts with, read once per launch from `services/launch-env` |
-
 ## services/catalog — the catalog database and the CLIs
 
 The only thing in the repo that talks to the catalog's SQLite file;
@@ -179,10 +149,10 @@ sees: the process's own exports, then `$HERMES_HOME/.env`, then `apps/web`'s
 `DATABASE_URL` made absolute and `CATALOG_DB` pinned at the file the catalog's
 own resolver names (`loadWebEnv`, `pinCatalogFile`, `childEnvironment`).
 `src/child-env.ts` prints that environment as one JSON object on stdout;
-`apps/desktop`'s `Checkout.swift` runs it once per launch, so the web server
-and the studio runner open the same catalog file and the same `AUTH_SECRET`.
-The tests are in `test/env.test.ts`, and `test/fixtures/dotenv.json` pins the
-shell's Swift dotenv parser against Node's `util.parseEnv`.
+a desktop launcher runs it once per launch, so the web server
+and the studio runner it starts open the same catalog file and the same `AUTH_SECRET`.
+The tests are in `test/env.test.ts`, and `test/fixtures/dotenv.json` pins a
+launcher's dotenv parser against Node's `util.parseEnv`.
 
 ## services/studio — the runner
 

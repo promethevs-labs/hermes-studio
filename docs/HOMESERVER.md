@@ -352,7 +352,7 @@ and points there.
   stop hermes hermes-studio hermes-export.timer` and then step 14's `while`
   until no `hermes-export.service` is still running, since stopping the
   timer does not stop an export already under way; on the Mac,
-  `npm run dev:down` or quitting Hermes Web.app,
+  `npm run dev:down`,
   away from the nightly export's 03:00), since each holds the file open and
   keeps its `-wal` and `-shm` beside it; take a `.backup` of the receiving side's own
   file too, since its history is what the sync gives up; then delete its

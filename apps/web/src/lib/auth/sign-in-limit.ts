@@ -15,7 +15,7 @@ import { checkRateLimit, type RateLimitRule, type RateLimitStore } from "@hermes
  * 2. **Everyone together**: `SIGN_IN_FAILURE_RULE` wrong passwords per
  *    window across all clients, counting attempts still in flight. Past it, every sign-in is refused until the
  *    window ends, the owner's included. That is the trade: a stranger can keep
- *    the form shut, but cannot keep guessing. The desktop shell signs in with
+ *    the form shut, but cannot keep guessing. A desktop launcher signs in with
  *    its launch token (`/api/auth/local`), which this does not touch.
  *
  * At most 4,800 guesses a day get through, which is nothing against a long

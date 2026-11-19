@@ -354,7 +354,7 @@ describe("ending every session (S7-03)", () => {
     await expect(verifySession({ ...CONFIG, password: "a brand new password" }, fresh, now)).resolves.toBe(true);
   });
 
-  it("the desktop shell's launch token signs under the current epoch", async () => {
+  it("a desktop launcher's launch token signs under the current epoch", async () => {
     const local = process.env.HERMES_LOCAL_TOKEN;
     process.env.SESSION_EPOCH = "7";
     process.env.HERMES_LOCAL_TOKEN = "launch-secret-0123456789abcdef-0123456789";

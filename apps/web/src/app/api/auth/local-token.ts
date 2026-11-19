@@ -1,10 +1,10 @@
 /**
- * The desktop shell's launch token: where it travels and whether this server
+ * A desktop launcher's launch token: where it travels and whether this server
  * process has spent it (`/api/auth/local`). Kept out of the route module,
  * which may export only route handlers.
  */
 
-/** The header the desktop shell sends its launch token in, never the URL. */
+/** The header a desktop launcher sends its launch token in, never the URL. */
 export const LOCAL_TOKEN_HEADER = "x-hermes-local-token";
 
 let redeemed = false;
