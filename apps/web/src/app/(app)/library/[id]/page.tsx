@@ -8,13 +8,14 @@ import { DownloadButton, FavoriteButton } from "@/components/library/AssetAction
 import { AskableTitle } from "@/components/library/AskableTitle";
 import { AssetTabs, assetTabItems, type AssetTabsInput } from "@/components/library/AssetTabs";
 import { AssetTitle } from "@/components/library/AssetTitle";
+import { YourRating } from "@/components/library/AssetRating";
 import { WatchProgress } from "@/components/library/WatchProgress";
 import { MarkWatched } from "@/components/library/MarkWatched";
 import { BackLink } from "@/components/ui/BackLink";
 import { Notice } from "@/components/ui/Notice";
 import { Button } from "@/components/ui/Button";
 import { cx } from "@/components/ui/classes";
-import { loadAssetDetail, loadFavorite, loadLastWatched, loadPlayback } from "@/lib/asset-library";
+import { loadAssetDetail, loadFavorite, loadLastWatched, loadPlayback, loadRating } from "@/lib/asset-library";
 import { appTimeZone } from "@hermes/tutor/server/time-zone";
 import { dayKey } from "@hermes/tutor/days";
 import { loadKnowledgeBase } from "@/lib/learner-store";
@@ -85,7 +86,7 @@ export default async function AssetPage({
   // Every state of the page has a way back to where it was opened from.
   const backLink = <BackLink href={back.href}>{back.label}</BackLink>;
   const detailRead = loadAssetDetail(id);
-  const [detail, { kb }, lastWatched, playback, favorite] = await Promise.all([
+  const [detail, { kb }, lastWatched, playback, favorite, { rating, dismissed }] = await Promise.all([
     detailRead,
     loadKnowledgeBase(),
     // Only Details' "Read" line wants it, and a video tracks itself instead:
@@ -93,6 +94,7 @@ export default async function AssetPage({
     detailRead.then(({ asset }) => (asset === null || asset.kind === "video" ? undefined : loadLastWatched(id))),
     loadPlayback(id),
     loadFavorite(id),
+    loadRating(id),
   ]);
   const { asset, derivations, related, reachable, titles, notes, concepts, naming } = detail;
 
@@ -185,8 +187,14 @@ export default async function AssetPage({
             playback,
             watchedDay: playback?.watchedAt ? dayKey(playback.watchedAt, zone) : null,
             favorite: favorite !== null,
+            rating,
+            ratingDismissed: dismissed,
             actions: addToNote ?? undefined,
-            tabs: assetTabItems({ ...tabInput, progress: { label: "Watched", value: <WatchProgress /> } }),
+            tabs: assetTabItems({
+              ...tabInput,
+              progress: { label: "Watched", value: <WatchProgress /> },
+              rating: { label: "Your rating", value: <YourRating /> },
+            }),
           }}
         />
       </div>

@@ -15,6 +15,7 @@ vi.mock("@/lib/asset-library", async (importOriginal) => ({
   loadFavorite: vi.fn(async () => null),
   loadLastWatched: vi.fn(async () => null),
   loadPlayback: vi.fn(async () => null),
+  loadRating: vi.fn(async () => ({ rating: null, dismissed: false })),
 }));
 
 vi.mock("@/lib/learner-store", async (importOriginal) => ({

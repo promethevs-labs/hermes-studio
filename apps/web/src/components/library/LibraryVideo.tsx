@@ -5,6 +5,8 @@ import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 
 
 import { AskButton, DownloadButton, FavoriteButton, PdfButton } from "@/components/library/AssetActions";
 import { AskPanel } from "@/components/library/AskPanel";
+import { RatingCard, RatingContext, RatingThumbs, useAssetRating } from "@/components/library/AssetRating";
+import type { ViewRating } from "@/lib/rating-draft";
 import { WatchStatusContext, type WatchStatus } from "@/components/library/WatchProgress";
 import type { TranscriptCue, VideoChapter } from "@hermes/tutor/media";
 import { Collapse } from "@/components/ui/Collapse";
@@ -49,7 +51,15 @@ type SaveResult = {
  * page: Favorite (the star, `FavoriteButton`), Ask (an unsaved chat about
  * this video, `AskPanel`, told where the player is when each question is
  * sent), Download, the PDF when `catalog asset upload` or `catalog video
- * put` stored one (`pdfHref`), then whatever the page adds (`actions`).
+ * put` stored one (`pdfHref`), the two rating thumbs, then whatever the page
+ * adds (`actions`).
+ *
+ * **The rating card.** Directly under the player, above the title, a card asks
+ * what the reader thought (`RatingCard`). A press on a thumb opens it; so does
+ * the save whose answer says `crossed`, the one that took coverage past the
+ * watched threshold, when the video is unrated and the prompt was never
+ * dismissed (`AssetRating.tsx`, `rating-card.ts`). The crossing happens once
+ * per video, so the card offers itself once, and a dismissal is remembered.
  *
  * Its state belongs to one asset, so the page renders it with `key` set to
  * the asset id: a client navigation from one video to the next starts over
@@ -68,6 +78,8 @@ export function LibraryVideo({
   heading,
   watchedDay,
   favorite,
+  rating: savedRating,
+  ratingDismissed,
   downloadHref,
   pdfHref,
   actions,
@@ -90,6 +102,10 @@ export function LibraryVideo({
   watchedDay: string | null;
   /** Whether the owner has starred this video. */
   favorite: boolean;
+  /** The owner's current rating of this video (no row id or time), or null for none. */
+  rating: ViewRating | null;
+  /** The owner dismissed or answered the rating prompt for this video before. */
+  ratingDismissed: boolean;
   /** What Download fetches: the file route's `?download=1` (`assetDownloadHref`). */
   downloadHref: string;
   /** The stored PDF's route (`assetPdfHref`), when one was made. */
@@ -104,6 +120,8 @@ export function LibraryVideo({
   const askId = useId();
   const [asking, setAsking] = useState(false);
   const askButton = useRef<HTMLButtonElement | null>(null);
+  const rating = useAssetRating({ assetId, rating: savedRating, dismissed: ratingDismissed });
+  const { crossed } = rating;
   const [startAt] = useState(() => resumeAt(saved));
   const [status, setStatus] = useState<WatchStatus>(() => ({
     coverage: saved === null ? 0 : coverage(saved.ranges, saved.duration),
@@ -179,7 +197,12 @@ export function LibraryVideo({
           if (!result) return;
           // A crossing wrote a `watched` event: re-read the server's render
           // so it agrees with the log, whichever answer arrives last.
-          if (result.crossed) router.refresh();
+          if (result.crossed) {
+            router.refresh();
+            // Watched through: offer the rating card, once, if it is unrated
+            // and was never dismissed.
+            crossed();
+          }
           if (seq < s.shown) return;
           s.shown = seq;
           setStatus({
@@ -191,7 +214,7 @@ export function LibraryVideo({
         })
         .catch(requeue);
     },
-    [assetId, router],
+    [assetId, router, crossed],
   );
 
   const onPlayback = useCallback(
@@ -243,50 +266,54 @@ export function LibraryVideo({
 
   return (
     <WatchStatusContext value={status}>
-      <VideoPlayer
-        src={src}
-        statusHref={statusHref}
-        poster={poster}
-        title={title}
-        sourceRepo={sourceRepo}
-        chapters={chapters}
-        transcript={transcript}
-        startAt={startAt}
-        onPlayback={onPlayback}
-        header={
-          <div className="flex flex-col gap-2">
-            {heading != null && <div className="min-w-0">{heading}</div>}
-            <div className="flex flex-wrap items-center gap-2">
-              <FavoriteButton assetId={assetId} initial={favorite} />
-              <AskButton
-                open={asking}
-                onToggle={() => setAsking((open) => !open)}
-                controls={askId}
-                buttonRef={askButton}
-              />
-              <DownloadButton href={downloadHref} />
-              {pdfHref !== undefined && <PdfButton href={pdfHref} />}
-              {actions}
-            </div>
-            <Collapse open={asking} id={askId}>
-              <div className="pt-1">
-                <AskPanel
-                  assetId={assetId}
-                  subject="video"
-                  position={() => state.current.last}
+      <RatingContext value={rating.state.stored}>
+        <VideoPlayer
+          src={src}
+          statusHref={statusHref}
+          poster={poster}
+          title={title}
+          sourceRepo={sourceRepo}
+          chapters={chapters}
+          transcript={transcript}
+          startAt={startAt}
+          onPlayback={onPlayback}
+          header={
+            <div className="flex flex-col gap-2">
+              <RatingCard rating={rating} />
+              {heading != null && <div className="min-w-0">{heading}</div>}
+              <div className="flex flex-wrap items-center gap-2">
+                <FavoriteButton assetId={assetId} initial={favorite} />
+                <AskButton
                   open={asking}
-                  onDismiss={() => {
-                    setAsking(false);
-                    askButton.current?.focus();
-                  }}
+                  onToggle={() => setAsking((open) => !open)}
+                  controls={askId}
+                  buttonRef={askButton}
                 />
+                <DownloadButton href={downloadHref} />
+                {pdfHref !== undefined && <PdfButton href={pdfHref} />}
+                <RatingThumbs rating={rating} />
+                {actions}
               </div>
-            </Collapse>
-            {notes}
-          </div>
-        }
-        tabs={tabs}
-      />
+              <Collapse open={asking} id={askId}>
+                <div className="pt-1">
+                  <AskPanel
+                    assetId={assetId}
+                    subject="video"
+                    position={() => state.current.last}
+                    open={asking}
+                    onDismiss={() => {
+                      setAsking(false);
+                      askButton.current?.focus();
+                    }}
+                  />
+                </div>
+              </Collapse>
+              {notes}
+            </div>
+          }
+          tabs={tabs}
+        />
+      </RatingContext>
     </WatchStatusContext>
   );
 }

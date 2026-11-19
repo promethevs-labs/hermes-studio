@@ -35,6 +35,21 @@ const pairs = (host: HTMLElement) =>
   [...host.querySelectorAll("dl > div")].map((row) => [...row.children].map((cell) => `${cell.tagName}:${cell.textContent}`));
 
 describe("FactList", () => {
+  it("puts a fact's own classes on its row, so a value that draws nothing can hide it", async () => {
+    const host = await mount(
+      createElement(FactList, {
+        facts: [
+          { label: "Your rating", value: null, className: "has-[dd:empty]:hidden" },
+          { label: "Kind", value: "Video" },
+        ],
+      }),
+    );
+    const rows = [...host.querySelectorAll("dl > div")];
+    expect(rows[0]?.className).toContain("has-[dd:empty]:hidden");
+    expect(rows[0]?.querySelector("dd")?.childNodes.length).toBe(0);
+    expect(rows[1]?.className).not.toContain("has-[dd:empty]:hidden");
+  });
+
   it("renders each fact as a dt and dd pair inside one dl", async () => {
     const host = await mount(
       createElement(FactList, {

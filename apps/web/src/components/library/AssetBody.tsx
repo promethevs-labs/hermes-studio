@@ -19,6 +19,7 @@ import type { RouteProblemCode } from "@hermes/tutor/asset-problems";
 import { assetFileHref, assetHref, assetStatusHref } from "@/lib/library";
 import { ownValue } from "@hermes/tutor/own-key";
 import type { Playback } from "@hermes/tutor/playback";
+import type { ViewRating } from "@/lib/rating-draft";
 import { parseChapters, parseTranscript } from "@hermes/tutor/transcript";
 
 /** What a servable video's player needs beyond the body's data: its playback, its star, and the page's slots. */
@@ -30,6 +31,10 @@ export interface AssetBodyVideo {
   /** The day `playback.watchedAt` falls on in the app's zone, or null. */
   watchedDay: string | null;
   favorite: boolean;
+  /** The owner's current rating of the video, or null for none. */
+  rating: ViewRating | null;
+  /** The owner dismissed or answered the rating prompt on an earlier visit. */
+  ratingDismissed: boolean;
   /** More pill actions after Favorite, Ask and Download (the page's Add to note). */
   actions?: ReactNode;
   /** The page's tabs after the transcript: Explains, Related, Files, Details. The previewer has none. */
@@ -97,6 +102,8 @@ export function AssetBody({
         heading={video.heading}
         watchedDay={video.watchedDay}
         favorite={video.favorite}
+        rating={video.rating}
+        ratingDismissed={video.ratingDismissed}
         downloadHref={data.downloadHref}
         pdfHref={data.pdfHref}
         actions={video.actions}
