@@ -2221,6 +2221,29 @@ the other way. `STUDIO_DAILY_USD=0.2oops` parsed as a $0.20 cap, because
 `cost_source` existed loaded without the field at all, so the API omitted it
 rather than reporting it null.
 
+### The run record and the review
+
+Built 2026-11-20, for diagram jobs as for video ones; the full description
+is in [STUDIO-VIDEOS.md](STUDIO-VIDEOS.md), "The run record and the review".
+The diagram runner has the same attempt loop, so `job.json` gains the same
+`attempts` list, one `{ n, startedAt, endedAt, turns, costUsd, gate }` per
+attempt with that attempt's own gate summary (a diagram gate has no
+warnings, so its count is 0). Every `job finish` the runner sends (Ready,
+failed, cancelled, a job cancelled before it started, and the reconcile's
+interrupted) carries `--run-file jobs/<id>/run.json`, a `JobRun` checked
+with `checkJobRun` first, and a record that fails the check finishes the
+job without one and is noted as `runRecordError`. The runner counts no
+canvas verbs and times no render, so a diagram's `calls` is `{}` and its
+`renderSeconds` null. A runner that throws inside a job still calls no
+`job finish`, as before, so that path has no run record.
+
+`POST /api/jobs/{id}/discard` takes the optional `{ tags, note }` body, with
+the same checks and the same 400s, and `GET /api/jobs` and
+`GET /api/jobs/{id}` show the stored `review`. An accept stores `{ verdict:
+"accept", tags: [], note: null }` with `catalog job review` after
+`job accept`, whatever that answered. A diagram is revised only from a
+terminal state, after its verdict, so a diagram revise writes no review.
+
 ## Known gaps
 
 Not a phase. What this design does not answer, written down so it is found

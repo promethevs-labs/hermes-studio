@@ -1190,6 +1190,67 @@ for the report to find.
 With Postgres down, Accept refuses and the candidate waits in the job
 workspace, as for diagrams (D16).
 
+## The run record and the review
+
+Built 2026-11-20. The catalog's `job.run` and `job.review` columns
+(services/catalog/SCHEMA.md, "The run and review columns") are filled by the
+runner, for video jobs and diagram jobs alike, through
+`services/studio/src/data/run-record.ts`.
+
+**The attempt history.** `job.json` gains `attempts`, one entry appended as
+each agent attempt ends, however it ended: `{ n, startedAt, endedAt, turns,
+costUsd, gate }`. `turns` is that attempt's own result event's `num_turns`,
+null when the session was killed before it wrote one. `costUsd` is what the
+job's cost meter gained during the attempt: the meter is one per job, so the
+difference of its readings before and after is the attempt's share, exact
+where both readings come from result events and an estimate otherwise, the
+same `result` and `stream` distinction the job's own figure carries. `gate`
+is the gate's summary for that attempt (`ok`, each step's `{ name, ok }`,
+and the count of findings and of warnings), filled in once the gate has run,
+and null for an attempt that never reached it. Before this, each attempt's
+gate overwrote the last and only the final one was kept. A `job.json` from
+before the field loads with an empty list.
+
+**The run record.** At every terminal state the runner reaches (Ready,
+failed, cancelled, the reconcile's interrupted, a job cancelled before it
+started, and a runner that threw after the claim), it builds a `JobRun`
+from the record and writes it to `jobs/<id>/run.json`, then passes that path
+to `catalog job finish --run-file`. It carries `harness` (`claude-code` and
+the CLI's version, read from `claude_code_version` on the session's
+`system/init` event, null when the stream named none; no process is spawned
+to ask), `model` (the model passed and the one the init event named),
+`effort`, `manualHash`, `auth`, `attempts`, `calls` (how many times the job
+called each wrapper verb, counted from `calls.ndjson`), `renderSeconds` (the
+`render` steps' own durations summed over the preview, still and build
+calls, a call with no steps counted by its wall time, null when the job made
+no wrapper call at all) and `transcriptPath` (`jobs/<id>/session.ndjson`,
+relative to `STUDIO_HOME`). The record is checked with `checkJobRun` before
+the catalog is called. One that fails the check, or cannot be written, never
+fails the job: the reason goes to the runner's log and onto the record as
+`runRecordError`, and the finish goes ahead without `--run-file`. A catalog
+that refuses or is down is treated exactly as any `job finish` failure.
+
+**The discard reason.** `POST /api/jobs/{id}/discard` takes an optional
+body, `{ "tags": [...], "note": "..." }`. No body, an empty one, `{}`, or
+empty tags with a blank note discards with no reason, as it always did, and
+writes no review. Tags must come from `RATING_TAGS_DOWN`, each kept once;
+the note is trimmed, blank becomes null, and it holds at most
+`RATING_LIMITS.maxNoteChars` (2000) characters. A bad tag or an overlong
+note answers 400 with the sentence `checkJobReview` uses, naming the tag or
+the limit, and discards nothing. A valid reason goes to the catalog in the
+discard's own update (`catalog job discard --tags --note`) and is kept on the
+runner's record, so `GET /api/jobs` and `GET /api/jobs/{id}` show it as
+`review: { verdict, tags, note, at }`, null when there is none.
+
+**Accept and revise.** An accept stores `{ verdict: "accept", tags: [], note:
+null }` with `catalog job review` after the video has landed, and a change
+asked of a video in review stores `{ verdict: "revise", tags: [], note }` on
+the parent, the note being the change request cut to the note limit. A
+change asked of a finished video writes no review, since its verdict was
+already given. Neither review can undo or block what it follows: one that
+does not land is a catalog error on the record, as an accept whose job row
+did not record it is.
+
 ## Schema
 
 One migration, the next free number (`0015` on `origin/main` today; check
@@ -1243,6 +1304,7 @@ handler. Only what changes:
 | `GET` | `/api/jobs/{id}/sheets` | new: `{ sheets: [{ scene, title, url, renderedAt, round }] }`, the latest per scene |
 | `GET` | `/api/jobs/{id}/sheets/{scene}.png` | new: one sheet, the scene name checked against the brief, the file opened with `O_NOFOLLOW` and served only if it is a regular file with one link, since it lives in `render/` |
 | `GET` | `/api/jobs/{id}/media/{file}` | new: the gate's copies in `candidate/`, the mp4 (with `Range`), `.vtt` and `poster.jpg`, named from a fixed list |
+| `POST` | `/api/jobs/{id}/discard` | takes an optional `{ tags, note }`, the reason, stored as the job's `review` ("The run record and the review"); every job view gains `review` |
 | `POST` | `/api/jobs/{id}/revise` | on a video job, allowed from `awaiting_review` too. The cap and the video doctor are checked first; then one catalog transaction discards the parent (keeping its source) and enqueues the child, so the lease on the slug passes from one to the other with no gap and a refusal leaves the parent as it was (D52) |
 | `GET` | `/api/videos` | new, built in phase 2a: the owner's landed studio videos for the grid, `{ videos: [{ slug, title, topic, concepts, assetId, posterAssetId, durationSeconds, narrated, revision, updated }] }` through `catalog video list`. The VIDEOS block reads the same verb directly, manimkc videos included. `/api/videos/{slug}` is not built |
 | `GET`, `PUT` | `/api/settings/agent` | new, built in phase 2a: both rows, what "Claude Code default" resolves to, and the priced models; `PUT { kind, model, effort }` stores a row through `catalog preference set` (STUDIO-MENTIONS.md, "API and schema", has the shapes) |
