@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { asset, assetJob, learner, LOCAL_LEARNER_ID, topic, type JobRun } from "@hermes/schema";
+import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { formatEval, runEvalReport } from "../src/commands/eval";
@@ -94,8 +95,10 @@ describe.skipIf(!reachable.ok)("catalog eval report", () => {
     return queued.job.id;
   }
 
-  async function link(assetId: string, jobId: string) {
-    await scratch.db.insert(assetJob).values({ assetId, jobId, contentHash: "a".repeat(64), bytes: 1, ownerId: LOCAL_LEARNER_ID });
+  async function link(assetId: string, jobId: string, writtenAt = new Date()) {
+    await scratch.db
+      .insert(assetJob)
+      .values({ assetId, jobId, contentHash: "a".repeat(64), bytes: 1, ownerId: LOCAL_LEARNER_ID, writtenAt });
   }
 
   beforeAll(async () => {
@@ -244,5 +247,86 @@ describe.skipIf(!reachable.ok)("catalog eval report", () => {
     const other = await runEvalReport({ owner: "owner-b" });
     expect(other.report.totals.videos).toBe(0);
     expect(other.report.totals.accepted).toBe(0);
+  });
+
+  describe("a video re-rendered by a newer job", () => {
+    const D = "manimkc:out/demo/d/d.mp4";
+    const MODEL_A: JobRun = { ...RUN, model: { passed: "a", resolved: "model-a" }, manualHash: "aaaaaaaa00000000" };
+    const MODEL_B: JobRun = { ...RUN, model: { passed: "b", resolved: "model-b" }, manualHash: "bbbbbbbb00000000" };
+    let before: Awaited<ReturnType<typeof runEvalReport>>["report"];
+    let after: Awaited<ReturnType<typeof runEvalReport>>["report"];
+
+    beforeAll(async () => {
+      before = (await runEvalReport({})).report;
+      await video(D);
+      const first = await ready("d-first", { run: MODEL_A, costUsd: 1, turns: 10 });
+      await link(D, first, new Date("2026-11-01T00:00:00Z"));
+      await runAccept({ jobId: first });
+      // Rated while the first job's cut was the video: the rating names that job.
+      await rateAsset(scratch.db, { learnerId: LOCAL_LEARNER_ID, assetId: D, value: -1, tags: ["same-look"], surface: "library" });
+      const second = await ready("d-second", { run: MODEL_B, costUsd: 2, turns: 20 });
+      await link(D, second, new Date("2026-11-10T00:00:00Z"));
+      await runAccept({ jobId: second });
+      after = (await runEvalReport({})).report;
+    });
+
+    it("counts both accepted jobs, and gives the video's own columns to the newest", () => {
+      expect(after.totals.videos).toBe(before.totals.videos + 1);
+      expect(after.totals.accepted).toBe(before.totals.accepted + 2);
+      const a = after.byModel.find((g) => g.key === "model-a")!;
+      const b = after.byModel.find((g) => g.key === "model-b")!;
+      // The older job is no video's current job, so it adds an accepted job and no video.
+      expect([a.videos, a.accepted]).toEqual([0, 1]);
+      expect([b.videos, b.accepted]).toEqual([1, 1]);
+      expect(b.costUsd).toMatchObject({ n: 1, mean: 2 });
+      expect(b.turns.median).toBe(20);
+      expect(a.costUsd.n).toBe(0);
+      expect(after.byManual.find((g) => g.key === "aaaaaaaa00000000")!.accepted).toBe(1);
+      expect(after.byManual.find((g) => g.key === "bbbbbbbb00000000")!.accepted).toBe(1);
+      // The test's jobs are diagram-kind, so the replaced one is filed under tldrawkc; the current one under the video's tool.
+      expect(after.byTool.find((g) => g.key === "manimkc")!.accepted).toBe(
+        before.byTool.find((g) => g.key === "manimkc")!.accepted + 1,
+      );
+      expect(after.byTool.find((g) => g.key === "tldrawkc")!.accepted).toBe(
+        before.byTool.find((g) => g.key === "tldrawkc")!.accepted + 1,
+      );
+    });
+
+    it("counts the rating under the job it judged, not the one that replaced it", () => {
+      const a = after.byModel.find((g) => g.key === "model-a")!;
+      const b = after.byModel.find((g) => g.key === "model-b")!;
+      expect([a.rated, a.down]).toEqual([1, 1]);
+      expect([b.rated, b.down]).toEqual([0, 0]);
+      expect(after.byManual.find((g) => g.key === "aaaaaaaa00000000")!.rated).toBe(1);
+      expect(after.byManual.find((g) => g.key === "bbbbbbbb00000000")!.rated).toBe(0);
+      // By tool, the rating counts under the video's tool.
+      expect(after.byTool.find((g) => g.key === "manimkc")!.rated).toBe(before.byTool.find((g) => g.key === "manimkc")!.rated + 1);
+    });
+
+    it("counts a rating of an older version, in the totals and by tool", () => {
+      expect(after.totals.staleRatings).toBe(before.totals.staleRatings + 1);
+      expect(after.byTool.find((g) => g.key === "manimkc")!.staleRatings).toBe(1);
+      expect(after.byModel.find((g) => g.key === "model-a")!.staleRatings).toBe(1);
+      expect(formatEval({ ok: true, command: "eval report", owner: "x", libraryFound: true, report: after })).toContain(
+        "1 of an older version",
+      );
+    });
+
+    it("keeps a rating with no job on the video's own row, and not stale", () => {
+      // A, rated before any job was linked to it, is attributed to its current job's model.
+      const opus = after.byModel.find((g) => g.key === "claude-opus-5-5")!;
+      expect(opus.rated).toBe(1);
+      expect(opus.staleRatings).toBe(0);
+    });
+
+    it("counts a rating whose bytes are not the asset's now as older, when both hashes are known", async () => {
+      const E = "manimkc:out/demo/e/e.mp4";
+      await video(E);
+      await scratch.db.update(asset).set({ contentHash: "e".repeat(64) }).where(eq(asset.id, E));
+      await rateAsset(scratch.db, { learnerId: LOCAL_LEARNER_ID, assetId: E, value: 1, surface: "library" });
+      expect((await runEvalReport({})).report.totals.staleRatings).toBe(after.totals.staleRatings);
+      await scratch.db.update(asset).set({ contentHash: "f".repeat(64) }).where(eq(asset.id, E));
+      expect((await runEvalReport({})).report.totals.staleRatings).toBe(after.totals.staleRatings + 1);
+    });
   });
 });

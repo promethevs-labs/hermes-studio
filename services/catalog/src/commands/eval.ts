@@ -16,7 +16,7 @@ import {
 } from "../ingredients/report";
 import type { IngredientMetrics } from "../ingredients/scan";
 import { assertMigrated } from "../migrations";
-import { listCurrentRatings } from "../state/asset-ratings";
+import { listCurrentRatings, type StoredRating } from "../state/asset-ratings";
 
 /**
  * `catalog eval report`: the owner's videos, how they were rated, what they
@@ -81,8 +81,38 @@ function reportJob(row: JobRow): NonNullable<ReportVideo["job"]> {
   };
 }
 
-/** Job states a report counts for a job with no video: the ones that ended. */
+/** Job states a report counts: the ones that ended. */
 const ENDED = ["accepted", "discarded", "failed", "cancelled", "interrupted"];
+
+/**
+ * A video's rating for the report. A rating that names a job is counted under
+ * that job's model and prompt version, even when a newer job has replaced the
+ * video; it is "of an older version" when that job is not the video's current
+ * one, or when the bytes it judged are not the asset's now (both hashes known).
+ */
+function reportRating(
+  rating: StoredRating,
+  currentJobId: string | null,
+  contentHash: string | null,
+  jobsById: Map<string, JobRow>,
+): NonNullable<ReportVideo["rating"]> {
+  const judged = rating.jobId === null ? undefined : jobsById.get(rating.jobId);
+  const stale =
+    (rating.jobId !== null && rating.jobId !== currentJobId) ||
+    (rating.assetHash !== null && contentHash !== null && rating.assetHash !== contentHash);
+  return {
+    value: rating.value,
+    tags: [...rating.tags],
+    job:
+      rating.jobId === null
+        ? null
+        : {
+            model: judged?.run?.model.resolved ?? judged?.run?.model.passed ?? null,
+            manualHash: judged?.run?.manualHash ?? null,
+          },
+    stale,
+  };
+}
 
 /** The report's inputs for one owner, read from the catalog. */
 export async function readReportInputs(
@@ -91,7 +121,7 @@ export async function readReportInputs(
   owner: string,
 ): Promise<{ videos: ReportVideo[]; extraJobs: ReportJob[] }> {
   const assets = await db
-    .select({ id: asset.id, title: asset.title })
+    .select({ id: asset.id, title: asset.title, contentHash: asset.contentHash })
     .from(asset)
     .where(and(eq(asset.kind, "video"), ownedBy(asset.ownerId, scope.readable)));
   assets.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
@@ -142,15 +172,18 @@ export async function readReportInputs(
               metrics: stored.metrics as unknown as IngredientMetrics,
               sceneCount: stored.sceneCount,
             },
-      rating: rating === undefined ? null : { value: rating.value, tags: [...rating.tags] },
+      rating: rating === undefined ? null : reportRating(rating, made?.jobId ?? null, row.contentHash, jobsById),
       job: producer === undefined ? null : reportJob(producer),
     };
   });
 
-  // Jobs that made no video: every kind, so a diagram job's discard counts too.
-  const hasVideo = new Set(links.map((l) => l.jobId));
+  // Every finished job counts once. The one behind a video as it is now is
+  // that video's `job`; every other finished job (one that made no video, a
+  // diagram job, or one a newer job replaced) is an extra, so an earlier
+  // accepted job is not lost when a re-render takes its place.
+  const current = new Set([...newest.values()].map((n) => n.jobId));
   const extraJobs: ReportJob[] = jobs
-    .filter((row) => !hasVideo.has(row.id) && ENDED.includes(row.state))
+    .filter((row) => !current.has(row.id) && ENDED.includes(row.state))
     .map((row) => ({
       kind: row.kind,
       tool: jobTool(row.kind, row.brief),

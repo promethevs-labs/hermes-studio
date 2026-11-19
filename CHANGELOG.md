@@ -44,7 +44,13 @@ This project is continuously deployed and not versioned; entries are grouped by 
   `catalog video put` scans the studio video it writes, each reporting a
   failure as a note. `catalog eval report` groups videos by tool, model and
   prompt version with ratings, accept rate, cost, wall time and how varied the
-  videos look (helper top five share, fade share, variety). See
+  videos look (helper top five share, fade share, variety). A name counts
+  under the one it is exported as, so an alias does not make a second helper;
+  a row scanned without manimkc's library is rescanned once the library is
+  there; a studio scan never overwrites a `video put` that landed while it
+  ran; an import forwards a scan's warnings to its notes; every finished job
+  is counted once in the accept rate; and a rating is counted under the job it
+  judged, with ratings of an older version of a video counted apart. See
   [services/catalog/SCHEMA.md](services/catalog/SCHEMA.md), "Ingredients and
   the evaluation report".
 - **Eval records in the catalog.**

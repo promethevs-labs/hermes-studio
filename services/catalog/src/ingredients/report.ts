@@ -19,7 +19,20 @@ export interface ReportVideo {
     metrics: IngredientMetrics;
     sceneCount: number | null;
   } | null;
-  rating: { value: -1 | 0 | 1; tags: string[] } | null;
+  rating: {
+    value: -1 | 0 | 1;
+    tags: string[];
+    /**
+     * The job the rating judged, when the rating names one: its model and
+     * prompt version, which the by-model and by-prompt-version tallies count
+     * the rating under even after a newer job replaced the video. Absent or
+     * null for a video made at a terminal, whose rating goes with the video's
+     * own row.
+     */
+    job?: { model: string | null; manualHash: string | null } | null;
+    /** True when the rating judged an older version than the video now is. */
+    stale?: boolean;
+  } | null;
   job: {
     model: string | null;
     effort: string | null;
@@ -75,10 +88,12 @@ export interface GroupRow {
   accepted: number;
   discarded: number;
   failed: number;
+  /** Ratings of an older version of a video than the one it is now. */
+  staleRatings: number;
   /** accepted / (accepted + discarded + failed), null with no such job. */
   acceptRate: number | null;
   discardTags: TagCount[];
-  /** Money spent on jobs that made no video. */
+  /** Money spent on jobs that are not the one behind a video as it is now: failed, discarded, cancelled, or replaced by a newer job. */
   wastedUsd: number;
 }
 
@@ -161,14 +176,45 @@ function tally(tags: string[]): TagCount[] {
 // Groups
 // ---------------------------------------------------------------------------
 
+/** One rating, with the keys it is counted under in each grouping. */
+interface RatingEntry {
+  value: -1 | 1;
+  tags: string[];
+  stale: boolean;
+  tool: string;
+  model: string;
+  manual: string;
+}
+
+/** The ratings of `videos`, each with where it is counted. A rating of 0 is not one. */
+function ratingEntries(videos: ReportVideo[]): RatingEntry[] {
+  const entries: RatingEntry[] = [];
+  for (const v of videos) {
+    const r = v.rating;
+    if (r === null || r.value === 0) continue;
+    // A rating that names its job is counted under that job; one that does
+    // not goes with the video's own row.
+    const judged = r.job;
+    entries.push({
+      value: r.value,
+      tags: r.tags,
+      stale: r.stale === true,
+      tool: v.tool,
+      model: judged ? (judged.model ?? UNKNOWN) : v.job ? (v.job.model ?? UNKNOWN) : NO_JOB,
+      manual: judged ? (judged.manualHash ?? NO_MANUAL) : v.job ? (v.job.manualHash ?? NO_MANUAL) : NO_JOB,
+    });
+  }
+  return entries;
+}
+
 function groupRow(
   key: string,
   videos: ReportVideo[],
   jobs: ReportJob[],
+  rated: RatingEntry[],
 ): GroupRow {
-  const rated = videos.filter((v) => v.rating !== null && v.rating.value !== 0);
-  const up = rated.filter((v) => v.rating!.value === 1).length;
-  const down = rated.filter((v) => v.rating!.value === -1).length;
+  const up = rated.filter((r) => r.value === 1).length;
+  const down = rated.filter((r) => r.value === -1).length;
   const withJob = videos.flatMap((v) => (v.job ? [v.job] : []));
   const metrics = videos.flatMap((v) =>
     v.ingredients ? [v.ingredients.metrics] : [],
@@ -190,7 +236,7 @@ function groupRow(
     up,
     down,
     upShare: rated.length === 0 ? null : round(up / rated.length, 4),
-    tagCounts: tally(rated.flatMap((v) => v.rating!.tags)),
+    tagCounts: tally(rated.flatMap((r) => r.tags)),
     costUsd: stat(withJob.map((j) => j.costUsd)),
     turns: stat(withJob.map((j) => j.turns)),
     wallSeconds: stat(withJob.map((j) => j.wallSeconds)),
@@ -204,6 +250,7 @@ function groupRow(
     accepted,
     discarded,
     failed,
+    staleRatings: rated.filter((r) => r.stale).length,
     acceptRate: decided === 0 ? null : round(accepted / decided, 4),
     discardTags: tally(
       jobs.filter((j) => j.state === "discarded").flatMap((j) => j.reviewTags),
@@ -218,11 +265,18 @@ function groupRow(
 function groupBy(
   videos: ReportVideo[],
   jobs: ReportJob[],
+  ratings: RatingEntry[],
   videoKey: (v: ReportVideo) => string,
   jobKey: (j: ReportJob) => string,
+  ratingKey: (r: RatingEntry) => string,
 ): GroupRow[] {
   const vs = new Map<string, ReportVideo[]>();
   const js = new Map<string, ReportJob[]>();
+  const rs = new Map<string, RatingEntry[]>();
+  for (const r of ratings) {
+    const k = ratingKey(r);
+    rs.set(k, [...(rs.get(k) ?? []), r]);
+  }
   for (const v of videos) {
     const k = videoKey(v);
     vs.set(k, [...(vs.get(k) ?? []), v]);
@@ -231,10 +285,10 @@ function groupBy(
     const k = jobKey(j);
     js.set(k, [...(js.get(k) ?? []), j]);
   }
-  const keys = [...new Set([...vs.keys(), ...js.keys()])].sort((a, b) =>
+  const keys = [...new Set([...vs.keys(), ...js.keys(), ...rs.keys()])].sort((a, b) =>
     a < b ? -1 : a > b ? 1 : 0,
   );
-  return keys.map((k) => groupRow(k, vs.get(k) ?? [], js.get(k) ?? []));
+  return keys.map((k) => groupRow(k, vs.get(k) ?? [], js.get(k) ?? [], rs.get(k) ?? []));
 }
 
 const NO_JOB = "(no job)";
@@ -303,8 +357,10 @@ function corpusSummary(
 }
 
 /**
- * Builds the report. `extraJobs` are jobs that made no video (failed,
- * discarded, cancelled); they feed the accept rates and the discard tags.
+ * Builds the report. A video's own `job` is the newest job behind it and
+ * gives its model, cost and turns. `extraJobs` are every other finished job:
+ * ones that made no video, and ones a newer job replaced. Each finished job
+ * is counted once, in the accept rates and the discard tags.
  * `libraryNames` are the library's helper names; they only fill the corpus
  * section's list of helpers nobody uses.
  */
@@ -313,25 +369,32 @@ export function evalReport(
   extraJobs: ReportJob[] = [],
   libraryNames?: readonly string[],
 ): EvalReport {
+  const ratings = ratingEntries(videos);
   return {
-    totals: groupRow("all", videos, extraJobs),
+    totals: groupRow("all", videos, extraJobs, ratings),
     byTool: groupBy(
       videos,
       extraJobs,
+      ratings,
       (v) => v.tool,
       (j) => j.tool,
+      (r) => r.tool,
     ),
     byModel: groupBy(
       videos,
       extraJobs,
+      ratings,
       (v) => (v.job ? (v.job.model ?? UNKNOWN) : NO_JOB),
       (j) => j.model ?? UNKNOWN,
+      (r) => r.model,
     ),
     byManual: groupBy(
       videos,
       extraJobs,
+      ratings,
       (v) => (v.job ? (v.job.manualHash ?? NO_MANUAL) : NO_JOB),
       (j) => j.manualHash ?? NO_MANUAL,
+      (r) => r.manual,
     ),
     corpus: corpusSummary(videos, libraryNames),
   };
@@ -341,7 +404,7 @@ export function evalReport(
 // Plain text
 // ---------------------------------------------------------------------------
 
-const NAME_WIDTH = 26;
+const NAME_WIDTH = 18;
 const LINE_WIDTH = 100;
 
 function pct(x: number | null): string {
@@ -411,7 +474,7 @@ function groupSection(title: string, rows: GroupRow[], keyLabel: string): string
   if (rows.length === 0) return [...out, "  No videos.", ""];
   out.push(
     ...table(
-      [keyLabel, "videos", "rated", "up", "down", "up share", "accepted", "discarded", "failed", "accept rate"],
+      [keyLabel, "videos", "rated", "up", "down", "up share", "accepted", "discarded", "failed", "accept", "older"],
       rows.map((r) => [
         clip(r.key, NAME_WIDTH),
         String(r.videos),
@@ -423,8 +486,10 @@ function groupSection(title: string, rows: GroupRow[], keyLabel: string): string
         String(r.discarded),
         String(r.failed),
         pct(r.acceptRate),
+        String(r.staleRatings),
       ]),
     ),
+    "  older: ratings of an older version of the video than it is now.",
     "",
     ...table(
       [keyLabel, "cost mean", "cost median", "turns", "wall median", "variety", "top 5", "fade", "3D"],
@@ -460,14 +525,17 @@ export function formatEvalReport(report: EvalReport): string {
     `  ${label.padEnd(28)}${value}`;
   out.push(
     kv("Videos", String(t.videos)),
-    kv("Rated", `${t.rated} (up ${t.up}, down ${t.down}, up share ${pct(t.upShare)})`),
+    kv(
+      "Rated",
+      `${t.rated} (up ${t.up}, down ${t.down}, up share ${pct(t.upShare)}; ${t.staleRatings} of an older version)`,
+    ),
     kv(
       "Jobs",
       `accepted ${t.accepted}, discarded ${t.discarded}, failed ${t.failed}, accept rate ${pct(t.acceptRate)}`,
     ),
     kv("Cost per video", `mean ${usd(t.costUsd.mean)}, median ${usd(t.costUsd.median)}`),
     kv("Wall time", `median ${secs(t.wallSeconds.median)}`),
-    kv("Spent on jobs with no video", usd(t.wastedUsd)),
+    kv("Spent on other jobs", usd(t.wastedUsd)),
     kv(
       "Look",
       `variety ${dec(t.meanVariety, 2)}, top 5 helpers ${pct(t.meanHelperTop5Share)}, fade ${pct(t.meanFadeShare)}, 3D ${pct(t.uses3dShare)}`,

@@ -230,6 +230,53 @@ describe("evalReport", () => {
   });
 });
 
+describe("evalReport: where a rating is counted", () => {
+  const rated = (assetId: string, rating: NonNullable<ReportVideo["rating"]>, model: string) =>
+    video({ assetId, rating, job: job({ model, manualHash: `${model}-manual` }) });
+
+  it("counts a rating that names its job under that job's model and prompt version, and a rating with none under the video's", () => {
+    const r = evalReport([
+      // Judged model-a's cut; model-b has since replaced it.
+      rated("a", { value: -1, tags: ["same-look"], job: { model: "model-a", manualHash: "model-a-manual" }, stale: true }, "model-b"),
+      // No job named: it goes with the video's own row.
+      rated("b", { value: 1, tags: [] }, "model-b"),
+      // Names a job that left no record of its model.
+      rated("c", { value: 1, tags: [], job: { model: null, manualHash: null } }, "model-b"),
+    ]);
+    const model = (key: string) => r.byModel.find((g) => g.key === key)!;
+    expect([model("model-a").rated, model("model-a").down]).toEqual([1, 1]);
+    expect([model("model-b").rated, model("model-b").up]).toEqual([1, 1]);
+    expect(model("unknown").rated).toBe(1);
+    expect(model("model-a").videos).toBe(0);
+    expect(r.byManual.find((g) => g.key === "model-a-manual")!.rated).toBe(1);
+    expect(r.byManual.find((g) => g.key === "(none)")!.rated).toBe(1);
+    // By tool, and in total, every rating counts under the video.
+    expect(r.byTool).toHaveLength(1);
+    expect(r.byTool[0]!.rated).toBe(3);
+    expect(r.totals.rated).toBe(3);
+  });
+
+  it("counts a rating that is not of the video as it is now", () => {
+    const r = evalReport([
+      rated("a", { value: 1, tags: [], stale: true }, "m"),
+      rated("b", { value: 1, tags: [], stale: false }, "m"),
+      rated("c", { value: 1, tags: [] }, "m"),
+      // A cleared rating is not a rating, stale or not.
+      rated("d", { value: 0, tags: [], stale: true }, "m"),
+    ]);
+    expect(r.totals.staleRatings).toBe(1);
+    expect(r.byTool[0]!.staleRatings).toBe(1);
+  });
+
+  it("counts every finished job once, whether or not a video still stands on it", () => {
+    const r = evalReport(
+      [video({ assetId: "a", job: job({ state: "accepted" }) })],
+      [extra({ state: "accepted" }), extra({ state: "accepted" }), extra({ state: "discarded" }), extra({ state: "cancelled" })],
+    );
+    expect([r.totals.accepted, r.totals.discarded, r.totals.failed, r.totals.acceptRate]).toEqual([3, 1, 0, 0.75]);
+  });
+});
+
 describe("formatEvalReport", () => {
   const report = evalReport(sample, [
     extra({ reviewTags: ["too busy"] }),
@@ -267,11 +314,11 @@ describe("formatEvalReport", () => {
       "Totals
 
         Videos                      4
-        Rated                       2 (up 1, down 1, up share 50%)
+        Rated                       2 (up 1, down 1, up share 50%; 0 of an older version)
         Jobs                        accepted 3, discarded 1, failed 1, accept rate 60%
         Cost per video              mean $2.00, median $2.00
         Wall time                   median 15.0m
-        Spent on jobs with no video $4.00
+        Spent on other jobs         $4.00
         Look                        variety 0.60, top 5 helpers 80%, fade 75%, 3D 50%
 
         Rating tags: pacing 2, clear 1
@@ -279,10 +326,11 @@ describe("formatEvalReport", () => {
 
       By tool
 
-      Tool        videos  rated  up  down  up share  accepted  discarded  failed  accept rate
-      ----------  ------  -----  --  ----  --------  --------  ---------  ------  -----------
-      manimkc          2      2   1     1       50%         2          1       1          50%
-      remotionkc       2      0   0     0         -         1          0       0         100%
+      Tool        videos  rated  up  down  up share  accepted  discarded  failed  accept  older
+      ----------  ------  -----  --  ----  --------  --------  ---------  ------  ------  -----
+      manimkc          2      2   1     1       50%         2          1       1     50%      0
+      remotionkc       2      0   0     0         -         1          0       0    100%      0
+        older: ratings of an older version of the video than it is now.
 
       Tool        cost mean  cost median  turns  wall median  variety  top 5  fade   3D
       ----------  ---------  -----------  -----  -----------  -------  -----  ----  ---
@@ -294,11 +342,12 @@ describe("formatEvalReport", () => {
 
       By model
 
-      Model     videos  rated  up  down  up share  accepted  discarded  failed  accept rate
-      --------  ------  -----  --  ----  --------  --------  ---------  ------  -----------
-      (no job)       1      0   0     0         -         0          0       0            -
-      opus           2      2   1     1       50%         2          1       1          50%
-      sonnet         1      0   0     0         -         1          0       0         100%
+      Model     videos  rated  up  down  up share  accepted  discarded  failed  accept  older
+      --------  ------  -----  --  ----  --------  --------  ---------  ------  ------  -----
+      (no job)       1      0   0     0         -         0          0       0       -      0
+      opus           2      2   1     1       50%         2          1       1     50%      0
+      sonnet         1      0   0     0         -         1          0       0    100%      0
+        older: ratings of an older version of the video than it is now.
 
       Model     cost mean  cost median  turns  wall median  variety  top 5  fade   3D
       --------  ---------  -----------  -----  -----------  -------  -----  ----  ---
@@ -311,11 +360,12 @@ describe("formatEvalReport", () => {
 
       By prompt version
 
-      Manual    videos  rated  up  down  up share  accepted  discarded  failed  accept rate
-      --------  ------  -----  --  ----  --------  --------  ---------  ------  -----------
-      (no job)       1      0   0     0         -         0          0       0            -
-      (none)         1      0   0     0         -         1          0       0         100%
-      abcdef01       2      2   1     1       50%         2          1       1          50%
+      Manual    videos  rated  up  down  up share  accepted  discarded  failed  accept  older
+      --------  ------  -----  --  ----  --------  --------  ---------  ------  ------  -----
+      (no job)       1      0   0     0         -         0          0       0       -      0
+      (none)         1      0   0     0         -         1          0       0    100%      0
+      abcdef01       2      2   1     1       50%         2          1       1     50%      0
+        older: ratings of an older version of the video than it is now.
 
       Manual    cost mean  cost median  turns  wall median  variety  top 5  fade   3D
       --------  ---------  -----------  -----  -----------  -------  -----  ----  ---
