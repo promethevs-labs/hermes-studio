@@ -3,7 +3,7 @@ import { childEnvironment } from "./env";
 /**
  * `node --import tsx services/launch-env/src/child-env.ts`: the environment
  * a launcher gives every service it spawns, as one JSON object on stdout
- * (`childEnvironment` in env.ts). The desktop shell's `Checkout` runs it
+ * (`childEnvironment` in env.ts). A desktop launcher runs it
  * once per launch through a login shell. It holds secrets (AUTH_SECRET, provider keys), so it is written to
  * the parent's pipe and nowhere else.
  */

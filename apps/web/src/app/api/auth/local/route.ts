@@ -13,7 +13,7 @@ import { claimLocalToken, LOCAL_TOKEN_HEADER, localTokenRedeemed } from "../loca
 import { redirectTo, sessionCookie, WRONG_PASSWORD_DELAY_MS } from "../shared";
 
 /**
- * `GET /api/auth/local`: how the desktop shell signs itself in.
+ * `GET /api/auth/local`: how a desktop launcher signs its window in.
  *
  * The shell mints a random `HERMES_LOCAL_TOKEN` for every server it spawns
  * and loads this route as the window's first request, with the token in the

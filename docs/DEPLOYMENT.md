@@ -7,7 +7,7 @@ Vercel project (`kaichen/self-learn`, at `self-learn-one.vercel.app`), with
 every deployment it held. The hosted app could serve the pages but not the
 agent runner (`services/studio`), which needs a machine that can spawn
 `claude` and render video, and what compute that takes is not decided. Until
-it is, Hermes runs where its owner runs it: the desktop shell, `npm run
+it is, Hermes runs where its owner runs it: a desktop launcher, `npm run
 dev:up`, or the homeserver in [HOMESERVER.md](HOMESERVER.md).
 
 What changed with the deletion:
@@ -174,7 +174,7 @@ stored server-side, so ending sessions means changing one of the three:
 vercel env add SESSION_EPOCH production       # any new value ends every session
 ```
 
-The desktop shell's launch token (`HERMES_LOCAL_TOKEN`, `/api/auth/local`)
+A desktop launcher's launch token (`HERMES_LOCAL_TOKEN`, `/api/auth/local`)
 mints the same cookie under the same key, so it follows the epoch and the
 password like a sign-in does. Since 2026-10-30 the password and the epoch are
 part of the key; every session from before that ended once, at the deploy

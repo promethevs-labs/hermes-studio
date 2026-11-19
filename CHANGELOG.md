@@ -7,6 +7,16 @@ This project is continuously deployed and not versioned; entries are grouped by 
 
 ## [Unreleased]
 
+### Removed
+
+- **The macOS Swift desktop shell is gone.** `apps/desktop` (the SwiftPM
+  package behind `Hermes Web.app`, with its bundler and installer scripts) and
+  the docs that described it are removed, because the owner stopped
+  developing it. `services/launch-env`, the local-token sign-in
+  (`GET /api/auth/local`, `HERMES_LOCAL_TOKEN`) and the studio runner's secret
+  scrubbing stay for a future desktop wrapper, with their comments now naming
+  "a desktop launcher" as the caller.
+
 ### Added
 
 - **The catalog's learner tables moved to SQLite** (`24b5cec0`). What was

@@ -114,7 +114,7 @@ const ASSET_CSP =
 /**
  * A stored PDF is the one type served without that policy, as the sibling
  * `/pdf` route serves the same documents. A PDF is drawn by the browser's own
- * viewer, a plugin in WebKit (the desktop shell's engine), and a document
+ * viewer, a plugin in WebKit, and a document
  * under `sandbox` may not load a plugin; the bytes are ours, made by
  * `catalog asset upload` or `catalog video put`, and carry nothing that runs
  * in this origin. Chromium draws one either way.
