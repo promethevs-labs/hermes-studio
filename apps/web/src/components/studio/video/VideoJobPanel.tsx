@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { Fragment, useId, useRef, useState, type ReactNode } from "react";
 
 import { formatTimecode, type TranscriptCue, type VideoChapter } from "@hermes/tutor/media";
+import { DiscardedReason, DiscardReasonCard, useDiscardAsk, type DiscardBody } from "@/components/studio/DiscardReason";
 import { JobLog } from "@/components/studio/job-log";
 import { CancelJobButton, Duration, JobDot } from "@/components/studio/job-bits";
 import { JobCost } from "@/components/studio/JobCost";
@@ -20,7 +21,6 @@ import { composerKey } from "@/components/ui/composer-keys";
 import { Collapse } from "@/components/ui/Collapse";
 import { Disclosure } from "@/components/ui/Disclosure";
 import { Glyph } from "@/components/ui/Glyph";
-import { InlineConfirm } from "@/components/ui/InlineConfirm";
 import { Textarea } from "@/components/ui/Textarea";
 import { TextLink } from "@/components/ui/TextLink";
 import { useFollowFoot } from "@/components/ui/use-follow-foot";
@@ -136,6 +136,9 @@ function Body({ job, brief, path, inConversation }: { job: VideoJob; brief: Vide
             ? "Discarded. The renders are deleted and nothing landed in the catalog; the source is kept, so a later change can start from it."
             : "Its renders are deleted and nothing of it landed in the catalog; the newer version starts from its source."}
         </p>
+      )}
+      {job.state === "discarded" && (
+        <DiscardedReason review={full.review} className="rounded-xl bg-surface2 px-4 py-3 text-[14px] text-text2" />
       )}
       {child !== null && (
         <div className="flex flex-wrap items-center gap-3 rounded-xl border border-hair px-4 py-3">
@@ -839,16 +842,18 @@ function Landed({ job, path }: { job: VideoJob; path: string }) {
 /* Accept, Discard, Change                                                    */
 /* -------------------------------------------------------------------------- */
 
-function Actions({ job, path, accept, discard, change }: { job: VideoJob; path: string; accept: boolean; discard: boolean; change: boolean }) {
+export function Actions({ job, path, accept, discard, change }: { job: VideoJob; path: string; accept: boolean; discard: boolean; change: boolean }) {
   const { run, busy } = useJobVerb(path);
   const router = useRouter();
   const [said, setSaid] = useState<{ ok: boolean; text: string } | null>(null);
   const [changing, setChanging] = useState(false);
-  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  // Discard asks why first (`DiscardReasonCard`); Skip and Discard both send the verb.
+  const { asking, open: openAsk, close: closeAsk, catchTrigger } = useDiscardAsk();
 
-  const act = async (verb: "accept" | "discard"): Promise<void> => {
-    const result = await run(job.jobId, verb);
-    setConfirmDiscard(false);
+  const act = async (verb: "accept" | "discard", reason?: DiscardBody): Promise<void> => {
+    const result = await (reason === undefined ? run(job.jobId, verb) : run(job.jobId, verb, { body: reason }));
+    // A refusal (the runner's 400, say) keeps the card open with its words: nothing was discarded.
+    if (result.ok || verb !== "discard") closeAsk();
     setSaid(result.ok ? null : { ok: false, text: result.text });
     // `run` has already read the job list again. The grid changes: an accepted video gets its tile, a discarded one loses its job.
     router.refresh();
@@ -867,22 +872,36 @@ function Actions({ job, path, accept, discard, change }: { job: VideoJob; path: 
             </Button>
           )}
           {change && (
-            <Button variant="secondary" disabled={busy !== null} onClick={() => setChanging(true)}>
+            <Button
+              variant="secondary"
+              disabled={busy !== null}
+              onClick={() => {
+                closeAsk();
+                setChanging(true);
+              }}
+            >
               Change
             </Button>
           )}
-          {discard && (
-            <InlineConfirm
-              label="Discard"
-              question="The renders are deleted; the source is kept."
-              confirmLabel="Discard it"
-              busyLabel={busy === "discard" ? "Discarding" : undefined}
-              onConfirm={() => void act("discard")}
-              busy={busy !== null}
-              open={confirmDiscard}
-              onOpenChange={setConfirmDiscard}
-            />
+          {discard && !asking && (
+            <Button ref={catchTrigger} variant="ghost" disabled={busy !== null} onClick={openAsk} className={FADE_IN}>
+              Discard
+            </Button>
           )}
+        </div>
+      )}
+      {discard && asking && !changing && (
+        <div className="flex min-w-0 flex-col gap-2">
+          <DiscardReasonCard
+            subject="video"
+            discarding={busy === "discard"}
+            disabled={busy !== null}
+            error={said?.ok === false ? said.text : null}
+            onSkip={() => void act("discard")}
+            onDiscard={(reason) => void act("discard", reason)}
+            onKeep={closeAsk}
+          />
+          <p className="text-[12px] text-text3">The renders are deleted; the source is kept.</p>
         </div>
       )}
       {accept && !changing && (
@@ -893,7 +912,7 @@ function Actions({ job, path, accept, discard, change }: { job: VideoJob; path: 
           <ChangeForm job={job} path={path} onClose={() => setChanging(false)} />
         </div>
       )}
-      <ErrorText>{said?.text}</ErrorText>
+      {!asking && <ErrorText>{said?.text}</ErrorText>}
     </div>
   );
 }

@@ -134,6 +134,22 @@ describe("useJobVerb", () => {
     expect(navigate).toHaveBeenCalledWith("/studio?view=list&job=j9");
   });
 
+  it("sends a discard's reason as the JSON body, and a bare verb as the empty object it always sent", async () => {
+    const fetch = runner({ status: 200, body: { jobId: "j1" } });
+    await mount(null);
+    const posted = () => fetch.mock.calls.filter(([, init]) => init?.method === "POST").at(-1)!;
+    await act(async () => {
+      await handle.verbs!.run("j1", "discard", { body: { tags: ["voice", "too-slow"], note: "mumbles" } });
+    });
+    expect(posted()[0]).toBe("/studio/api/jobs/j1/discard");
+    expect(JSON.parse(String(posted()[1]?.body))).toEqual({ tags: ["voice", "too-slow"], note: "mumbles" });
+    expect(new Headers(posted()[1]?.headers).get("content-type")).toBe("application/json");
+    await act(async () => {
+      await handle.verbs!.run("j1", "discard");
+    });
+    expect(JSON.parse(String(posted()[1]?.body))).toEqual({});
+  });
+
   it("reads the job list after a post, and not after a quiet one", async () => {
     const fetch = runner({ status: 202, body: { jobId: "j2" } });
     await mount(null);

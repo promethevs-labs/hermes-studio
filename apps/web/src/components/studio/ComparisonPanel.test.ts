@@ -104,15 +104,41 @@ describe("a verb on the comparison", () => {
     expect(verb.refresh).not.toHaveBeenCalled();
   });
 
-  it("draws the page again after a confirmed discard, and not before the confirm", async () => {
+  it("asks why before a discard, and draws the page again after Skip, which sends no reason", async () => {
     const host = await mount(job({}));
     await press(host, "Discard");
     expect(verb.run).not.toHaveBeenCalled();
-    await press(host, "Discard it");
+    expect(host.querySelector("h3")?.textContent).toBe("Why discard this diagram?");
+    await press(host, "Skip");
     expect(verb.run).toHaveBeenCalledTimes(1);
     expect(verb.run).toHaveBeenCalledWith("j1", "discard");
     expect(router.refresh).toHaveBeenCalledTimes(1);
     expect(verb.refresh).not.toHaveBeenCalled();
+  });
+
+  it("sends the tags and the note with a discard that gives a reason", async () => {
+    const host = await mount(job({}));
+    await press(host, "Discard");
+    await press(host, "Looks like the others");
+    await press(host, "Looks like the others");
+    await press(host, "Too much text");
+    const field = host.querySelector("input") as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+    act(() => {
+      setter?.call(field, "all boxes");
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await press(host, "Discard");
+    expect(verb.run).toHaveBeenCalledWith("j1", "discard", { body: { tags: ["too-much-text"], note: "all boxes" } });
+  });
+
+  it("keeps the card with the runner's words when a discard is refused", async () => {
+    verb.run.mockResolvedValueOnce({ ok: false, text: "the note is too long", next: null, data: {} } as never);
+    const host = await mount(job({}));
+    await press(host, "Discard");
+    await press(host, "Discard");
+    expect(host.querySelector("h3")?.textContent).toBe("Why discard this diagram?");
+    expect(host.textContent).toContain("the note is too long");
   });
 
   it("says the sentence a refused accept comes back with, and a Compare after it draws the page no second time", async () => {

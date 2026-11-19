@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/Button";
 import { Callout } from "@/components/ui/Callout";
 import { cx, FOCUS } from "@/components/ui/classes";
 import { checkWord } from "@/lib/studio-job-state";
-import { InlineConfirm } from "@/components/ui/InlineConfirm";
+import { DiscardReasonCard, useDiscardAsk, type DiscardBody } from "@/components/studio/DiscardReason";
 import {
   catalogErrorLine,
   countRows,
@@ -57,8 +57,8 @@ export function ComparisonPanel({ job, path }: { job: Job; path: string }) {
   const { run, busy } = useJobVerb(path);
   const router = useRouter();
   const [said, setSaid] = useState<{ ok: boolean; text: string; recompare?: boolean } | null>(null);
-  // Discard asks first, as a video's does: the candidate goes for good.
-  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  // Discard asks why first, as a video's does: the candidate goes for good.
+  const { asking, open: openAsk, close: closeAsk, catchTrigger } = useDiscardAsk();
 
   const comparison: Comparison = job.comparison ?? {
     before: null,
@@ -71,9 +71,10 @@ export function ComparisonPanel({ job, path }: { job: Job; path: string }) {
   const accepted = job.state === "accepted";
   const reviewable = job.state === "awaiting_review";
 
-  const act = async (verb: string): Promise<void> => {
-    const result = await run(job.jobId, verb);
-    setConfirmDiscard(false);
+  const act = async (verb: string, reason?: DiscardBody): Promise<void> => {
+    const result = await (reason === undefined ? run(job.jobId, verb) : run(job.jobId, verb, { body: reason }));
+    // A refused discard (the runner's 400, say) keeps the card open: nothing was discarded.
+    if (result.ok || verb !== "discard") closeAsk();
     const detail = (result.data.detail ?? {}) as { recompare?: boolean };
     setSaid({ ok: result.ok, text: result.text, recompare: detail.recompare === true });
     // `run` has already read the job list again. Only an accept or a discard
@@ -124,21 +125,30 @@ export function ComparisonPanel({ job, path }: { job: Job; path: string }) {
           <Button size="xs" disabled={busy !== null} onClick={() => void act("accept")}>
             {busy === "accept" ? "Accepting…" : "Accept"}
           </Button>
-          <InlineConfirm
-            label="Discard"
-            question="The candidate is deleted; the diagram stays as it was."
-            confirmLabel="Discard it"
-            busyLabel={busy === "discard" ? "Discarding…" : undefined}
-            onConfirm={() => void act("discard")}
-            busy={busy !== null}
-            open={confirmDiscard}
-            onOpenChange={setConfirmDiscard}
-            buttonSize="sm"
+          {!asking && (
+            <Button ref={catchTrigger} variant="ghost" size="sm" disabled={busy !== null} onClick={openAsk}>
+              Discard
+            </Button>
+          )}
+        </div>
+      )}
+      {reviewable && asking && (
+        <div className="mt-2 flex flex-col gap-2 rounded-md border border-border bg-surface2 p-2">
+          <DiscardReasonCard
+            subject="diagram"
+            compact
+            discarding={busy === "discard"}
+            disabled={busy !== null}
+            error={said !== null && !said.ok ? said.text : null}
+            onSkip={() => void act("discard")}
+            onDiscard={(reason) => void act("discard", reason)}
+            onKeep={closeAsk}
           />
+          <p className="text-xs text-text3">The candidate is deleted; the diagram stays as it was.</p>
         </div>
       )}
 
-      {said !== null && (
+      {said !== null && !(asking && !said.ok) && (
         <Callout tone={said.ok ? "neutral" : "danger"} dense bordered className="mt-2">
           <p className="break-words">{said.text}</p>
           {said.recompare === true && (
