@@ -7,6 +7,7 @@ import {
   isStudioRelativePath,
   JOB_RUN_LIMITS,
   type JobRun,
+  normaliseInstant,
   RATING_LIMITS,
   RATING_PROMPT_PREFERENCE_PREFIX,
   RATING_TAG_LABELS,
@@ -198,6 +199,59 @@ describe("checkJobRun", () => {
     const calls = Object.fromEntries(Array.from({ length: JOB_RUN_LIMITS.maxCalls + 1 }, (_, i) => [`tool-${i}`, 1]));
     expect(checkJobRun(run({ calls })).ok).toBe(false);
     expect(checkJobRun(run({ effort: "x".repeat(JOB_RUN_LIMITS.maxChars + 1) })).ok).toBe(false);
+  });
+});
+
+describe("normaliseInstant", () => {
+  it("takes an instant with Z or an offset, and stores it in UTC as toISOString writes it", () => {
+    expect(normaliseInstant("2026-11-20T10:00:00Z")).toBe("2026-11-20T10:00:00.000Z");
+    expect(normaliseInstant("2026-11-20T10:00:00.000Z")).toBe("2026-11-20T10:00:00.000Z");
+    expect(normaliseInstant("2026-11-20T18:00:00+08:00")).toBe("2026-11-20T10:00:00.000Z");
+    expect(normaliseInstant("2026-11-20T05:30:00.25-04:30")).toBe("2026-11-20T10:00:00.250Z");
+    expect(normaliseInstant("2026-11-20T10:00:00.123456Z")).toBe("2026-11-20T10:00:00.123Z");
+  });
+
+  it("refuses a time with no zone, a date alone, a locale form and other strings", () => {
+    for (const value of [
+      "2026-11-20T10:00:00",
+      "2026-11-20T10:00:00.000",
+      "2026-11-20",
+      "11/20/2026 10:00",
+      "20/11/2026 10:00",
+      "Fri, 20 Nov 2026 10:00:00 GMT",
+      "2026-11-20 10:00:00Z",
+      "2026-11-20T10:00Z",
+      "2026-11-20T10:00:00z",
+      "2026-11-20T10:00:00+0800",
+      "2026-11-20T10:00:00+08",
+      "1795168800000",
+      "",
+    ]) {
+      expect(normaliseInstant(value), value).toBeNull();
+    }
+    expect(normaliseInstant(1795168800000)).toBeNull();
+    expect(normaliseInstant(null)).toBeNull();
+  });
+
+  it("refuses a calendar date or time that does not exist, which Date.parse would roll over", () => {
+    for (const value of ["2026-02-30T00:00:00Z", "2026-13-01T00:00:00Z", "2026-11-20T24:00:00Z", "2026-11-20T10:60:00Z", "2026-11-20T10:00:00+24:00"]) {
+      expect(normaliseInstant(value), value).toBeNull();
+    }
+  });
+
+  it("is what checkJobRun and checkJobReview store", () => {
+    const attempt = { n: 1, startedAt: "2026-11-20T18:00:00+08:00", endedAt: "2026-11-20T10:05:00Z", turns: null, costUsd: null, gate: null };
+    const checked = checkJobRun(run({ attempts: [attempt] }));
+    expect(checked.ok && checked.run.attempts[0]).toMatchObject({ startedAt: "2026-11-20T10:00:00.000Z", endedAt: "2026-11-20T10:05:00.000Z" });
+    expect(checkJobRun(run({ attempts: [{ ...attempt, startedAt: "2026-11-20T10:00:00" }] }))).toEqual({
+      ok: false,
+      reason: expect.stringContaining("with a zone"),
+    });
+    const review = checkJobReview({ verdict: "accept", tags: [], note: null, at: "2026-11-20T05:00:00-05:00" });
+    expect(review.ok && review.review.at).toBe("2026-11-20T10:00:00.000Z");
+    for (const at of ["2026-11-20T10:00:00", "2026-11-20", "11/20/2026 10:00"]) {
+      expect(checkJobReview({ verdict: "accept", tags: [], note: null, at }).ok, at).toBe(false);
+    }
   });
 });
 

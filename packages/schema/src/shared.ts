@@ -934,7 +934,7 @@ export interface JobRunGate {
 export interface JobRunAttempt {
   /** 1, 2, 3: the attempt's number. */
   n: number;
-  /** ISO 8601, or null when not known. */
+  /** An ISO 8601 instant with a zone, stored in UTC as `toISOString` writes it (`normaliseInstant`), or null when not known. */
   startedAt: string | null;
   endedAt: string | null;
   turns: number | null;
@@ -971,7 +971,7 @@ export interface JobReview {
   verdict: JobVerdict;
   tags: RatingTagDown[];
   note: string | null;
-  /** When the review was written, ISO 8601. */
+  /** When the review was written: an ISO 8601 instant, stored in UTC (`normaliseInstant`). */
   at: string;
 }
 
@@ -983,8 +983,44 @@ type Check<T> = { ok: true; value: T } | { ok: false; reason: string };
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-const isInstant = (value: unknown): value is string =>
-  typeof value === "string" && value.length <= 64 && !Number.isNaN(Date.parse(value));
+/**
+ * `YYYY-MM-DDTHH:MM:SS`, an optional fraction of 1 to 9 digits, and an
+ * explicit zone: `Z`, or a `+hh:mm` or `-hh:mm` offset.
+ */
+const ISO_INSTANT = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(?:Z|[+-](\d{2}):(\d{2}))$/;
+
+/**
+ * An ISO 8601 instant with an explicit zone, as `toISOString` writes it (in
+ * UTC, with milliseconds), or null for anything else: a time with no zone
+ * (which each reader would place in its own), a date alone, a locale form
+ * such as `11/20/2026 10:00`, or a calendar date that does not exist
+ * (`2026-02-30`, `24:00`), which `Date.parse` would quietly roll over. So the
+ * same instant is always stored as the same string, whatever offset it came
+ * in.
+ */
+export function normaliseInstant(value: unknown): string | null {
+  if (typeof value !== "string" || value.length > 64) return null;
+  const match = ISO_INSTANT.exec(value);
+  if (match === null) return null;
+  const [year, month, day, hour, minute, second] = match.slice(1, 7).map(Number) as [number, number, number, number, number, number];
+  // The fields as written, read back through the calendar: a day or hour that
+  // does not exist comes back as a different one.
+  const fields = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+  if (
+    fields.getUTCFullYear() !== year ||
+    fields.getUTCMonth() !== month - 1 ||
+    fields.getUTCDate() !== day ||
+    fields.getUTCHours() !== hour ||
+    fields.getUTCMinutes() !== minute ||
+    fields.getUTCSeconds() !== second
+  ) {
+    return null;
+  }
+  const [offsetHours, offsetMinutes] = [match[7], match[8]].map((part) => (part === undefined ? 0 : Number(part))) as [number, number];
+  if (offsetHours > 23 || offsetMinutes > 59) return null;
+  const ms = Date.parse(value);
+  return Number.isNaN(ms) ? null : new Date(ms).toISOString();
+}
 
 const isCount = (value: unknown): value is number => Number.isInteger(value) && (value as number) >= 0;
 
@@ -1051,10 +1087,14 @@ function checkAttempt(value: unknown, field: string): Check<JobRunAttempt> {
   if (!Number.isInteger(value.n) || (value.n as number) < 1) {
     return { ok: false, reason: `${field}.n is a whole number, 1 or more.` };
   }
+  const instants: Record<"startedAt" | "endedAt", string | null> = { startedAt: null, endedAt: null };
   for (const key of ["startedAt", "endedAt"] as const) {
-    if (value[key] !== null && !isInstant(value[key])) {
-      return { ok: false, reason: `${field}.${key} is null or an ISO 8601 instant.` };
+    if (value[key] === null) continue;
+    const instant = normaliseInstant(value[key]);
+    if (instant === null) {
+      return { ok: false, reason: `${field}.${key} is null or an ISO 8601 instant with a zone (Z or +hh:mm).` };
     }
+    instants[key] = instant;
   }
   if (value.turns !== null && !isCount(value.turns)) {
     return { ok: false, reason: `${field}.turns is null or a whole number, 0 or more.` };
@@ -1068,8 +1108,8 @@ function checkAttempt(value: unknown, field: string): Check<JobRunAttempt> {
     ok: true,
     value: {
       n: value.n as number,
-      startedAt: value.startedAt as string | null,
-      endedAt: value.endedAt as string | null,
+      startedAt: instants.startedAt,
+      endedAt: instants.endedAt,
       turns: value.turns as number | null,
       costUsd: value.costUsd as number | null,
       gate: gate.value,
@@ -1182,7 +1222,7 @@ export function checkJobRun(input: unknown): { ok: true; run: JobRun } | { ok: f
 /**
  * A `JobReview` checked: a verdict from `JOB_VERDICTS`, tags from
  * `RATING_TAGS_DOWN` (each once), a note cleaned as a rating's is, and `at`
- * an ISO 8601 instant.
+ * an ISO 8601 instant with a zone, stored in UTC (`normaliseInstant`).
  */
 export function checkJobReview(input: unknown): { ok: true; review: JobReview } | { ok: false; reason: string } {
   if (!isPlainObject(input)) return { ok: false, reason: "A review is a JSON object." };
@@ -1196,10 +1236,11 @@ export function checkJobReview(input: unknown): { ok: true; review: JobReview } 
   if (!tags.ok) return tags;
   const note = cleanNote(input.note);
   if (!note.ok) return note;
-  if (!isInstant(input.at)) return { ok: false, reason: "at is an ISO 8601 instant." };
+  const at = normaliseInstant(input.at);
+  if (at === null) return { ok: false, reason: "at is an ISO 8601 instant with a zone (Z or +hh:mm)." };
   return {
     ok: true,
-    review: { verdict: verdict as JobVerdict, tags: tags.tags as RatingTagDown[], note: note.note, at: input.at },
+    review: { verdict: verdict as JobVerdict, tags: tags.tags as RatingTagDown[], note: note.note, at },
   };
 }
 
