@@ -4,6 +4,7 @@ import { asset, assetJob, assetRating, COMMONS_OWNER, job, learner, LOCAL_LEARNE
 import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
+import { inTransaction } from "../src/db";
 import { applyMigrations } from "../src/migrations";
 import { partialMigrations } from "./partial-migrations";
 import { currentRating, listCurrentRatings, rateAsset, ratingHistory, StateError } from "../src/state";
@@ -164,6 +165,70 @@ describe.skipIf(!reachable.ok)("asset_rating", () => {
     const rated = await rate(video, -1, { tags: ["too-long"] });
     expect(rated.jobId).toBe("job-new");
     expect(rated.assetHash).toBe("a".repeat(64));
+  });
+
+  /**
+   * `scratch.db` behind a Proxy that logs, in order, the transaction boundary
+   * (`inTransaction` opens and closes a handle that did not come through
+   * `connect()` with `db.run`, as courses-reader.test.ts watches it) and each
+   * query the writer starts. `failInsert` makes the insert throw, after every
+   * read has run.
+   */
+  function watched(log: string[], options: { failInsert?: boolean } = {}) {
+    return new Proxy(scratch.db, {
+      get(target, key, receiver) {
+        const value = Reflect.get(target, key, receiver) as unknown;
+        if (key === "run") {
+          return (query: never) => {
+            const chunks = (query as { queryChunks?: { value?: string[] }[] }).queryChunks ?? [];
+            log.push(chunks.map((chunk) => (chunk.value ?? []).join("")).join(""));
+            return (value as (q: never) => unknown).call(target, query);
+          };
+        }
+        if (key === "select" || key === "insert" || key === "execute") {
+          return (...args: unknown[]) => {
+            log.push(key);
+            if (key === "insert" && options.failInsert === true) throw new Error("the insert failed after the reads");
+            return (value as (...a: unknown[]) => unknown).apply(receiver, args);
+          };
+        }
+        return value;
+      },
+    });
+  }
+
+  it("runs the readable check, both snapshot reads and the insert in one transaction", async () => {
+    const log: string[] = [];
+    await rateAsset(watched(log), { learnerId: LOCAL_LEARNER_ID, assetId: MINE, value: 1, surface: "library" });
+    expect(log[0]).toBe("begin immediate");
+    expect(log[log.length - 1]).toBe("commit");
+    // Every query the writer started sits between the two: the readable
+    // check and the two snapshot reads (selects), and the insert.
+    const inside = log.slice(1, -1);
+    expect(inside.filter((entry) => entry === "select").length).toBeGreaterThanOrEqual(3);
+    expect(inside).toContain("insert");
+    expect(inside.every((entry) => ["select", "insert", "execute"].includes(entry))).toBe(true);
+  });
+
+  it("rolls the whole rating back when the insert fails after the reads", async () => {
+    const log: string[] = [];
+    await expect(
+      rateAsset(watched(log, { failInsert: true }), { learnerId: LOCAL_LEARNER_ID, assetId: MINE, value: 1, surface: "library" }),
+    ).rejects.toThrow(/after the reads/);
+    expect(log[0]).toBe("begin immediate");
+    expect(log[log.length - 1]).toBe("rollback");
+    expect(log).not.toContain("commit");
+    expect(await scratch.db.select().from(assetRating)).toEqual([]);
+  });
+
+  it("joins a transaction the caller holds rather than committing on its own", async () => {
+    await expect(
+      inTransaction(scratch.db, async (tx) => {
+        await rateAsset(tx, { learnerId: LOCAL_LEARNER_ID, assetId: MINE, value: -1, surface: "studio" });
+        throw new Error("the caller's next write failed");
+      }),
+    ).rejects.toThrow(/caller's next write/);
+    expect(await scratch.db.select().from(assetRating)).toEqual([]);
   });
 
   it("keeps a pruned asset's ratings, with no foreign key to stop the prune", async () => {

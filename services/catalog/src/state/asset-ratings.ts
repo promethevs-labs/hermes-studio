@@ -11,7 +11,7 @@ import {
 import { and, desc, eq, sql } from "drizzle-orm";
 
 import { cacheKey } from "../content/scope";
-import type { CatalogDatabase } from "../db";
+import { type CatalogDatabase, inTransaction } from "../db";
 import { assetsByIds } from "./assets";
 import { StateError } from "./errors";
 import { ensureLearner } from "./learner";
@@ -91,9 +91,12 @@ const NEWEST_FIRST = [desc(assetRating.at), desc(sql`${assetRating}.rowid`)] as 
  * does), and a value, tag, note or surface that `cleanRating` and
  * `RATING_SURFACES` do not take, with a `RangeError` naming why.
  *
- * Snapshots, read in the same call: `job_id` is the newest `asset_job` row
- * naming the asset, and `asset_hash` the asset's `content_hash`, else the
- * sha256 of the blob it points at.
+ * Snapshots, read in the same transaction as the insert: `job_id` is the
+ * newest `asset_job` row naming the asset, and `asset_hash` the asset's
+ * `content_hash`, else the sha256 of the blob it points at. Called inside a
+ * transaction the caller already holds, it runs as a savepoint of that one
+ * (`inTransaction` nests), so `catalog rating add` and a route need nothing
+ * of their own.
  */
 export async function rateAsset(db: CatalogDatabase, input: RateAssetInput): Promise<StoredRating> {
   const { learnerId, assetId } = input;
@@ -102,42 +105,47 @@ export async function rateAsset(db: CatalogDatabase, input: RateAssetInput): Pro
   if (!(RATING_SURFACES as readonly string[]).includes(input.surface)) {
     throw new RangeError(`"${input.surface}" is not a surface a rating is given on. Known: ${RATING_SURFACES.join(", ")}.`);
   }
-  if (!(await ratingsExist(db))) {
-    throw new StateError("This database predates asset ratings: run `npm run catalog -- migrate`.");
-  }
-  if ((await assetsByIds(db, [assetId], ownerScope(learnerId))).length === 0) {
-    throw new StateError(`No asset "${assetId}" to rate.`);
-  }
+  // One transaction from the readable check to the insert, so a re-render
+  // that lands between the reads cannot leave one version's hash beside
+  // another's job. Inside a caller's transaction this is a savepoint of it.
+  return inTransaction(db, async (tx) => {
+    if (!(await ratingsExist(tx))) {
+      throw new StateError("This database predates asset ratings: run `npm run catalog -- migrate`.");
+    }
+    if ((await assetsByIds(tx, [assetId], ownerScope(learnerId))).length === 0) {
+      throw new StateError(`No asset "${assetId}" to rate.`);
+    }
 
-  const [hashes] = await db
-    .select({ contentHash: asset.contentHash, blobHash: blobObject.sha256 })
-    .from(asset)
-    .leftJoin(blobObject, eq(blobObject.key, asset.blobKey))
-    .where(eq(asset.id, assetId))
-    .limit(1);
-  const [made] = await db
-    .select({ jobId: assetJob.jobId })
-    .from(assetJob)
-    .where(eq(assetJob.assetId, assetId))
-    .orderBy(desc(assetJob.writtenAt), desc(assetJob.jobId))
-    .limit(1);
+    const [hashes] = await tx
+      .select({ contentHash: asset.contentHash, blobHash: blobObject.sha256 })
+      .from(asset)
+      .leftJoin(blobObject, eq(blobObject.key, asset.blobKey))
+      .where(eq(asset.id, assetId))
+      .limit(1);
+    const [made] = await tx
+      .select({ jobId: assetJob.jobId })
+      .from(assetJob)
+      .where(eq(assetJob.assetId, assetId))
+      .orderBy(desc(assetJob.writtenAt), desc(assetJob.jobId))
+      .limit(1);
 
-  await ensureLearner(db, learnerId);
-  const [row] = await db
-    .insert(assetRating)
-    .values({
-      id: randomUUID(),
-      learnerId,
-      assetId,
-      value: cleaned.rating.value,
-      tags: JSON.stringify(cleaned.rating.tags),
-      note: cleaned.rating.note,
-      surface: input.surface,
-      jobId: made?.jobId ?? null,
-      assetHash: hashes?.contentHash ?? hashes?.blobHash ?? null,
-    })
-    .returning();
-  return toStored(row!);
+    await ensureLearner(tx, learnerId);
+    const [row] = await tx
+      .insert(assetRating)
+      .values({
+        id: randomUUID(),
+        learnerId,
+        assetId,
+        value: cleaned.rating.value,
+        tags: JSON.stringify(cleaned.rating.tags),
+        note: cleaned.rating.note,
+        surface: input.surface,
+        jobId: made?.jobId ?? null,
+        assetHash: hashes?.contentHash ?? hashes?.blobHash ?? null,
+      })
+      .returning();
+    return toStored(row!);
+  });
 }
 
 /**
