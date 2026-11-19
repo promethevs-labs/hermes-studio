@@ -17,7 +17,7 @@
 
 import { createHash } from "node:crypto";
 
-export const INGREDIENTS_SCANNER_VERSION = 1;
+export const INGREDIENTS_SCANNER_VERSION = 2;
 
 export type IngredientsTool =
   | "manimkc"
@@ -46,6 +46,12 @@ export interface IngredientMetrics {
   distinctEngine: number;
   uses3d: boolean;
   variety: number | null;
+  /**
+   * A short hash of the library names the scan was given (`none` when it had
+   * none). A row scanned without the library differs from one scanned with
+   * it even when the source did not change, so a rescan must not skip it.
+   */
+  libraryHash?: string;
 }
 
 export interface Ingredients {
@@ -408,21 +414,60 @@ function blankPyString(
 }
 
 /**
+ * Where JSX can start: after one of these characters (or at the start of the
+ * text, or after `return`), never straight after an identifier or a closing
+ * bracket, so `Array<string>`, `foo<Bar>('x')` and `a < b` are not tags.
+ */
+const JSX_START_AFTER = new Set(["(", ",", "=", "?", ":", "{", ">", "&", "|", "["]);
+
+type Frame =
+  /** The code of a template literal's `${}`. */
+  | { t: "tpl"; d: number }
+  /** The code of a JSX `{}`, in an attribute or among the children. */
+  | { t: "expr"; d: number }
+  /** The children of an element: text, where a quote is not a string. */
+  | { t: "text" }
+  /** A tag, from its `<` to its `>`. */
+  | { t: "tag"; closing: boolean };
+
+/**
  * Blanks TypeScript comments and string literals: `//` and block comments,
  * single and double quoted strings (which end at a newline when
- * unterminated, so a JSX apostrophe cannot swallow the file), and template
- * literals. The text of a template is blanked but the code inside its `${}`
- * stays, nested to any depth.
+ * unterminated), and template literals. The text of a template is blanked but
+ * the code inside its `${}` stays, nested to any depth.
+ *
+ * It also follows JSX well enough that an apostrophe in element text (`<p>Don't
+ * <Card /></p>`) does not open a string: from the `>` that ends an opening tag
+ * to the next `<` or `{`, characters are text and are blanked. A `<` starts a
+ * tag only where JSX can start (see `JSX_START_AFTER`) and is followed at once
+ * by a name, `/` or `>`.
  */
 export function stripTypeScript(text: string): Stripped {
   const out: string[] = [];
   const strings = new Map<number, string>();
   const n = text.length;
-  const exprDepth: number[] = [];
+  const frames: Frame[] = [];
   let inTemplate = false;
   let i = 0;
+
+  const previousSignificant = (): string => {
+    for (let k = out.length - 1; k >= 0; k--) {
+      const ch = out[k] as string;
+      if (ch !== " " && ch !== "\n" && ch !== "\r" && ch !== "\t") return ch;
+    }
+    return "";
+  };
+  const afterReturn = (): boolean => /(?:^|[^\w$])return\s*$/.test(out.slice(-12).join(""));
+  const jsxMayStart = (): boolean => {
+    const prev = previousSignificant();
+    return prev === "" || JSX_START_AFTER.has(prev) || afterReturn();
+  };
+  const tagStartsAt = (at: number): boolean => /[A-Za-z_$>]/.test(text.charAt(at));
+
   while (i < n) {
     const c = text.charAt(i);
+    const top = frames[frames.length - 1];
+
     if (inTemplate) {
       if (c === "\\") {
         out.push(" ");
@@ -437,7 +482,7 @@ export function stripTypeScript(text: string): Stripped {
         i++;
       } else if (c === "$" && text.charAt(i + 1) === "{") {
         out.push("  ");
-        exprDepth.push(0);
+        frames.push({ t: "tpl", d: 0 });
         inTemplate = false;
         i += 2;
       } else {
@@ -446,6 +491,24 @@ export function stripTypeScript(text: string): Stripped {
       }
       continue;
     }
+
+    if (top?.t === "text") {
+      if (c === "{") {
+        frames.push({ t: "expr", d: 0 });
+        out.push(c);
+      } else if (c === "<" && text.charAt(i + 1) === "/") {
+        frames.push({ t: "tag", closing: true });
+        out.push(c);
+      } else if (c === "<" && tagStartsAt(i + 1)) {
+        frames.push({ t: "tag", closing: false });
+        out.push(c);
+      } else {
+        out.push(blank(c));
+      }
+      i++;
+      continue;
+    }
+
     if (c === "/" && text.charAt(i + 1) === "/") {
       while (i < n && text.charAt(i) !== "\n") {
         out.push(blank(text.charAt(i)));
@@ -500,16 +563,47 @@ export function stripTypeScript(text: string): Stripped {
       i++;
       continue;
     }
-    if (c === "{" && exprDepth.length > 0) bumpTop(exprDepth, 1);
-    if (c === "}" && exprDepth.length > 0) {
-      if (exprDepth[exprDepth.length - 1] === 0) {
-        exprDepth.pop();
-        inTemplate = true;
-        out.push(" ");
-        i++;
-        continue;
+
+    if (top?.t === "tag") {
+      if (c === "{") {
+        frames.push({ t: "expr", d: 0 });
+      } else if (c === ">") {
+        const selfClosing = previousSignificant() === "/" && !top.closing;
+        frames.pop();
+        if (top.closing) {
+          if (frames[frames.length - 1]?.t === "text") frames.pop();
+        } else if (!selfClosing) {
+          frames.push({ t: "text" });
+        }
       }
-      bumpTop(exprDepth, -1);
+      out.push(c);
+      i++;
+      continue;
+    }
+
+    // Code: the root, a `${}` or a JSX `{}`.
+    if (c === "<" && text.charAt(i + 1) !== "/" && tagStartsAt(i + 1) && jsxMayStart()) {
+      frames.push({ t: "tag", closing: false });
+      out.push(c);
+      i++;
+      continue;
+    }
+    if (top !== undefined && (top.t === "tpl" || top.t === "expr")) {
+      if (c === "{") top.d++;
+      if (c === "}") {
+        if (top.d === 0) {
+          frames.pop();
+          if (top.t === "tpl") {
+            inTemplate = true;
+            out.push(" ");
+          } else {
+            out.push(c);
+          }
+          i++;
+          continue;
+        }
+        top.d--;
+      }
     }
     out.push(c);
     i++;
@@ -520,11 +614,6 @@ export function stripTypeScript(text: string): Stripped {
 // ---------------------------------------------------------------------------
 // Shared helpers
 // ---------------------------------------------------------------------------
-
-function bumpTop(stack: number[], by: number): void {
-  const top = stack.length - 1;
-  stack[top] = (stack[top] ?? 0) + by;
-}
 
 function bump(map: Map<string, number>, key: string, by = 1): void {
   map.set(key, (map.get(key) ?? 0) + by);
@@ -572,6 +661,13 @@ export function normalisedEntropy(counts: Iterable<number>): number | null {
     h -= p * Math.log(p);
   }
   return round4(h / Math.log(xs.length));
+}
+
+/** Twelve hex characters of the sorted library names, or `none` when there were none. */
+export function libraryHashOf(names: readonly string[] | undefined): string {
+  if (names === undefined) return "none";
+  const sorted = [...new Set(names)].sort();
+  return createHash("sha256").update(sorted.join("\n"), "utf8").digest("hex").slice(0, 12);
 }
 
 function hashSources(files: readonly SourceFile[]): string {
@@ -660,6 +756,8 @@ interface PyImports {
   libTargets: Map<string, string>;
   /** Local names imported from anywhere that is not the library or manim. */
   otherImported: Set<string>;
+  /** Local name to the engine name it stands for, for `from manimlib import Square as Sq`. */
+  engineAliases: Map<string, string>;
 }
 
 function parsePyImports(
@@ -668,6 +766,7 @@ function parsePyImports(
 ): PyImports {
   const libTargets = new Map<string, string>();
   const otherImported = new Set<string>();
+  const engineAliases = new Map<string, string>();
 
   const fromRe =
     /^[ \t]*from[ \t]+([\w.]+)[ \t]+import[ \t]*(\*|\(([^)]*)\)|((?:[^\n\\]|\\\r?\n)*))/gm;
@@ -686,6 +785,7 @@ function parsePyImports(
       const local = sm[2] ?? imported;
       if (isLibrary(mod)) libTargets.set(local, `${mod}.${imported}`);
       else if (!isManim) otherImported.add(local);
+      else if (local !== imported) engineAliases.set(local, imported);
     }
   }
 
@@ -706,7 +806,7 @@ function parsePyImports(
       else otherImported.add(local);
     }
   }
-  return { libTargets, otherImported };
+  return { libTargets, otherImported, engineAliases };
 }
 
 /** Counts the `class` declarations whose body defines `construct`. */
@@ -749,7 +849,7 @@ function scanPythonFile(
   const { code } = stripPython(text);
   const patterns = LIBRARY_MODULE_PATTERNS[tool];
   const roots = LIBRARY_ROOT_SEGMENTS[tool];
-  const { libTargets, otherImported } = parsePyImports(code, (m) =>
+  const { libTargets, otherImported, engineAliases } = parsePyImports(code, (m) =>
     patterns.some((p) => p.test(m)),
   );
 
@@ -793,7 +893,8 @@ function scanPythonFile(
       continue;
     }
 
-    const name = path;
+    // An alias counts under the name it stands for.
+    const name = engineAliases.get(path) ?? path;
     if (PYTHON_IGNORED.has(name)) continue;
     sawNames.add(name);
     const target = libTargets.get(name);
@@ -963,13 +1064,17 @@ function scanTypeScriptFile(
       n += (code.match(jsx) ?? []).length;
       if (n > 0) counts.set(imp.local, n);
     }
-    for (const [key, n] of counts) {
-      bump(into.all, key, n);
+    for (const [localKey, n] of counts) {
       const name = imp.namespace
-        ? key.slice(imp.local.length + 1)
+        ? localKey.slice(imp.local.length + 1)
         : imp.imported === "default"
           ? imp.local
           : imp.imported;
+      // Counted under the exported name, so `ramp as r` here and `ramp`
+      // there are one helper. A member of a library namespace is its member's
+      // name; an engine namespace keeps its qualifier (`THREE.Mesh`).
+      const key = imp.namespace ? (imp.kind === "library" ? name : localKey) : name;
+      bump(into.all, key, n);
       if (imp.kind === "library") bump(into.helpers, key, n);
       if (imp.kind === "engine") bump(into.engine, key, n);
       if (TS_MOTION_SET.has(name)) {
@@ -1048,6 +1153,7 @@ export function scanSources(
       distinctEngine: tally.engine.size,
       uses3d: tally.uses3d,
       variety: normalisedEntropy(dist.values()),
+      libraryHash: libraryHashOf(options.libraryNames),
     },
   };
 }

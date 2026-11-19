@@ -334,12 +334,13 @@ describe("scanSources: TypeScript", () => {
         ].join("\n"),
       ),
     );
+    // An alias counts under the exported name: `Fill` is AbsoluteFill, `r` is ramp.
     expect(r.calls).toEqual({
-      Fill: 1,
+      AbsoluteFill: 1,
       Tex: 1,
       "THREE.Mesh": 2,
       "THREE.Vector3": 1,
-      r: 2,
+      ramp: 2,
       spring: 1,
       useCurrentFrame: 1,
     });
@@ -462,6 +463,115 @@ describe("scanSources: TypeScript", () => {
       ts("import { ramp } from '#lib';\nconst s = `x ${ramp(1)} ${`y ${ramp(2)}`}`;"),
     );
     expect(r.calls).toEqual({ ramp: 2 });
+  });
+});
+
+describe("aliases count under the exported name", () => {
+  it("makes `ramp as r` in one file and `ramp` in another one helper, so variety does not move", () => {
+    const body = (importLine: string, call: string) =>
+      `${importLine}\nimport { spring } from "remotion";\n${call}; spring();\n`;
+    const aliased = scanSources("remotionkc", [
+      { path: "a.tsx", text: body('import { ramp as r } from "#lib";', "r(1)") },
+      { path: "b.tsx", text: body('import { ramp } from "#lib";', "ramp(2)") },
+    ]);
+    const plain = scanSources("remotionkc", [
+      { path: "a.tsx", text: body('import { ramp } from "#lib";', "ramp(1)") },
+      { path: "b.tsx", text: body('import { ramp } from "#lib";', "ramp(2)") },
+    ]);
+    expect(aliased.calls).toEqual({ ramp: 2, spring: 2 });
+    expect(aliased.metrics.distinctHelpers).toBe(1);
+    expect(aliased.metrics.variety).toBe(plain.metrics.variety);
+    expect(aliased.calls).toEqual(plain.calls);
+  });
+
+  it("names a library namespace's member by the member, and keeps an engine namespace's qualifier", () => {
+    const r = scanSources(
+      "revideokc",
+      ts(
+        [
+          "import * as lib from '#lib';",
+          "import * as THREE from 'three';",
+          "lib.ramp(1); lib.ramp(2); new THREE.Mesh();",
+        ].join("\n"),
+      ),
+    );
+    expect(r.calls).toEqual({ "THREE.Mesh": 1, ramp: 2 });
+    expect(r.metrics.helperCalls).toBe(2);
+  });
+
+  it("uses the local name for a default import", () => {
+    const r = scanSources("remotionkc", ts("import Chart from '#lib/chart';\nChart();\n"));
+    expect(r.calls).toEqual({ Chart: 1 });
+  });
+
+  it("counts a Python alias of a library name or a manim name under the name it stands for", () => {
+    const r = scanSources(
+      "manimkc",
+      py(
+        [
+          "from manimlib import FadeIn as F, Square as Sq",
+          "from lesson import body as b",
+          "from cslib import body",
+          "F(a); Sq(); b('x'); body('y')",
+        ].join("\n"),
+      ),
+    );
+    expect(r.calls).toEqual({ FadeIn: 1, Square: 1, body: 2 });
+    expect(r.metrics).toMatchObject({ helperCalls: 2, distinctHelpers: 1, animationCalls: 1, engineCalls: 1 });
+  });
+
+  it("is scanner version 2", () => {
+    expect(INGREDIENTS_SCANNER_VERSION).toBe(2);
+  });
+});
+
+describe("JSX text in the TypeScript tokenizer", () => {
+  const lib = 'import { Card } from "#lib";\n';
+
+  it("keeps a component after an apostrophe in element text", () => {
+    const r = scanSources("remotionkc", ts(`${lib}const a = <p>Don't <Card /></p>;\n`));
+    expect(r.calls).toEqual({ Card: 1 });
+  });
+
+  it("does not count a component named inside element text", () => {
+    const r = scanSources("remotionkc", ts(`${lib}const a = <p>say <b>Card(</b> or "it's" here</p>;\n`));
+    expect(r.calls).toEqual({});
+  });
+
+  it("reads a string inside an expression container among the children as a string", () => {
+    const r = scanSources(
+      "remotionkc",
+      ts(`${lib}const a = (\n  <div>\n    it's {cond ? "it's <Card />" : 'x'} <Card />\n  </div>\n);\n`),
+    );
+    expect(r.calls).toEqual({ Card: 1 });
+  });
+
+  it("handles a nested element, attributes with strings and braces, and a self-closing tag", () => {
+    const r = scanSources(
+      "remotionkc",
+      ts(
+        `${lib}const a = <Card title="it's" onClick={() => go('x>y')}>\n  <Card /> don't <Card></Card>\n</Card>;\nCard();\n`,
+      ),
+    );
+    expect(r.calls).toEqual({ Card: 4 });
+  });
+
+  it("does not read a generic call or a comparison as a tag", () => {
+    const r = scanSources(
+      "remotionkc",
+      ts(`${lib}const x = foo<Bar>('x'); const y = a < b && c > d; Card('it');\nconst z = Array<string>(1); Card(2);\n`),
+    );
+    expect(r.calls).toEqual({ Card: 2 });
+  });
+
+  it("finds JSX after return, an arrow, a ternary and a call argument", () => {
+    const r = scanSources(
+      "remotionkc",
+      ts(
+        `${lib}function f() { return <p>don't <Card /></p>; }\nconst g = () => <p>it's <Card /></p>;\nconst h = ok ? <p>x's <Card /></p> : null;\nuse(1, <p>y's <Card /></p>);\n`,
+      ),
+    );
+    expect(r.calls).toEqual({ Card: 4 });
   });
 });
 
