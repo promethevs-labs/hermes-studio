@@ -54,6 +54,9 @@ export function useAssetRating({
   const [failed, setFailed] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const thumbs = useRef<Record<string, HTMLButtonElement | null>>({});
+  // The thumb press still on its way, resolving to whether the route took it.
+  // Save waits on it, so tags chosen while the press travels are not dropped.
+  const pressing = useRef<Promise<boolean> | null>(null);
 
   /** The thumb that is on, else the first, for focus to return to when the card closes. */
   const focusThumb = () => (thumbs.current[String(state.value)] ?? thumbs.current["1"])?.focus();
@@ -70,7 +73,11 @@ export function useAssetRating({
     setProblem(null);
     dispatch(taking ? { type: "clear" } : { type: "choose", value: next });
     setBusy(true);
-    const answer = await setRating(assetId, { value: taking ? 0 : next });
+    const request = setRating(assetId, { value: taking ? 0 : next });
+    const took = request.then((sent) => sent.ok);
+    pressing.current = took;
+    const answer = await request;
+    if (pressing.current === took) pressing.current = null;
     setBusy(false);
     if (!answer.ok) {
       dispatch({ type: "restore", state: before });
@@ -82,15 +89,22 @@ export function useAssetRating({
 
   /** Save the tags and note with the chosen value and close the card. True when the route took it. */
   const save = async (): Promise<boolean> => {
-    if (busy || state.value === 0) return false;
+    if (saving || state.value === 0) return false;
     const cleaned = cleanDraft(state.value, state.tags, state.note);
     if (!cleaned.ok) {
       setProblem(cleaned.reason);
       return false;
     }
     setProblem(null);
-    setBusy(true);
     setSaving(true);
+    // A thumb press may still be travelling (the card opens before it
+    // lands). Wait for it rather than drop this save; a press the route
+    // refused has already put the card back and said so.
+    if (pressing.current !== null && !(await pressing.current)) {
+      setSaving(false);
+      return false;
+    }
+    setBusy(true);
     const answer = await setRating(assetId, cleaned.rating);
     setBusy(false);
     setSaving(false);

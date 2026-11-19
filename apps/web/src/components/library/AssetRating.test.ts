@@ -163,6 +163,49 @@ describe("the card", () => {
     expect(ui.details()).toBe("Not good (Too slow, Too long)dull start");
   });
 
+  it("waits for a thumb press still on its way, then saves the tags chosen meanwhile", async () => {
+    const ui = await mount();
+    let land: (answer: unknown) => void = () => {};
+    actions.setRating.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          land = resolve;
+        }),
+    );
+    await click(ui.thumb("Not good"));
+    await click(ui.pill("Too slow"));
+    await click(ui.pill("Save"));
+    // Only the press has gone out; the save is waiting on it, not dropped.
+    expect(actions.setRating).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      land({ ok: true, value: { value: -1, tags: [], note: null } });
+    });
+    expect(actions.setRating).toHaveBeenCalledTimes(2);
+    expect(actions.setRating).toHaveBeenLastCalledWith("manimkc:out/a.mp4", { value: -1, tags: ["too-slow"], note: null });
+    expect(ui.isOpen()).toBe(false);
+    expect(ui.details()).toBe("Not good (Too slow)");
+  });
+
+  it("does not save when the thumb press it waited on was refused", async () => {
+    const ui = await mount();
+    let land: (answer: unknown) => void = () => {};
+    actions.setRating.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          land = resolve;
+        }),
+    );
+    await click(ui.thumb("Not good"));
+    await click(ui.pill("Too slow"));
+    await click(ui.pill("Save"));
+    await act(async () => {
+      land({ ok: false, message: "The database did not answer." });
+    });
+    expect(actions.setRating).toHaveBeenCalledTimes(1);
+    expect(ui.thumb("Not good").getAttribute("aria-pressed")).toBe("false");
+    expect(ui.details()).toBe("");
+  });
+
   it("keeps the card open with the route's words when a save is refused", async () => {
     const ui = await mount();
     await click(ui.thumb("Good"));
