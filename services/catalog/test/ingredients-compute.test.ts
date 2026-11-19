@@ -110,6 +110,13 @@ describe("computeIngredientsForTool", () => {
     expect(await manimkcLibraryNames(path.join(work, "no-such-checkout"))).toBeNull();
   });
 
+  it("lists a library's callable names and leaves its constants out", async () => {
+    const checkout = path.join(work, "manim-constants");
+    await write(path.join(checkout, "lib", "cslib.py"), "ACCENT = '#fff'\nPANEL_BG = '#000'\nSIZE_2 = 2\ndef caption(s): pass\nclass CaptionBar: pass\n");
+    await write(path.join(checkout, "lib", "lesson.py"), "def heading(s): pass\n");
+    expect(await manimkcLibraryNames(checkout)).toEqual(["CaptionBar", "caption", "heading"]);
+  });
+
   it("reads blenderkc's files from the default topics folder", async () => {
     const checkout = path.join(work, "blender-checkout");
     await write(

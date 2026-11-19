@@ -61,7 +61,7 @@ export interface ToolComputation {
 }
 
 /**
- * The public names of manimkc's library, read from the checkout's `lib/`.
+ * The public callable names of manimkc's library, read from the checkout's `lib/`.
  * Null when the checkout has none of them, so a caller can say the library
  * was not found rather than report every star-imported helper as unused.
  */
@@ -72,7 +72,8 @@ export async function manimkcLibraryNames(checkout: string): Promise<string[] | 
     try {
       const text = await readFile(path.join(checkout, "lib", file), "utf8");
       found += 1;
-      for (const name of pythonPublicNames(text)) names.add(name);
+      // Constants (`ACCENT`, `PANEL_BG`) are values, not helpers a scene calls.
+      for (const name of pythonPublicNames(text)) if (!/^[A-Z][A-Z0-9_]*$/.test(name)) names.add(name);
     } catch {
       // A missing file is a smaller library, not a failure.
     }
