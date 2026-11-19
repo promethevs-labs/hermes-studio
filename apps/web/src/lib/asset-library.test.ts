@@ -66,8 +66,13 @@ const listAssets = vi.hoisted(() =>
   ),
 );
 
+const currentRating = vi.hoisted(() => vi.fn(async (): Promise<unknown> => null));
+const readPreference = vi.hoisted(() => vi.fn(async (): Promise<unknown> => undefined));
+
 vi.mock("@hermes/catalog/state", () => ({
   assetParents,
+  currentRating,
+  readPreference,
   listAssets,
   readEvents,
   readPreferencesWithPrefix,
@@ -93,7 +98,7 @@ vi.mock("@hermes/catalog/state", () => ({
 
 vi.mock("next/server", () => ({ connection: async () => undefined }));
 
-const { loadAssetParents, loadFavorites, loadLastWatched, readLibrary, readAssetDetail, readSearchText } = await import(
+const { loadAssetParents, loadFavorites, loadLastWatched, loadRating, readLibrary, readAssetDetail, readSearchText } = await import(
   "@/lib/asset-library"
 );
 const { NoOwnerError } = await import("@/lib/owner");
@@ -145,6 +150,45 @@ describe("loadFavorites", () => {
   it("answers null, not an empty set, when the store cannot be read", async () => {
     readPreferencesWithPrefix.mockRejectedValueOnce(new Error("store unavailable"));
     expect(await loadFavorites()).toBeNull();
+  });
+});
+
+describe("loadRating", () => {
+  it("answers no rating and no dismissal for an asset the owner never rated", async () => {
+    expect(await loadRating("fx:video")).toEqual({ rating: null, dismissed: false });
+  });
+
+  it("answers the current rating under the owner, and whether the prompt was dismissed", async () => {
+    currentRating.mockResolvedValueOnce({
+      id: "r1",
+      assetId: "fx:video",
+      value: -1,
+      tags: ["too-slow"],
+      note: "slow",
+      surface: "library",
+      jobId: null,
+      assetHash: null,
+      at: "2026-11-20T10:00:00.000Z",
+    });
+    readPreference.mockResolvedValueOnce({ at: "2026-11-20T10:01:00.000Z" });
+    expect(await loadRating("fx:video")).toEqual({
+      rating: { value: -1, tags: ["too-slow"], note: "slow" },
+      dismissed: true,
+    });
+    // The owner is passed on both reads, never left to the default.
+    expect(currentRating).toHaveBeenLastCalledWith(expect.anything(), "local", "fx:video");
+    expect(readPreference).toHaveBeenLastCalledWith(expect.anything(), "ratingPrompt:fx:video", "local");
+  });
+
+  it("reads a rating that was taken back as no rating, and a stray preference value as not dismissed", async () => {
+    currentRating.mockResolvedValueOnce({ value: 0, tags: [], note: null });
+    readPreference.mockResolvedValueOnce("yes");
+    expect(await loadRating("fx:video")).toEqual({ rating: null, dismissed: false });
+  });
+
+  it("answers unrated and undismissed when the store cannot be read", async () => {
+    currentRating.mockRejectedValueOnce(new Error("store unavailable"));
+    expect(await loadRating("fx:video")).toEqual({ rating: null, dismissed: false });
   });
 });
 

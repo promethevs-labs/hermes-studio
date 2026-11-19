@@ -1,4 +1,4 @@
-import { JOB_ACTIVE_STATES, type JobState } from "@hermes/schema/shared";
+import { JOB_ACTIVE_STATES, type JobReview, type JobState } from "@hermes/schema/shared";
 
 import type { Comparison } from "@/lib/studio-compare";
 import { jobStateInline } from "@/lib/studio-job-state";
@@ -139,6 +139,12 @@ export interface Job {
   cancelRequestedAt: string | null;
   /** The conversation that started it (docs/STUDIO-CHAT-FIRST.md). Optional: an older runner does not send it. */
   draftId?: string | null;
+  /**
+   * What a person decided about the output, and why (`JobReview`): the tags
+   * and note a discard carried. Optional on the wire, so a runner one version
+   * behind reads as no review.
+   */
+  review?: JobReview | null;
   /**
    * Every catalog call that did not go through, newest last.
    *

@@ -151,6 +151,19 @@ describe("/studio/api/*", () => {
     expect(seen).toHaveLength(1);
   });
 
+  it("forwards a discard's reason to the runner as the JSON it was sent", async () => {
+    const reason = JSON.stringify({ tags: ["voice", "too-slow"], note: "the narrator mumbles" });
+    const response = await POST(
+      request("POST", { "sec-fetch-site": "same-origin", "content-type": "application/json" }, reason, "jobs/j1/discard"),
+      { params: Promise.resolve({ segments: ["jobs", "j1", "discard"] }) },
+    );
+    expect(response.status).toBe(200);
+    const last = seen.at(-1)!;
+    expect(new URL(last.url).pathname).toBe("/api/jobs/j1/discard");
+    expect(last.body).toBe(reason);
+    expect(last.headers.get("content-type")).toBe("application/json");
+  });
+
   it("drops a Location and a Set-Cookie from the runner, and sandboxes what it hands back", async () => {
     reply = () =>
       new Response("<svg/>", {

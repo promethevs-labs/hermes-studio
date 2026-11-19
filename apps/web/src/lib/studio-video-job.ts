@@ -1,4 +1,4 @@
-import type { JobState } from "@hermes/schema/shared";
+import type { JobReview, JobState } from "@hermes/schema/shared";
 import type { VideoChapter } from "@hermes/tutor/media";
 
 import { assetFileHref, assetStatusHref } from "@/lib/library";
@@ -133,6 +133,8 @@ export interface VideoJob {
   note: string;
   /** Only `GET /api/jobs/{id}` carries it. */
   brief?: VideoBrief;
+  /** What a person decided about the cut, and why. Optional: a runner one version behind sends none. */
+  review?: JobReview | null;
 }
 
 /** One entry of `GET /api/jobs/{id}/sheets`: the latest contact sheet of one scene. */

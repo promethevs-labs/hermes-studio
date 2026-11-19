@@ -43,6 +43,11 @@ export type AssetTabsInput = {
    * video, "Read" for anything else. Left out when there is nothing to say.
    */
   progress?: { label: string; value: ReactNode };
+  /**
+   * The reader's own rating, as the row after `progress`. Its value may draw
+   * nothing (an unrated video), and the row is then hidden.
+   */
+  rating?: { label: string; value: ReactNode };
 };
 
 export function assetTabItems({
@@ -53,6 +58,7 @@ export function assetTabItems({
   derivations,
   indexed,
   progress,
+  rating,
 }: AssetTabsInput): TabItem[] {
   const familyCount = derivations.sources.length + derivations.derived.length;
   return [
@@ -86,7 +92,14 @@ export function assetTabItems({
       id: "details",
       label: "Details",
       content: (
-        <CatalogFacts asset={asset} titles={titles} indexed={indexed} progress={progress} className="max-w-3xl" />
+        <CatalogFacts
+          asset={asset}
+          titles={titles}
+          indexed={indexed}
+          progress={progress}
+          rating={rating}
+          className="max-w-3xl"
+        />
       ),
     },
   ];
@@ -250,12 +263,14 @@ function CatalogFacts({
   titles,
   indexed,
   progress,
+  rating,
   className,
 }: {
   asset: AssetWithTopics;
   titles: Record<string, string>;
   indexed: string;
   progress?: { label: string; value: ReactNode };
+  rating?: { label: string; value: ReactNode };
   className?: string;
 }) {
   const size = formatBytes(asset.bytes);
@@ -264,6 +279,8 @@ function CatalogFacts({
       className={className}
       facts={[
         progress,
+        // An unrated video's value draws nothing, which hides the whole row.
+        rating && { ...rating, className: "has-[dd:empty]:hidden" },
         { label: "Kind", value: assetKindLabel(asset.kind) },
         { label: "Indexed", value: indexed },
         { label: "Id", value: <span className="font-mono text-[12px]">{asset.id}</span> },

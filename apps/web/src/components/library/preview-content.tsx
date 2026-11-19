@@ -7,7 +7,7 @@ import { FavoriteButton } from "@/components/library/AssetActions";
 import { AssetBody } from "@/components/library/AssetBody";
 import { loadAssetBody } from "@/components/library/asset-body-data";
 import { MarkWatched } from "@/components/library/MarkWatched";
-import { loadAssetDetail, loadAssetParents, loadFavorite, loadPlayback } from "@/lib/asset-library";
+import { loadAssetDetail, loadAssetParents, loadFavorite, loadPlayback, loadRating } from "@/lib/asset-library";
 import { dayKey } from "@hermes/tutor/days";
 import { loadKnowledgeBase } from "@/lib/learner-store";
 import { assetHref, conceptHref, explainedConcepts } from "@/lib/library";
@@ -46,12 +46,13 @@ export async function loadPreview(requested: string): Promise<PreviewAnswer> {
   const id = typeof requested === "string" ? parseOpen(requested) : null;
   if (id === null) return { state: "missing", id: String(requested) };
 
-  const [detail, { kb }, playback, favorite, parents] = await Promise.all([
+  const [detail, { kb }, playback, favorite, parents, { rating, dismissed }] = await Promise.all([
     loadAssetDetail(id),
     loadKnowledgeBase(),
     loadPlayback(id),
     loadFavorite(id),
     loadAssetParents(id),
+    loadRating(id),
   ]);
   const { asset, derivations, reachable, notes, concepts } = detail;
   if (asset === null) return { state: reachable ? "missing" : "unreachable", id };
@@ -104,6 +105,8 @@ export async function loadPreview(requested: string): Promise<PreviewAnswer> {
             playback,
             watchedDay: playback?.watchedAt ? dayKey(playback.watchedAt, zone) : null,
             favorite: favorite !== null,
+            rating,
+            ratingDismissed: dismissed,
           }}
         />
       </div>

@@ -55,7 +55,7 @@ function data(asset: Partial<AssetRef> & Pick<AssetRef, "id" | "kind">, over: Pa
 const draw = (body: AssetBodyData, video?: AssetBodyVideo) =>
   renderToStaticMarkup(createElement(AssetBody, { data: body, title: "Demo", notes: {}, variant: "page", video }));
 
-const player: AssetBodyVideo = { heading: null, playback: null, watchedDay: null, favorite: false };
+const player: AssetBodyVideo = { heading: null, playback: null, watchedDay: null, favorite: false, rating: null, ratingDismissed: false };
 const videoRow = { id: "video:manimkc:out/demo.mp4", kind: "video", path: "out/demo.mp4" } as const;
 
 describe("AssetBody", () => {

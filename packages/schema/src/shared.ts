@@ -803,7 +803,7 @@ export const RATING_TAG_LABELS: Readonly<Record<RatingTag, string>> = {
   wrong: "Wrong or misleading",
   voice: "Voice",
   "too-long": "Too long",
-  clear: "Clear",
+  clear: "Easy to follow",
   "good-visuals": "Good visuals",
   "good-pacing": "Good pacing",
 };

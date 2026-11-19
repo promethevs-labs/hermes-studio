@@ -5,6 +5,7 @@ import { cache } from "react";
 import {
   assetCounts,
   assetParents,
+  currentRating,
   derivationSources,
   listAssets,
   readEvents,
@@ -26,6 +27,8 @@ import type { AssetAccess } from "@/lib/library-thumbnails";
 import { currentOwner, currentScope, NoOwnerError, type OwnerScope } from "@/lib/owner";
 import { FAVORITE_PREFIX, favoriteKey, parseFavorite, type Favorite } from "@hermes/tutor/favorite";
 import { parsePlayback, playbackKey, type Playback } from "@hermes/tutor/playback";
+import { ratingPromptKey } from "@hermes/schema/shared";
+import { parseRatingPrompt, type ViewRating } from "@/lib/rating-draft";
 import {
   optionalParents,
   optionalTitles,
@@ -461,6 +464,31 @@ export async function loadFavorite(id: string): Promise<Favorite | null> {
   } catch (error) {
     warn("favorite", error);
     return null;
+  }
+}
+
+/**
+ * The owner's current rating of one asset, and whether they dismissed or
+ * answered the rating prompt under it (`ratingPrompt:<id>`). `rating` is null
+ * for no rating, a rating taken back included. A store that could not be read
+ * costs the control its state, which reads as unrated and undismissed; the
+ * card then offers itself once more, and a press writes through the route,
+ * which says if it failed.
+ */
+export async function loadRating(id: string): Promise<{ rating: ViewRating | null; dismissed: boolean }> {
+  await connection();
+  const owner = await currentOwner();
+  try {
+    const db = await catalogDatabase();
+    const [row, prompt] = await Promise.all([
+      currentRating(db, owner, id),
+      readPreference(db, ratingPromptKey(id), owner),
+    ]);
+    const rating = row === null || row.value === 0 ? null : { value: row.value, tags: row.tags, note: row.note };
+    return { rating, dismissed: parseRatingPrompt(prompt) };
+  } catch (error) {
+    warn("rating", error);
+    return { rating: null, dismissed: false };
   }
 }
 

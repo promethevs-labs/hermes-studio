@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { PanelLink } from "@/components/studio/PanelLink";
 import { ComparisonPanel } from "@/components/studio/ComparisonPanel";
+import { DiscardedReason } from "@/components/studio/DiscardReason";
 import { CancelJobButton, Elapsed, IndeterminateBar } from "@/components/studio/job-bits";
 import { JobCost } from "@/components/studio/JobCost";
 import { useJobVerb } from "@/components/studio/use-job-verb";
@@ -267,6 +268,7 @@ function DiagramJobPanel({
           <p className="mt-1">
             The diagram in the catalog never changed, so there is nothing to undo.
           </p>
+          <DiscardedReason review={job.review} className="mt-1" />
         </div>
       )}
 

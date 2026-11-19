@@ -8,6 +8,8 @@ export interface Fact {
   value: ReactNode;
   /** The row's React key, for a list whose facts move; the place and the label otherwise, so two rows with one label never collide. */
   key?: string;
+  /** Classes for the pair's row, such as `has-[dd:empty]:hidden` for a value that draws nothing. */
+  className?: string;
 }
 
 /**
@@ -44,11 +46,12 @@ export function FactList({
         fact ? (
           <div
             key={fact.key ?? `${at}:${fact.label}`}
-            className={
+            className={cx(
               dense
                 ? "grid min-h-8 grid-cols-[6rem_minmax(0,1fr)] items-start gap-3 border-b border-border py-1.5 last:border-b-0"
-                : "grid grid-cols-1 gap-0.5 sm:grid-cols-[6rem_minmax(0,1fr)] sm:gap-4"
-            }
+                : "grid grid-cols-1 gap-0.5 sm:grid-cols-[6rem_minmax(0,1fr)] sm:gap-4",
+              fact.className,
+            )}
           >
             <dt className={dense ? "text-xs text-text2" : cx(LABEL, "pt-0.5")}>{fact.label}</dt>
             <dd className={cx("min-w-0 break-words", dense ? "text-xs text-text" : "text-[13px] text-text2")}>
