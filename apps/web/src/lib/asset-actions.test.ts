@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ASSET_NAME_MAX, cleanAssetName } from "@hermes/schema/shared";
 
-import { checkAssetName, markWatched, renameAsset, setFavorite } from "./asset-actions";
+import { checkAssetName, dismissRatingPrompt, markWatched, renameAsset, setFavorite, setRating } from "./asset-actions";
 
 /**
  * The library's three client writes, against a stubbed `fetch`: what each
@@ -94,5 +94,42 @@ describe("checkAssetName", () => {
       ok: false,
       message: `At most ${ASSET_NAME_MAX} characters.`,
     });
+  });
+});
+
+describe("setRating", () => {
+  it("posts the value with its tags and note, and answers the stored rating", async () => {
+    fetchMock.mockResolvedValue(
+      reply(200, { ok: true, result: { assetId: "v", value: -1, tags: ["voice"], note: "mumbles", at: "2026-11-20T10:00:00.000Z" } }),
+    );
+    expect(await setRating("v", { value: -1, tags: ["voice"], note: "mumbles" })).toEqual({
+      ok: true,
+      value: { value: -1, tags: ["voice"], note: "mumbles" },
+    });
+    expect(sent()).toEqual({
+      path: "/api/learner/rating",
+      method: "POST",
+      body: { assetId: "v", value: -1, tags: ["voice"], note: "mumbles" },
+    });
+  });
+
+  it("sends a bare value with no tags and no note, and says why a refusal was one", async () => {
+    fetchMock.mockResolvedValueOnce(reply(200, { ok: true, result: { value: 1 } }));
+    expect(await setRating("v", { value: 1 })).toEqual({ ok: true, value: { value: 1, tags: [], note: null } });
+    expect(sent().body).toEqual({ assetId: "v", value: 1, tags: [], note: null });
+    fetchMock.mockResolvedValueOnce(reply(400, { ok: false, error: "No asset." }));
+    expect(await setRating("v", { value: 1 })).toEqual({ ok: false, message: "No asset." });
+  });
+});
+
+describe("dismissRatingPrompt", () => {
+  it("writes { at } under the asset's ratingPrompt key through the preference route", async () => {
+    fetchMock.mockResolvedValue(reply(200, { ok: true }));
+    expect(await dismissRatingPrompt("manimkc:out/a.mp4")).toEqual({ ok: true, value: null });
+    const { path, method, body } = sent();
+    expect(path).toBe("/api/learner/preference");
+    expect(method).toBe("POST");
+    expect(body.key).toBe("ratingPrompt:manimkc:out/a.mp4");
+    expect(Date.parse(body.value.at)).not.toBeNaN();
   });
 });

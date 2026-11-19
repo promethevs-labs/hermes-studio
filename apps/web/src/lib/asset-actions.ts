@@ -1,5 +1,12 @@
-import { ASSET_NAME_MAX, cleanAssetName } from "@hermes/schema/shared";
+import {
+  ASSET_NAME_MAX,
+  cleanAssetName,
+  ratingPromptKey,
+  type RatingTag,
+  type RatingValue,
+} from "@hermes/schema/shared";
 
+import { ratingPromptValue } from "@/lib/rating-draft";
 import { sendJson } from "@/lib/send-json";
 
 /**
@@ -63,4 +70,45 @@ export async function renameAsset(assetId: string, name: string | null): Promise
   const result = answer.value.result;
   if (result === undefined) return { ok: false, message: "Not saved: the server sent no result." };
   return { ok: true, value: { title: result.title ?? null, name: result.name ?? null } };
+}
+
+/** What `POST /api/learner/rating` stores and answers: the new current rating. */
+export interface StoredRatingView {
+  value: RatingValue;
+  tags: RatingTag[];
+  note: string | null;
+}
+
+/**
+ * Rate a library asset (`/api/learner/rating`): `value` -1, 0 (take it back)
+ * or 1, with the tags and note that say why. Answers the stored rating, or the
+ * sentence to show when the route refused it.
+ */
+export async function setRating(
+  assetId: string,
+  rating: { value: RatingValue; tags?: readonly RatingTag[]; note?: string | null },
+): Promise<ActionResult<StoredRatingView>> {
+  const answer = await post<StoredRatingView>("/api/learner/rating", {
+    assetId,
+    value: rating.value,
+    tags: rating.tags ?? [],
+    note: rating.note ?? null,
+  });
+  if (!answer.ok) return answer;
+  const result = answer.value.result;
+  if (result === undefined) return { ok: false, message: "Not saved: the server sent no result." };
+  return { ok: true, value: { value: result.value, tags: result.tags ?? [], note: result.note ?? null } };
+}
+
+/**
+ * Remember the rating prompt was dismissed or answered for this asset
+ * (`ratingPrompt:<asset id>` through `/api/learner/preference`), so the
+ * watched crossing never opens it again.
+ */
+export async function dismissRatingPrompt(assetId: string): Promise<ActionResult> {
+  const answer = await post("/api/learner/preference", {
+    key: ratingPromptKey(assetId),
+    value: ratingPromptValue(),
+  });
+  return answer.ok ? { ok: true, value: null } : answer;
 }

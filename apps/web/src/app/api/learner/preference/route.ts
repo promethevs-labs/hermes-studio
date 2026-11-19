@@ -1,15 +1,18 @@
 import {
   asThemeMode,
   isUserResourceUrl,
+  ownerScope,
   PREFERENCE_KEYS,
+  RATING_PROMPT_PREFERENCE_PREFIX,
   THEME_MODES,
   USER_RESOURCE_LIMITS,
   type ThemeMode,
 } from "@hermes/schema/shared";
-import { writePreference } from "@hermes/catalog/state";
+import { assetsByIds, StateError, writePreference } from "@hermes/catalog/state";
 import { lastVisitedValue, rememberVisit } from "@hermes/tutor/server/learner-writes";
 
 import { BadRequest, handler, MAX_ID_CHARS } from "@/lib/learner-api";
+import { parseRatingPrompt } from "@/lib/rating-draft";
 import {
   InvalidPreference,
   validateMotionMode,
@@ -34,6 +37,12 @@ import {
  * `lastVisited` write (`rememberVisit`). `dailyTarget` and `dailyLeeway` went with the
  * habit layer (H1 of docs/proposals/home-page.md): their rows stay, and nothing
  * writes them.
+ *
+ * One family is open by prefix, not by key: `ratingPrompt:<asset id>`
+ * (`RATING_PROMPT_PREFERENCE_PREFIX`), the mark that the learner dismissed or
+ * answered the rating prompt under a library video. Its value is `{ at }`, as
+ * a favourite's is, and the asset must be one the owner can read, so the table
+ * does not collect keys for ids that were never assets.
  */
 const WRITABLE = {
   [PREFERENCE_KEYS.theme]: theme,
@@ -61,8 +70,16 @@ function settled<T>(validate: (value: unknown) => T): (value: unknown) => T {
 
 export const POST = handler(
   "preference",
-  (body) => {
+  (body): { key: string; value: unknown; assetId?: string } => {
     const key = body.key;
+    if (typeof key === "string" && key.startsWith(RATING_PROMPT_PREFERENCE_PREFIX)) {
+      const assetId = key.slice(RATING_PROMPT_PREFERENCE_PREFIX.length);
+      if (assetId.trim() === "" || assetId.length > MAX_ID_CHARS) {
+        throw new BadRequest(`"key" must name an asset after "${RATING_PROMPT_PREFERENCE_PREFIX}".`);
+      }
+      if (!parseRatingPrompt(body.value)) throw new BadRequest(`"value" must be { "at": an ISO 8601 time }.`);
+      return { key, value: { at: (body.value as { at: string }).at }, assetId };
+    }
     // `Object.hasOwn`, not `key in WRITABLE`. `in` walks the prototype chain,
     // so "constructor" and "toString" would pass the allow-list and then be
     // persisted as preference keys — with `Object` itself standing in as the
@@ -73,8 +90,13 @@ export const POST = handler(
     const validate = WRITABLE[key as keyof typeof WRITABLE];
     return { key, value: validate(body.value) };
   },
-  async (db, { key, value }, owner) => {
-    if (key === PREFERENCE_KEYS.lastVisited) {
+  async (db, { key, value, assetId }, owner) => {
+    if (assetId !== undefined) {
+      if ((await assetsByIds(db, [assetId], ownerScope(owner))).length === 0) {
+        throw new StateError(`No asset "${assetId}" to remember a prompt for.`);
+      }
+      await writePreference(db, key, value, owner);
+    } else if (key === PREFERENCE_KEYS.lastVisited) {
       await rememberVisit(db, value, owner);
     } else {
       await writePreference(db, key, value, owner);
