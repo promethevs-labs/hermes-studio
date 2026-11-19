@@ -747,6 +747,9 @@ export async function runIndex(
       try {
         const computed = await computeIngredientsForTool(videoTool(indexer.source), report, indexer.root(context));
         const stored = await storeToolIngredients(db, ownerScope(owner), computed);
+        // What made the scan incomplete (a missing library, a cut-off topic) is said,
+        // as the standalone verb says it, so a partial scan does not read as whole.
+        for (const note of computed.notes) write.notes.push(`ingredients: ${note}`);
         if (stored.written > 0 || stored.skipped.length > 0) {
           write.notes.push(
             `ingredients: ${stored.written} written, ${stored.unchanged} unchanged` +

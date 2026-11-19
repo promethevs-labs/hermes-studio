@@ -22,6 +22,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { runImportCommand } from "../src/commands/index-command";
 import { runIngredientsScan } from "../src/commands/ingredients";
+import { readStudioScan, writeStudioScan } from "../src/index/ingredients-scan";
 import { JobError, runClaim, runEnqueue, runFinish, runShow, type BriefDocument } from "../src/commands/job";
 import { BlobIntegrityError } from "@hermes/blob";
 import { runPreferenceGet, runPreferenceSet } from "../src/commands/preference";
@@ -344,6 +345,37 @@ describe.skipIf(!reachable.ok)("studio videos in the catalog", () => {
     expect(studio).toMatchObject({ ran: true, written: 1 });
     expect(studio?.unchanged).toBeGreaterThanOrEqual(1);
     expect(studio?.scanned).toBeGreaterThanOrEqual(2);
+  });
+
+  it("does not let a studio scan's older read overwrite what a put wrote while it ran", async () => {
+    const slug = "scan-race";
+    const scene = (call: string) => `class S1_Why(VoiceScene):\n    def construct(self):\n        self.play(${call})\n`;
+    const { job: first } = await jobReady(slug);
+    const landed = await put({ slug, dir: await candidate(slug, { scene: scene("FadeIn(a)") }), jobId: first.id, base: null });
+    const scope = ownerScope(LOCAL_LEARNER_ID);
+
+    // Step one reads the source as it is now.
+    const plan = await readStudioScan(scratch.db, scope, { slug });
+    expect(plan.entries.map((e) => e.slug)).toEqual([slug]);
+
+    // A put lands between the two steps, with a new source and its own scan.
+    const { job: change } = await jobReady(slug, briefOf(slug, { mode: "change" }), { parentJob: first.id });
+    await put({ slug, dir: await candidate(slug, { scene: scene("Write(a)") }), jobId: change.id, base: landed.revision });
+    const newer = async () =>
+      (await scratch.db.select().from(assetIngredients).where(eq(assetIngredients.assetId, `video:${slug}`)))[0]!;
+    expect((await newer()).calls).toMatchObject({ Write: 1 });
+
+    // Step two finds the source moved and writes nothing, even forced.
+    const written = await writeStudioScan(scratch.db, scope, plan, { force: true });
+    expect(written).toMatchObject({ written: 0, unchanged: 0 });
+    expect(written.skipped).toEqual([{ id: `video:${slug}`, reason: "changed during the scan" }]);
+    const row = await newer();
+    expect(row.calls).toMatchObject({ Write: 1 });
+    expect(row.calls).not.toHaveProperty("FadeIn");
+
+    // A scan whose read and write see the same source writes as before.
+    const fresh = await writeStudioScan(scratch.db, scope, await readStudioScan(scratch.db, scope, { slug }), { force: true });
+    expect(fresh).toMatchObject({ written: 1 });
   });
 
   it("scans a revideokc studio video's TypeScript with the brief's tool", async () => {

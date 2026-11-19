@@ -95,7 +95,7 @@ describe.skipIf(!reachable.ok)("ingredients in catalog import", () => {
       tool: "blenderkc",
       durationSeconds: 12,
       sceneCount: 1,
-      scannerVersion: 1,
+      scannerVersion: 2,
     });
     expect(row!.calls).toEqual({ "geo.box": 1, "rigs.dark_studio": 1 });
   });
@@ -122,6 +122,30 @@ describe.skipIf(!reachable.ok)("ingredients in catalog import", () => {
     const again = await runImportCommand({ dir: SEED });
     expect(notesOf(again)).toContain("ingredients: 1 written, 0 unchanged");
     expect((await rows())[0]!.calls).toMatchObject({ "geo.box": 2 });
+  });
+
+  it("forwards what makes a scan incomplete, so it does not look whole", async () => {
+    // A topic folder past the cut-off for TypeScript tools: the compute half says so in its notes.
+    const { computeIngredientsForTool } = await import("../src/index/ingredients-scan");
+    const { BLENDERKC } = await import("../src/index/video-tool");
+    const noTopics = await computeIngredientsForTool(
+      BLENDERKC,
+      { topics: [] } as never,
+      checkout,
+      { env: { BLENDERKC_TOPICS: "relative/path" } },
+    );
+    expect(noTopics.notes.join()).toContain("must be an absolute path");
+
+    // Through the import: the same note lands in the tool's notes.
+    const previous = process.env["BLENDERKC_TOPICS"];
+    process.env["BLENDERKC_TOPICS"] = "relative/path";
+    try {
+      const result = await runImportCommand({ dir: SEED });
+      expect(notesOf(result).join("\n")).toContain("ingredients: BLENDERKC_TOPICS must be an absolute path");
+    } finally {
+      if (previous === undefined) delete process.env["BLENDERKC_TOPICS"];
+      else process.env["BLENDERKC_TOPICS"] = previous;
+    }
   });
 
   it("notes a topic whose source cannot be read and imports the rest", async () => {

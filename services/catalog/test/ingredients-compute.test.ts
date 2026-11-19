@@ -230,12 +230,12 @@ describe.skipIf(!reachable.ok)("storeToolIngredients", () => {
     });
   }
 
-  const computation = (scene: string, extra: string[] = []) => {
+  const computation = (scene: string, extra: string[] = [], libraryNames: string[] | null = ["caption"]) => {
     const ing = (assetId: string) => ({
       assetId,
       topicPath: "demo/one",
       durationSeconds: 61.5,
-      ingredients: computeStudioIngredients({ files: { "scene.py": scene }, brief: {} }, 61.5, ["caption"]),
+      ingredients: computeStudioIngredients({ files: { "scene.py": scene }, brief: {} }, 61.5, libraryNames ?? undefined),
     });
     const videos = [MINE, ...extra].map(ing).map((v) => {
       if ("problem" in v.ingredients) throw new Error(v.ingredients.problem);
@@ -259,7 +259,7 @@ describe.skipIf(!reachable.ok)("storeToolIngredients", () => {
     const first = await storeToolIngredients(scratch.db, scope, computation(SCENE));
     expect(first).toMatchObject({ scanned: 1, written: 1, unchanged: 0, skipped: [] });
     const row = await assetIngredients(scratch.db, scope, MINE);
-    expect(row).toMatchObject({ tool: "manimkc", durationSeconds: 61.5, scannerVersion: 1 });
+    expect(row).toMatchObject({ tool: "manimkc", durationSeconds: 61.5, scannerVersion: 2 });
     expect(row!.calls).toEqual({ FadeIn: 1, FadeOut: 1, caption: 1 });
 
     const again = await storeToolIngredients(scratch.db, scope, computation(SCENE));
@@ -275,15 +275,36 @@ describe.skipIf(!reachable.ok)("storeToolIngredients", () => {
     expect((await assetIngredients(scratch.db, scope, MINE))!.calls).toMatchObject({ Write: 1 });
   });
 
+  it("rewrites a row scanned without the library once the library is there, without --force", async () => {
+    const without = await storeToolIngredients(scratch.db, scope, computation(SCENE, [], null), { force: true });
+    expect(without.written).toBe(1);
+    const bare = (await assetIngredients(scratch.db, scope, MINE))!;
+    expect(bare.metrics["libraryHash"]).toBe("none");
+    expect(bare.metrics).toMatchObject({ helperCalls: 0 });
+
+    // The same source, the same scanner, the same duration, and now the library: not fresh.
+    const withLibrary = await storeToolIngredients(scratch.db, scope, computation(SCENE));
+    expect(withLibrary).toMatchObject({ written: 1, unchanged: 0 });
+    const full = (await assetIngredients(scratch.db, scope, MINE))!;
+    expect(full.metrics["libraryHash"]).toMatch(/^[0-9a-f]{12}$/);
+    expect(full.metrics).toMatchObject({ helperCalls: 1 });
+
+    // Run again with the library: now it is fresh. A different library is not.
+    expect(await storeToolIngredients(scratch.db, scope, computation(SCENE))).toMatchObject({ written: 0, unchanged: 1 });
+    expect(await storeToolIngredients(scratch.db, scope, computation(SCENE, [], ["caption", "heading"]))).toMatchObject({ written: 1 });
+    // Names in another order are the same library.
+    expect(await storeToolIngredients(scratch.db, scope, computation(SCENE, [], ["heading", "caption"]))).toMatchObject({ unchanged: 1 });
+  });
+
   it("rewrites a row whose duration moved, and a row from another scanner version", async () => {
     const moved = computation(SCENE);
     moved.videos[0]!.durationSeconds = 70;
     expect((await storeToolIngredients(scratch.db, scope, moved)).written).toBe(1);
     expect((await assetIngredients(scratch.db, scope, MINE))!.durationSeconds).toBe(70);
 
-    await scratch.db.update(ingredientsTable).set({ scannerVersion: 2 }).where(eq(ingredientsTable.assetId, MINE));
+    await scratch.db.update(ingredientsTable).set({ scannerVersion: 3 }).where(eq(ingredientsTable.assetId, MINE));
     expect((await storeToolIngredients(scratch.db, scope, moved)).written).toBe(1);
-    expect((await assetIngredients(scratch.db, scope, MINE))!.scannerVersion).toBe(1);
+    expect((await assetIngredients(scratch.db, scope, MINE))!.scannerVersion).toBe(2);
   });
 
   it("skips, with a reason, a video the catalog does not hold and one the owner cannot read", async () => {

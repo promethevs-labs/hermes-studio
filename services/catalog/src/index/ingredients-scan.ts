@@ -6,7 +6,7 @@ import { asset, video as videoTable, type OwnerScope } from "@hermes/schema";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 
 import { ownedBy } from "../content/scope";
-import type { CatalogDatabase } from "../db";
+import { inTransaction, type CatalogDatabase } from "../db";
 import {
   pythonPublicNames,
   scanSources,
@@ -332,7 +332,7 @@ export interface StoreSummary {
 }
 
 export interface StoreOptions {
-  /** Rewrite a row whose source hash, scanner version and duration have not moved. */
+  /** Rewrite a row whose source, scanner, library and duration have not moved. */
   force?: boolean;
 }
 
@@ -341,6 +341,54 @@ interface Pending {
   tool: string;
   durationSeconds: number | null;
   ingredients: Ingredients;
+}
+
+/** What storing one video came to: written, left alone, or the reason it was skipped. */
+type Stored = "written" | "unchanged" | { skipped: string };
+
+/**
+ * Store one video's scan. The row is left alone when its source hash,
+ * scanner version, library hash and duration all match what this scan
+ * computed: the library hash is in the key because a scan made while the
+ * library was missing counts no helper, and must be redone when it is back.
+ * A video the scope cannot read is skipped, not an error.
+ */
+async function storeOne(
+  db: CatalogDatabase,
+  scope: OwnerScope,
+  item: Pending,
+  options: StoreOptions,
+): Promise<Stored> {
+  try {
+    if (!(await readableAssets(db, scope, [item.assetId])).has(item.assetId)) {
+      return { skipped: "no such video in the catalog for this owner" };
+    }
+    if (options.force !== true) {
+      const stored = await assetIngredients(db, scope, item.assetId);
+      if (
+        stored !== null &&
+        stored.sourceHash === item.ingredients.sourceHash &&
+        stored.scannerVersion === item.ingredients.scannerVersion &&
+        stored.metrics["libraryHash"] === item.ingredients.metrics.libraryHash &&
+        stored.durationSeconds === item.durationSeconds
+      ) {
+        return "unchanged";
+      }
+    }
+    await upsertAssetIngredients(db, {
+      assetId: item.assetId,
+      tool: item.tool,
+      scannerVersion: item.ingredients.scannerVersion,
+      sourceHash: item.ingredients.sourceHash,
+      sceneCount: item.ingredients.sceneCount,
+      durationSeconds: item.durationSeconds,
+      calls: item.ingredients.calls,
+      metrics: { ...item.ingredients.metrics },
+    });
+    return "written";
+  } catch (error) {
+    return { skipped: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 /** The asset ids among `ids` the scope can read, in chunks the driver takes. */
@@ -356,48 +404,10 @@ async function readableAssets(db: CatalogDatabase, scope: OwnerScope, ids: strin
   return found;
 }
 
-async function storePending(
-  db: CatalogDatabase,
-  scope: OwnerScope,
-  pending: Pending[],
-  options: StoreOptions,
-): Promise<StoreSummary> {
-  const summary: StoreSummary = { scanned: pending.length, written: 0, unchanged: 0, skipped: [] };
-  const known = await readableAssets(db, scope, pending.map((p) => p.assetId));
-  for (const item of pending) {
-    try {
-      if (!known.has(item.assetId)) {
-        summary.skipped.push({ id: item.assetId, reason: "no such video in the catalog for this owner" });
-        continue;
-      }
-      if (options.force !== true) {
-        const stored = await assetIngredients(db, scope, item.assetId);
-        if (
-          stored !== null &&
-          stored.sourceHash === item.ingredients.sourceHash &&
-          stored.scannerVersion === item.ingredients.scannerVersion &&
-          stored.durationSeconds === item.durationSeconds
-        ) {
-          summary.unchanged += 1;
-          continue;
-        }
-      }
-      await upsertAssetIngredients(db, {
-        assetId: item.assetId,
-        tool: item.tool,
-        scannerVersion: item.ingredients.scannerVersion,
-        sourceHash: item.ingredients.sourceHash,
-        sceneCount: item.ingredients.sceneCount,
-        durationSeconds: item.durationSeconds,
-        calls: item.ingredients.calls,
-        metrics: { ...item.ingredients.metrics },
-      });
-      summary.written += 1;
-    } catch (error) {
-      summary.skipped.push({ id: item.assetId, reason: error instanceof Error ? error.message : String(error) });
-    }
-  }
-  return summary;
+function tally(summary: StoreSummary, id: string, stored: Stored): void {
+  if (stored === "written") summary.written += 1;
+  else if (stored === "unchanged") summary.unchanged += 1;
+  else summary.skipped.push({ id, reason: stored.skipped });
 }
 
 /** Store a tool's computed ingredients. A video that is not in the catalog is skipped, never an error. */
@@ -407,18 +417,22 @@ export async function storeToolIngredients(
   computation: ToolComputation,
   options: StoreOptions = {},
 ): Promise<StoreSummary> {
-  const stored = await storePending(
-    db,
-    scope,
-    computation.videos.map((v) => ({
-      assetId: v.assetId,
-      tool: computation.tool,
-      durationSeconds: v.durationSeconds,
-      ingredients: v.ingredients,
-    })),
-    options,
-  );
-  return { ...stored, skipped: [...computation.skipped, ...stored.skipped] };
+  const summary: StoreSummary = {
+    scanned: computation.videos.length,
+    written: 0,
+    unchanged: 0,
+    skipped: [...computation.skipped],
+  };
+  for (const v of computation.videos) {
+    const stored = await storeOne(
+      db,
+      scope,
+      { assetId: v.assetId, tool: computation.tool, durationSeconds: v.durationSeconds, ingredients: v.ingredients },
+      options,
+    );
+    tally(summary, v.assetId, stored);
+  }
+  return summary;
 }
 
 /** The studio's videos the scope can read and has not archived. */
@@ -427,6 +441,7 @@ async function studioRows(db: CatalogDatabase, scope: OwnerScope, slug?: string)
     .select({
       slug: videoTable.slug,
       source: videoTable.source,
+      sourceHash: videoTable.sourceHash,
       durationSeconds: videoTable.durationSeconds,
     })
     .from(videoTable)
@@ -439,6 +454,77 @@ async function studioRows(db: CatalogDatabase, scope: OwnerScope, slug?: string)
     );
 }
 
+/** What the read step of a studio scan saw: the computed rows, and the source each came from. */
+export interface StudioPlan {
+  entries: Array<{ slug: string; sourceHash: string; item: Pending }>;
+  skipped: IngredientsSkip[];
+  /** How many videos the read step looked at. */
+  read: number;
+}
+
+/**
+ * Step one of a studio scan: read each video's stored source and compute its
+ * ingredients. Nothing is written. `sourceHash` is the identity of the source
+ * that was read, which step two checks again before it writes.
+ */
+export async function readStudioScan(
+  db: CatalogDatabase,
+  scope: OwnerScope,
+  options: { slug?: string; libraryNames?: readonly string[] } = {},
+): Promise<StudioPlan> {
+  const rows = await studioRows(db, scope, options.slug);
+  const plan: StudioPlan = { entries: [], skipped: [], read: rows.length };
+  for (const row of rows) {
+    const id = `video:${row.slug}`;
+    const computed = computeStudioIngredients(row.source, row.durationSeconds, options.libraryNames);
+    if ("problem" in computed) {
+      plan.skipped.push({ id, reason: computed.problem });
+      continue;
+    }
+    plan.entries.push({
+      slug: row.slug,
+      sourceHash: row.sourceHash,
+      item: { assetId: id, tool: computed.tool, durationSeconds: computed.durationSeconds, ingredients: computed.ingredients },
+    });
+  }
+  return plan;
+}
+
+/**
+ * Step two: write the plan, each video in its own transaction that first
+ * reads the video's source hash as stored now. A video whose source moved
+ * since step one (a `video put` landed in between) is skipped as "changed
+ * during the scan": the put's own scan has the newer answer, and an older
+ * copy must not overwrite it.
+ */
+export async function writeStudioScan(
+  db: CatalogDatabase,
+  scope: OwnerScope,
+  plan: StudioPlan,
+  options: StoreOptions = {},
+): Promise<StoreSummary> {
+  const summary: StoreSummary = { scanned: plan.read, written: 0, unchanged: 0, skipped: [...plan.skipped] };
+  for (const entry of plan.entries) {
+    let stored: Stored;
+    try {
+      stored = await inTransaction(db, async (tx) => {
+        const [now] = await tx
+          .select({ sourceHash: videoTable.sourceHash, archivedAt: videoTable.archivedAt })
+          .from(videoTable)
+          .where(and(eq(videoTable.slug, entry.slug), ownedBy(videoTable.ownerId, scope.readable)));
+        if (now === undefined || now.archivedAt !== null || now.sourceHash !== entry.sourceHash) {
+          return { skipped: "changed during the scan" } as Stored;
+        }
+        return storeOne(tx, scope, entry.item, options);
+      });
+    } catch (error) {
+      stored = { skipped: error instanceof Error ? error.message : String(error) };
+    }
+    tally(summary, entry.item.assetId, stored);
+  }
+  return summary;
+}
+
 /**
  * Compute and store the ingredients of the studio's videos (`video:<slug>`
  * assets) the scope can read, or of one when `slug` is given.
@@ -449,18 +535,6 @@ export async function scanStudioVideos(
   scope: OwnerScope,
   options: StoreOptions & { slug?: string; libraryNames?: readonly string[] } = {},
 ): Promise<StoreSummary> {
-  const rows = await studioRows(db, scope, options.slug);
-  const pending: Pending[] = [];
-  const skipped: IngredientsSkip[] = [];
-  for (const row of rows) {
-    const id = `video:${row.slug}`;
-    const computed = computeStudioIngredients(row.source, row.durationSeconds, options.libraryNames);
-    if ("problem" in computed) {
-      skipped.push({ id, reason: computed.problem });
-      continue;
-    }
-    pending.push({ assetId: id, tool: computed.tool, durationSeconds: computed.durationSeconds, ingredients: computed.ingredients });
-  }
-  const stored = await storePending(db, scope, pending, options);
-  return { ...stored, scanned: rows.length, skipped: [...skipped, ...stored.skipped] };
+  const plan = await readStudioScan(db, scope, options);
+  return writeStudioScan(db, scope, plan, options);
 }
