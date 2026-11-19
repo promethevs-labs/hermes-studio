@@ -1,4 +1,5 @@
 import type { JobState } from "@hermes/schema";
+import type { JobReview, JobRunAttempt } from "@hermes/schema/shared";
 
 import type { AgentAuth } from "../config";
 import type { CostSource } from "../cost";
@@ -142,4 +143,12 @@ export interface VideoJobRecord {
   indexed: boolean;
   catalogErrors: string[];
   reconciled?: boolean;
+  /** One entry per agent attempt, as the diagram record keeps them (`data/run-record.ts`). Absent on an older record, loaded as empty. */
+  attempts?: JobRunAttempt[];
+  /** The CLI's version, from the session's `system/init` event. */
+  harnessVersion?: string | null;
+  /** Why the run record was not stored, when it failed `checkJobRun` or could not be written. */
+  runRecordError?: string | null;
+  /** A person's verdict detail, kept beside the catalog's `job.review`. Null until one is written. */
+  review?: JobReview | null;
 }

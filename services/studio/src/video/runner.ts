@@ -4,7 +4,20 @@ import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { agentEnv, spawnClaude, type AgentOutcome, type AgentRun } from "../agent/agent";
+import { agentEnv, spawnClaude, type AgentInit, type AgentOutcome, type AgentRun } from "../agent/agent";
+import {
+  appendAttempt,
+  callCounts,
+  endAttempt,
+  gateSummary,
+  keepReview,
+  renderSeconds,
+  reviseNote,
+  runFileFor,
+  startAttempt,
+  withAttemptGate,
+  type AttemptStart,
+} from "../data/run-record";
 import { jobClaim, jobEnqueue, jobFinish, jobShow, sessionEnd, sessionStart, videoCheckout, videoShow } from "../data/catalog";
 import { agentAuth, dailyCapUsd, DAILY_WINDOW_MS, type AgentAuth } from "../config";
 import { costFromLog, JobCostMeter, spendWindow, type CostReading, type SpendEntry } from "../cost";
@@ -232,7 +245,13 @@ export class VideoRunner {
           ...(cost?.usd === undefined || cost.usd === null ? {} : { costUsd: cost.usd, costSource: cost.source }),
         });
         interrupted.push(record.id);
-        const finished = await jobFinish({ jobId: record.id, state: "interrupted", errorKind: "interrupted", error: "the runner died while this job was running" });
+        const finished = await jobFinish({
+          jobId: record.id,
+          state: "interrupted",
+          errorKind: "interrupted",
+          error: "the runner died while this job was running",
+          ...(await this.runFile(record.id)),
+        });
         if (!finished.ok) await this.store.noteCatalogError(record.id, finished.error ?? "");
         if (record.sessionId !== null) await sessionEnd(record.sessionId, "interrupted");
       } else if (record.state === "awaiting_review") {
@@ -408,6 +427,8 @@ export class VideoRunner {
       written: [],
       indexed: false,
       catalogErrors: [],
+      attempts: [],
+      review: null,
     };
     // Before `create`, which puts the record in the store before its write does.
     this.unanswered.add(id);
@@ -528,7 +549,13 @@ export class VideoRunner {
             error: `the video runner threw: ${(error as Error).message}`,
           });
           if (entry.mayFinish) {
-            const finished = await jobFinish({ jobId: next.id, state: "failed", errorKind: "internal", error: (error as Error).message });
+            const finished = await jobFinish({
+              jobId: next.id,
+              state: "failed",
+              errorKind: "internal",
+              error: (error as Error).message,
+              ...(await this.runFile(next.id)),
+            });
             if (!finished.ok) await this.store.noteCatalogError(next.id, finished.error ?? "");
           }
           const sessionId = this.store.get(next.id)?.sessionId ?? null;
@@ -735,6 +762,7 @@ export class VideoRunner {
       startedSession = true;
       const sceneBefore = await backend.sourceHash(paths);
       let initNoted: Promise<void> = Promise.resolve();
+      const begun = startAttempt(attempt, entry.meter.read().usd);
       const agent = this.spawn({
         id,
         paths,
@@ -750,7 +778,11 @@ export class VideoRunner {
         onLine: (line) => entry.lines.push(() => this.onAgentLine(entry, line)),
         onInit: (init) => {
           initNoted = (async () => {
-            await this.store.update(id, { resolvedModel: init.model, apiKeySource: init.apiKeySource });
+            await this.store.update(id, {
+              resolvedModel: init.model,
+              apiKeySource: init.apiKeySource,
+              ...((init.version ?? null) === null ? {} : { harnessVersion: init.version }),
+            });
             await this.store.appendRaw(id, credentialRecord(auth, init.apiKeySource));
             await this.store.emit(id, { type: "step", state: "running", note: credentialNote(auth, init.apiKeySource) });
             await this.store.emit(id, { type: "step", state: "running", note: `the agent runs ${init.model ?? "a model it did not name"}` });
@@ -764,6 +796,9 @@ export class VideoRunner {
       // included, before anything below reads what those lines wrote.
       await entry.lines.settled();
       await initNoted;
+      // Every attempt the agent ran is in the history, however it ended:
+      // before the cancel and every other exit below.
+      await this.recordAttempt(id, begun, outcome, entry.meter.read().usd);
       await this.refreshSteps(entry);
       if (entry.cancelled || outcome.stopReason === "cancelled") break;
       // Before every other reading of the outcome: a session this runner
@@ -829,7 +864,11 @@ export class VideoRunner {
         onStep: (step) => void this.store.emit(id, { type: "step", state: "running", note: `check: ${step.name}: ${step.ok ? "passed" : "failed"}, ${step.detail}` }),
       });
       entry.gateRunning = false;
-      record = await this.store.update(id, { gate, lineChanges: gate.script?.changes ?? record.lineChanges });
+      record = await this.store.update(id, {
+        gate,
+        lineChanges: gate.script?.changes ?? record.lineChanges,
+        attempts: withAttemptGate(this.store.get(id)?.attempts, attempt, gateSummary(gate)),
+      });
       await this.refreshSteps(entry);
       findings = gate.findings;
       if (gate.ok) break;
@@ -910,7 +949,7 @@ export class VideoRunner {
     effort: string | null;
     source: string | undefined;
     onLine: (line: string) => void;
-    onInit: (init: { apiKeySource: string | null; model: string | null }) => void;
+    onInit: (init: AgentInit) => void;
   }): AgentRun {
     const { paths } = input;
     const argv = videoAgentArgv(input);
@@ -1056,11 +1095,28 @@ export class VideoRunner {
       ...(record.costSource === null ? {} : { costSource: record.costSource }),
       ...(record.errorKind === null ? {} : { errorKind: record.errorKind }),
       ...(record.error === null ? {} : { error: record.error }),
+      ...(await this.runFile(id)),
     });
     if (!finished.ok) await this.store.noteCatalogError(id, finished.error ?? "");
     if (record.sessionId !== null) {
       await sessionEnd(record.sessionId, state === "awaiting_review" ? "closed" : state === "cancelled" ? "cancelled" : "failed", record.error ?? undefined);
     }
+  }
+
+  /** One attempt into the record's history, as it ended: its gate is filled in once the gate has judged it. */
+  private async recordAttempt(id: string, begun: AttemptStart, outcome: AgentOutcome | null, usdAfter: number | null): Promise<void> {
+    const attempt = endAttempt(begun, outcome, usdAfter);
+    await this.store.update(id, { attempts: appendAttempt(this.store.get(id)?.attempts, attempt) });
+  }
+
+  /**
+   * The `--run-file` for this job's `job finish`, from its record and its
+   * wrapper's log (`calls.ndjson` in the job directory for every backend,
+   * `videoPaths`): the calls by verb and the seconds spent rendering.
+   */
+  private async runFile(id: string): Promise<{ runFile?: string }> {
+    const calls = await readCalls(path.join(jobDir(id), "calls.ndjson"));
+    return runFileFor(this.store, id, { calls: callCounts(calls), renderSeconds: renderSeconds(calls) });
   }
 
   /* ------------------------------------------------------------------ */
@@ -1080,7 +1136,13 @@ export class VideoRunner {
         errorKind: "cancelled",
         error: "cancelled before it started",
       });
-      const finished = await jobFinish({ jobId: id, state: "cancelled", errorKind: "cancelled", error: "cancelled before it started" });
+      const finished = await jobFinish({
+        jobId: id,
+        state: "cancelled",
+        errorKind: "cancelled",
+        error: "cancelled before it started",
+        ...(await this.runFile(id)),
+      });
       if (!finished.ok) await this.store.noteCatalogError(id, finished.error ?? "");
       return updated;
     }
@@ -1116,6 +1178,10 @@ export class VideoRunner {
       { jobId: record.id, agentSessionId: record.agentSessionId, changes, discard: fromReview },
       { draftId },
     );
+    // A video in review sent back for changes: the parent's review says what
+    // the person wanted different. After the child is queued, and never in
+    // its way: a review that does not land is a catalog error on the parent.
+    if (fromReview) await keepReview(this.store, record.id, "revise", { tags: [], note: reviseNote(changes) });
     return next;
   }
 

@@ -37,6 +37,7 @@ vi.mock("../src/canvas/canvas", async (importOriginal) => {
 const catalogMock = vi.hoisted(() => ({
   jobAccept: vi.fn(),
   jobDiscard: vi.fn(),
+  jobReview: vi.fn(async () => ({ ok: true, json: {} as unknown, error: null as string | null, offline: false })),
   diagramShow: vi.fn(),
   diagramPut: vi.fn(),
   diagramCheckout: vi.fn(),
@@ -262,6 +263,18 @@ describe("a clean accept", () => {
     expect(store.get("job-accept")?.state).toBe("accepted");
     expect(store.get("job-accept")?.indexed).toBe(true);
     expect(result.note).toMatch(/nothing to commit/);
+    // The accept's review, on the record and in the catalog, after the job row.
+    expect(store.get("job-accept")?.review).toMatchObject({ verdict: "accept", tags: [], note: null });
+    expect(catalogMock.jobReview).toHaveBeenCalledWith("job-accept", "accept", { tags: [], note: null });
+  });
+
+  it("lands and records the accept when its review does not land, and notes why", async () => {
+    canvasMock.canvas.mockImplementationOnce(() => reply(0, { checks: [] }));
+    catalogMock.jobReview.mockResolvedValueOnce({ ok: false, json: null, error: "catalog job review exited 1: boom", offline: false });
+    const result = await accept(store, await place());
+    expect(result).toMatchObject({ ok: true, indexed: true });
+    expect(store.get("job-accept")).toMatchObject({ state: "accepted", indexed: true });
+    expect(store.get("job-accept")?.catalogErrors.at(-1)).toContain("boom");
   });
 
   it("reports indexed: false when the job row does not record it, with the diagram landed", async () => {
@@ -472,6 +485,15 @@ describe("discard", () => {
     expect(await exists(files.candidateSvg)).toBe(false);
     expect(catalogMock.diagramPut).not.toHaveBeenCalled();
     expect(store.get("job-accept")?.state).toBe("discarded");
+    expect(store.get("job-accept")?.review ?? null).toBeNull();
+  });
+
+  it("keeps a reason on the record and hands it to the catalog's discard", async () => {
+    const reason = { tags: ["wrong" as const], note: "the arrow points the wrong way" };
+    const result = await discard(store, await place(), reason);
+    expect(result.ok).toBe(true);
+    expect(catalogMock.jobDiscard).toHaveBeenLastCalledWith("job-accept", reason);
+    expect(store.get("job-accept")).toMatchObject({ state: "discarded", review: { verdict: "discard", ...reason } });
   });
 });
 

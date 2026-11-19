@@ -19,6 +19,21 @@ This project is continuously deployed and not versioned; entries are grouped by 
 
 ### Added
 
+- **The studio records how each job ran, and why a person dropped it.**
+  Both runners keep an `attempts` list in `job.json`, one entry per agent
+  attempt with its turns, its share of the cost and its own gate summary,
+  where before each attempt's gate overwrote the last. At every terminal
+  state they write a `JobRun` to `jobs/<id>/run.json` and pass it to
+  `catalog job finish --run-file`; a record that fails `checkJobRun` never
+  fails the job, which finishes without it and notes `runRecordError`.
+  `POST /api/jobs/{id}/discard` takes an optional `{ tags, note }` reason,
+  checked against `RATING_TAGS_DOWN` and the note limit (400 otherwise),
+  stored through `catalog job discard --tags --note`, and shown as `review`
+  on every job view. An accept, and a change asked of a video in review,
+  store their review with `catalog job review` without ever blocking what
+  they follow. See [docs/STUDIO-VIDEOS.md](docs/STUDIO-VIDEOS.md), "The run
+  record and the review".
+
 - **Eval records in the catalog.**
   [`0005_eval_records.sql`](services/catalog/drizzle-sqlite/0005_eval_records.sql)
   adds `asset_rating`, a learner's thumbs up or down on an asset with tags

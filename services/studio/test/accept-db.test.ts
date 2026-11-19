@@ -159,16 +159,30 @@ describe.skipIf(!reachable.ok)("Accept through the real catalog on a database th
     expect(jobId).toBe(JOB_ID);
     expect((await catalog.sessionStart({ id: "studio-accept-db", title: "Accepted" })).error).toBeNull();
     expect((await catalog.jobClaim(jobId, "test-runner", "studio-accept-db")).error).toBeNull();
+    // The run record as the runner writes it, through the real `--run-file`.
+    const { buildJobRun, writeRunFile } = await import("../src/data/run-record");
+    await mkdir(path.join(home, "jobs", jobId), { recursive: true });
+    const run = buildJobRun({
+      id: jobId,
+      harnessVersion: "2.1.300",
+      agentModel: { passed: "sonnet" },
+      resolvedModel: "claude-sonnet-5",
+      attempts: [{ n: 1, startedAt: new Date().toISOString(), endedAt: new Date().toISOString(), turns: 3, costUsd: 0.02, gate: { ok: true, steps: [{ name: "lints", ok: true }], findings: 0, warnings: 0 } }],
+    });
+    const runFile = await writeRunFile(jobId, run);
+    expect(runFile.reason).toBeNull();
     expect(
       (await catalog.jobFinish({
         jobId,
         state: "awaiting_review",
         phase: "ready",
         candidatePath: candidateRef(jobId, SLUG),
+        runFile: runFile.file!,
       })).error,
     ).toBeNull();
     const [queued] = await scratch.db.select().from(job).where(eq(job.id, jobId));
     expect(queued?.candidatePath).toBe(`jobs/${jobId}/candidate/${SLUG}.tldr`);
+    expect(queued?.run).toEqual(run);
 
     // The candidates, where the agent writes them: the job's own workspace.
     await mkdir(path.dirname(candidatePath(jobId, SLUG)), { recursive: true });
@@ -269,5 +283,36 @@ describe.skipIf(!reachable.ok)("Accept through the real catalog on a database th
     );
     const [jobRow] = await scratch.db.select().from(job).where(eq(job.id, jobId));
     expect(jobRow?.state).toBe("accepted");
+    // The accept's review, through the real `job review`, and nothing for a catalog error.
+    expect(jobRow?.review).toMatchObject({ verdict: "accept", tags: [], note: null });
+    expect(store.get(jobId)?.catalogErrors).toEqual([]);
+  }, 120_000);
+
+  it("stores a discard's reason through the real `job discard --tags --note`, in the discard's own update", async () => {
+    const catalog = await import("../src/data/catalog");
+    const briefFile = path.join(home, "brief-discard.json");
+    const discardId = "studio-accept-db-discard";
+    await writeFile(
+      briefFile,
+      JSON.stringify({
+        id: discardId,
+        kind: "diagram",
+        topic: "alpha",
+        target: targetPath("studio-accept-db-discarded"),
+        candidate: candidateRef(discardId, "studio-accept-db-discarded"),
+        idempotencyKey: "accept-db-discard-key",
+        brief: { intent: "i", topic: "alpha", slug: "studio-accept-db-discarded", title: "Discarded", mode: "new" },
+      }),
+    );
+    expect((await catalog.jobEnqueue(briefFile)).error).toBeNull();
+    expect((await catalog.sessionStart({ id: "studio-accept-db-discard", title: "Discarded" })).error).toBeNull();
+    expect((await catalog.jobClaim(discardId, "test-runner", "studio-accept-db-discard")).error).toBeNull();
+    expect((await catalog.jobFinish({ jobId: discardId, state: "awaiting_review", phase: "ready" })).error).toBeNull();
+    // A note beginning with `--` is a note, not an option.
+    const discarded = await catalog.jobDiscard(discardId, { tags: ["too-slow", "wrong"], note: "--the arrows, again" });
+    expect(discarded.error).toBeNull();
+    const [row] = await scratch.db.select().from(job).where(eq(job.id, discardId));
+    expect(row?.state).toBe("discarded");
+    expect(row?.review).toMatchObject({ verdict: "discard", tags: ["too-slow", "wrong"], note: "--the arrows, again" });
   }, 120_000);
 });

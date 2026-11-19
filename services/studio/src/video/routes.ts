@@ -12,6 +12,7 @@ import { isLook, readCalls } from "./calls";
 import { candidateNames, type VideoPaths } from "./paths";
 import { briefTool } from "./tools";
 import { acceptVideo, discardVideo } from "./review";
+import { parseReviewReason } from "../data/run-record";
 import type { Drafts } from "../drafts/drafts";
 import { videoNote, type VideoRunner, type VideoStore } from "./runner";
 import type { VideoJobRecord } from "./types";
@@ -96,6 +97,9 @@ export function videoView(record: VideoJobRecord): Record<string, unknown> {
     updated: record.heartbeatAt ?? record.finishedAt ?? record.requestedAt,
     cancelRequestedAt: record.cancelRequestedAt,
     catalogErrors: record.catalogErrors,
+    // A person's verdict detail, `{ verdict, tags, note, at }`: a discard's
+    // reason, an accept, or a revise on the job it revised. Null when none.
+    review: record.review ?? null,
     note: videoNote(record),
   };
 }
@@ -177,7 +181,18 @@ export async function videoJobRoutes(
         return send(response, 200, { jobId: id, state: store.get(id)?.state, landed: result.landed ?? [], revision: result.revision ?? null, note: result.note });
       }
       case "POST discard": {
-        const result = await discardVideo(store, runner, id);
+        // An optional `{ tags, note }`: why the video was not kept. Checked
+        // before anything is touched, so a bad tag or an overlong note
+        // discards nothing.
+        let body: unknown;
+        try {
+          body = await readJson(request);
+        } catch (error) {
+          return fail(response, 400, "the request body is not JSON", (error as Error).message);
+        }
+        const parsed = parseReviewReason(body);
+        if (!parsed.ok) return fail(response, 400, parsed.message);
+        const result = await discardVideo(store, runner, id, parsed.reason);
         if (!result.ok) return fail(response, result.status, result.note);
         return send(response, 200, { jobId: id, state: store.get(id)?.state, note: result.note });
       }

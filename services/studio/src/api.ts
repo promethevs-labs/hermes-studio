@@ -34,6 +34,7 @@ import { readListing, type ListingCache, type Listings } from "./probes/listings
 import type { ProbeReading } from "./probes/probe";
 import { scratchDir, shotPath, studioHome, targetPath, workDir, workSvgPath } from "./paths";
 import { accept, discard, reindex } from "./diagram/review";
+import { parseReviewReason } from "./data/run-record";
 import { JobRefused, noteFor, Runner } from "./diagram/runner";
 import type { JobRecord, JobStore } from "./data/store";
 import { offeredModels, resolveDiagramAgent, resolveVideoAgent } from "./agent/agent-settings";
@@ -297,6 +298,9 @@ function view(record: JobRecord): Record<string, unknown> {
     updated: record.heartbeatAt ?? record.finishedAt ?? record.requestedAt,
     cancelRequestedAt: record.cancelRequestedAt,
     catalogErrors: record.catalogErrors,
+    // A person's verdict detail, `{ verdict, tags, note, at }`: a discard's
+    // reason, or an accept. Null when none was written.
+    review: record.review ?? null,
     note: noteFor(record),
   };
 }
@@ -570,7 +574,18 @@ async function handle(
     }
 
     case "POST discard": {
-      const result = await discard(store, record);
+      // An optional `{ tags, note }`: why the drawing was not kept. Checked
+      // before anything is touched, so a bad tag or an overlong note
+      // discards nothing.
+      let body: unknown;
+      try {
+        body = await readJson(request);
+      } catch (error) {
+        return badBody(response, error);
+      }
+      const reason = parseReviewReason(body);
+      if (!reason.ok) return fail(response, 400, reason.message);
+      const result = await discard(store, record, reason.reason);
       if (!result.ok) return fail(response, 409, result.note, result.error ?? null);
       return send(response, 200, {
         jobId: id,

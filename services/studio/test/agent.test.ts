@@ -256,7 +256,7 @@ describe("the agent's environment", () => {
     // the CLI lets it write without asking any rule, is inside the job.
     expect(env.claudeTmpdir).toBe(tmpDir("job-login"));
 
-    expect(inits).toEqual([{ apiKeySource: "none", model: "claude-sonnet-test" }]);
+    expect(inits).toEqual([{ apiKeySource: "none", model: "claude-sonnet-test", version: null }]);
     expect(outcome.apiKeySource).toBe("none");
     expect(outcome.isError).toBe(false);
     expect(outcome.result).toBe("drew it");

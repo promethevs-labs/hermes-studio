@@ -33,6 +33,7 @@ vi.mock("../src/canvas/canvas", async (importOriginal) => {
 const catalogMock = vi.hoisted(() => ({
   jobAccept: vi.fn(),
   jobDiscard: vi.fn(),
+  jobReview: vi.fn(async () => ({ ok: true, json: {}, error: null, offline: false })),
   diagramShow: vi.fn(),
   diagramPut: vi.fn(),
   diagramCheckout: vi.fn(),
