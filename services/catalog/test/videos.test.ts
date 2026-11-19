@@ -6,6 +6,7 @@ import path from "node:path";
 import {
   asset,
   assetDerivation,
+  assetIngredients,
   assetJob,
   blobObject,
   contentRevision,
@@ -20,6 +21,7 @@ import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { runImportCommand } from "../src/commands/index-command";
+import { runIngredientsScan } from "../src/commands/ingredients";
 import { JobError, runClaim, runEnqueue, runFinish, runShow, type BriefDocument } from "../src/commands/job";
 import { BlobIntegrityError } from "@hermes/blob";
 import { runPreferenceGet, runPreferenceSet } from "../src/commands/preference";
@@ -309,6 +311,53 @@ describe.skipIf(!reachable.ok)("studio videos in the catalog", () => {
     const checked = await checkoutVideo(scratch.db, LOCAL, slug, out);
     expect(checked.files.map((f) => f.name).sort()).toEqual(["narration.json", "parts.ts", "scene.tsx", "topic.yml"]);
     expect(await readFile(path.join(out, "scene.tsx"), "utf8")).toBe(files["source/scene.tsx"]);
+  });
+
+  it("records what a studio video was made of when it lands, and a scan that fails is a note, not a failed put", async () => {
+    const scene = "class S1_Why(VoiceScene):\n    def construct(self):\n        self.play(FadeIn(Text('a')), Write(Text('b')))\n";
+    const slug = "scan-on-put";
+    const { job: queued } = await jobReady(slug);
+    const result = await put({ slug, dir: await candidate(slug, { scene }), jobId: queued.id, base: null });
+    expect(result.notes.some((n) => n.startsWith("ingredients"))).toBe(false);
+    const [row] = await scratch.db.select().from(assetIngredients).where(eq(assetIngredients.assetId, `video:${slug}`));
+    expect(row).toMatchObject({ tool: "manimkc", durationSeconds: 58.4, sceneCount: 1 });
+    expect(row?.calls).toMatchObject({ FadeIn: 1, Write: 1, Text: 2 });
+
+    // The same landing with the ingredients table out of reach: the video lands, the job is accepted.
+    const failing = "scan-fails";
+    const { job: second } = await jobReady(failing);
+    await scratch.db.run(sql`alter table asset_ingredients rename to asset_ingredients_away`);
+    let landed: Awaited<ReturnType<typeof put>>;
+    try {
+      landed = await put({ slug: failing, dir: await candidate(failing, { scene }), jobId: second.id, base: null });
+    } finally {
+      await scratch.db.run(sql`alter table asset_ingredients_away rename to asset_ingredients`);
+    }
+    expect(landed).toMatchObject({ ok: true, slug: failing, jobState: "accepted" });
+    expect(landed.notes.some((n) => n.startsWith("ingredients not recorded"))).toBe(true);
+    expect(await jobState(second.id)).toBe("accepted");
+    expect(await scratch.db.select().from(assetIngredients).where(eq(assetIngredients.assetId, `video:${failing}`))).toEqual([]);
+
+    // `ingredients scan --only studio` makes up the row the put missed, and leaves the first alone.
+    const scan = await runIngredientsScan({ only: "studio" });
+    const studio = scan.sources.find((x) => x.source === "studio");
+    expect(studio).toMatchObject({ ran: true, written: 1 });
+    expect(studio?.unchanged).toBeGreaterThanOrEqual(1);
+    expect(studio?.scanned).toBeGreaterThanOrEqual(2);
+  });
+
+  it("scans a revideokc studio video's TypeScript with the brief's tool", async () => {
+    const slug = "scan-ts-on-put";
+    const source = {
+      "source/scene.tsx": 'import { defineTopic, ramp } from "#lib";\nimport { all } from "@revideo/core";\ndefineTopic(ramp(1));\nall();\n',
+      "source/narration.json": "[]\n",
+      "source/topic.yml": `topic: ${TOPIC}\n`,
+    };
+    const { job: queued } = await jobReady(slug, briefOf(slug, { tool: "revideokc" }));
+    await put({ slug, dir: await candidate(slug, { source }), jobId: queued.id, base: null });
+    const [row] = await scratch.db.select().from(assetIngredients).where(eq(assetIngredients.assetId, `video:${slug}`));
+    expect(row).toMatchObject({ tool: "revideokc", sceneCount: null });
+    expect(row?.metrics).toMatchObject({ helperCalls: 2, animationCalls: 1 });
   });
 
   it("lands a remotionkc video with its composition and narration as the source, and refuses one without its composition (phase 3)", async () => {

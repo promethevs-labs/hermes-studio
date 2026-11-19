@@ -50,7 +50,8 @@ import { sessionsIndexer } from "./sessions";
 import { tagsIndexer } from "./tags";
 import type { IndexContext, Indexer } from "./source";
 import { topicsIndexer } from "./topics";
-import { BLENDERKC, hasToolCli, isVideoToolName, MANIMKC, REMOTIONKC, REVIDEOKC, type VideoTool } from "./video-tool";
+import { computeIngredientsForTool, storeToolIngredients } from "./ingredients-scan";
+import { BLENDERKC, hasToolCli, isVideoToolName, MANIMKC, REMOTIONKC, REVIDEOKC, type VideoTool, videoTool } from "./video-tool";
 import { loadVocabulary, vocabularyOf } from "./vocabulary";
 import { pruneHeldTopics, writeSource, type SourceWrite } from "./writer";
 
@@ -735,6 +736,27 @@ export async function runIndex(
                   .join("; ") + (why === "" ? "" : `: ${why}`),
           );
         }
+      }
+    }
+
+    // What each rendered video was made of, read from the source the report
+    // names. The tool's rows are written already, so a failure here is a
+    // note and never undoes or fails the import; `catalog ingredients scan`
+    // makes up what it missed.
+    if (isVideoToolName(indexer.source) && report !== undefined) {
+      try {
+        const computed = await computeIngredientsForTool(videoTool(indexer.source), report, indexer.root(context));
+        const stored = await storeToolIngredients(db, ownerScope(owner), computed);
+        if (stored.written > 0 || stored.skipped.length > 0) {
+          write.notes.push(
+            `ingredients: ${stored.written} written, ${stored.unchanged} unchanged` +
+              (stored.skipped.length === 0
+                ? ""
+                : `, ${stored.skipped.length} skipped (${stored.skipped[0]?.id}: ${stored.skipped[0]?.reason})`),
+          );
+        }
+      } catch (error) {
+        write.notes.push(`ingredients not recorded: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
 

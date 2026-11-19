@@ -235,6 +235,15 @@ export interface TopicsReport {
   drift: { orphans?: Orphan[]; unrendered?: unknown[] };
 }
 
+/**
+ * The asset id of a rendered video: the tool's prefix and the video's `out/…`
+ * path. The one place the id is built, so the indexer and every reader that
+ * maps a report's video to its row agree.
+ */
+export function videoToolAssetId(tool: VideoTool, videoPath: string): string {
+  return `${tool.prefix}${videoPath}`;
+}
+
 /** Where the pinned CLI of `tool` is on this machine. */
 export function toolCliPath(tool: VideoTool, repoRoot: string): string {
   return path.join(tool.resolveRoot(repoRoot), tool.cli);
@@ -565,7 +574,7 @@ export async function buildToolRows(
       const videoPath = str(deliverable.path);
       if (videoPath === null) continue;
 
-      const videoId = `${tool.prefix}${videoPath}`;
+      const videoId = videoToolAssetId(tool, videoPath);
       const videoFile = path.join(outRoot, videoPath);
       const facts = await fileFacts(videoFile);
       const sectionName = str(section.section);

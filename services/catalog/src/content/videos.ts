@@ -9,6 +9,7 @@ import {
   canonicalJson,
   concept,
   job as jobTable,
+  ownerScope,
   readableOwners,
   topic,
   video,
@@ -20,7 +21,9 @@ import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 
 import { acceptJobIn, JobError, VIDEOS_DIR, VIDEO_SLUG } from "../commands/job";
 import type { CatalogDatabase } from "../db";
+import { resolveManimkcRoot } from "../env";
 import { fileFacts } from "../index/files";
+import { manimkcLibraryNames, scanStudioVideos } from "../index/ingredients-scan";
 import { VIDEO_TOOLS, type VideoToolName } from "../index/video-tool";
 import { buildVideoPdf, readSegments } from "../pdf/build";
 import { PDF_CONTENT_TYPE, PDF_EXTENSION } from "../pdf/recipe";
@@ -872,6 +875,20 @@ export async function putVideo(db: CatalogDatabase, store: BlobStore, input: Put
 
   const results = outcome.written;
   const own = results[0] as WriteContentResult;
+  // What the video was made of, recorded after the landing and outside its
+  // transaction: a scan that fails is a note, never a reason the put did not
+  // happen. `catalog ingredients scan` makes up any row this misses.
+  try {
+    const libraryNames = sourceTool(brief) === "manimkc" ? await manimkcLibraryNames(resolveManimkcRoot()) : null;
+    const scanned = await scanStudioVideos(db, ownerScope(ownerId), {
+      slug,
+      ...(libraryNames === null ? {} : { libraryNames }),
+    });
+    const why = scanned.skipped[0]?.reason;
+    if (why !== undefined) notes.push(`ingredients not recorded: ${why}`);
+  } catch (error) {
+    notes.push(`ingredients not recorded: ${error instanceof Error ? error.message : String(error)}`);
+  }
   return {
     ok: true,
     slug,
