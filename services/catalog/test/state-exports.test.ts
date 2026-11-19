@@ -85,6 +85,14 @@ const REQUIRED = [
   // Recent, bounded: the event log folded per module and concept, and the concepts it names.
   "recentActivity",
   "recentConcepts",
+  // Ratings: a learner's thumbs up or down on an asset, for the library and the studio.
+  "rateAsset",
+  "currentRating",
+  "ratingHistory",
+  "listCurrentRatings",
+  // What a video was made of, read under the owner's scope.
+  "assetIngredients",
+  "listAssetIngredients",
 ] as const;
 
 describe("the state barrel", () => {

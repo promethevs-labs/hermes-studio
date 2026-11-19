@@ -259,6 +259,20 @@ export {
 export { assetParents, type AssetConversation, type AssetOrigin, type AssetParents, type AssetPlace } from "./asset-parents";
 export { conversationMade, madeName, MADE_KINDS, type MadeAsset, type MadeKind } from "./conversation-made";
 export { readAssetNaming, writeAssetName, type AssetNaming } from "./asset-names";
+export {
+  currentRating,
+  listCurrentRatings,
+  rateAsset,
+  ratingHistory,
+  type RateAssetInput,
+  type StoredRating,
+} from "./asset-ratings";
+/**
+ * What a video was made of (`asset_ingredients`), read under an owner scope.
+ * The writer stays in `../index/`, where content and index writes live; only
+ * the two reads come through the door, for the pages that show them.
+ */
+export { assetIngredients, listAssetIngredients, type StoredIngredients } from "../index/ingredients";
 export { readCheckDistractors, writeCheckDistractor, type StoredCheckDistractor } from "./check-distractors";
 export {
   domainOf,
