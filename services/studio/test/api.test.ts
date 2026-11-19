@@ -55,6 +55,7 @@ const catalogMock = vi.hoisted(() => ({
   diagramCommit: vi.fn(),
   jobAccept: vi.fn(),
   jobDiscard: vi.fn(),
+  jobReview: vi.fn(async () => ({ ok: true, json: {}, error: null, offline: false })),
   topicList: vi.fn(),
   status: vi.fn(),
   preferenceGet: vi.fn(),

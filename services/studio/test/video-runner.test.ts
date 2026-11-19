@@ -28,6 +28,7 @@ const catalogMock = vi.hoisted(() => ({
   jobFinish: vi.fn(async () => ({ ok: true, json: {}, error: null, offline: false })),
   jobShow: vi.fn(),
   jobDiscard: vi.fn(async () => ({ ok: true, json: {}, error: null, offline: false })),
+  jobReview: vi.fn(async () => ({ ok: true, json: {} as unknown, error: null as string | null, offline: false })),
   sessionStart: vi.fn(),
   sessionEnd: vi.fn(async () => ({ ok: true, json: {}, error: null, offline: false })),
   videoShow: vi.fn(),
@@ -290,6 +291,31 @@ describe("a change asked of a video in review (D52)", () => {
     expect(child).toMatchObject({ parentJobId: parent.id, agentSessionId: "11111111-1111-4111-8111-111111111111", changes: "the arrow in scene two points at the wrong box", state: "queued" });
     const written = JSON.parse(await readFile(path.join(home, "jobs", child.id, "brief.json"), "utf8")) as Record<string, unknown>;
     expect(written.parentJob).toBe(parent.id);
+    // The parent's review says what the person wanted different, on its record and in the catalog.
+    expect(store.get(parent.id)?.review).toMatchObject({ verdict: "revise", tags: [], note: "the arrow in scene two points at the wrong box" });
+    expect(catalogMock.jobReview).toHaveBeenCalledWith(parent.id, "revise", { tags: [], note: "the arrow in scene two points at the wrong box" });
+  });
+
+  it("queues the change even when the parent's review does not land, and notes why", async () => {
+    const made = await runner();
+    const { record: parent } = await made.enqueue(brief());
+    await store.update(parent.id, { state: "awaiting_review" });
+    catalogMock.jobReview.mockResolvedValueOnce({ ok: false, json: null, error: "catalog job review exited 1: boom", offline: false });
+    const long = `make it ${"slower ".repeat(400)}`.trim().slice(0, 2_000);
+    const child = await made.revise(store.get(parent.id)!, long);
+    expect(child.state).toBe("queued");
+    expect(store.get(parent.id)?.catalogErrors.at(-1)).toContain("boom");
+    expect(store.get(parent.id)?.review?.note?.length).toBeLessThanOrEqual(2_000);
+  });
+
+  it("writes no review on a change asked of a finished video", async () => {
+    const made = await runner();
+    const { record: parent } = await made.enqueue(brief());
+    await store.update(parent.id, { state: "failed" });
+    catalogMock.jobReview.mockClear();
+    await made.revise(store.get(parent.id)!, "try again");
+    expect(catalogMock.jobReview).not.toHaveBeenCalled();
+    expect(store.get(parent.id)?.review ?? null).toBeNull();
   });
 
   it("leaves the parent in review when the catalog refuses, and when it is down", async () => {
@@ -326,8 +352,21 @@ describe("Accept and Discard", () => {
     expect(accepted).toMatchObject({ ok: true, landed: ["video:two-boxes", "poster:video:two-boxes"], revision: 1 });
     expect(catalogMock.videoPut).toHaveBeenCalledWith(expect.objectContaining({ jobId: record.id, slug: "two-boxes", base: null }));
     expect(store.get(record.id)?.state).toBe("accepted");
+    expect(store.get(record.id)?.review).toMatchObject({ verdict: "accept", tags: [], note: null });
+    expect(catalogMock.jobReview).toHaveBeenCalledWith(record.id, "accept", { tags: [], note: null });
     const again = await acceptVideo(store, made, record.id);
     expect(again).toMatchObject({ ok: false, status: 409 });
+  });
+
+  it("lands the video when its accept review does not, and says so on the record", async () => {
+    const made = await runner();
+    const { record } = await made.enqueue(brief());
+    await store.update(record.id, { state: "awaiting_review", targetRevisionBefore: null });
+    catalogMock.videoPut.mockResolvedValueOnce(ok({ revision: 1, assets: [{ id: "video:two-boxes" }] }));
+    catalogMock.jobReview.mockResolvedValueOnce({ ok: false, json: null, error: "ECONNREFUSED", offline: true });
+    expect(await acceptVideo(store, made, record.id)).toMatchObject({ ok: true });
+    expect(store.get(record.id)).toMatchObject({ state: "accepted", indexed: true });
+    expect(store.get(record.id)?.catalogErrors.at(-1)).toContain("ECONNREFUSED");
   });
 
   it("refuses with the database down and leaves the candidate waiting (V15)", async () => {
@@ -357,6 +396,19 @@ describe("Accept and Discard", () => {
     expect(existsSync(path.join(job, "render"))).toBe(false);
     expect(existsSync(path.join(job, "candidate"))).toBe(false);
     expect(await readFile(path.join(job, "source", "two_boxes.py"), "utf8")).toBe("# the source\n");
+    // No reason given: the discard is the same call it always was, and no review is kept.
+    expect(catalogMock.jobDiscard).toHaveBeenLastCalledWith(record.id, undefined);
+    expect(store.get(record.id)?.review).toBeNull();
+  });
+
+  it("keeps a discard's reason on the record and hands it to the catalog's discard", async () => {
+    const made = await runner();
+    const { record } = await made.enqueue(brief());
+    await store.update(record.id, { state: "awaiting_review" });
+    const reason = { tags: ["too-slow" as const, "voice" as const], note: "the voice drags" };
+    expect(await discardVideo(store, made, record.id, reason)).toMatchObject({ ok: true });
+    expect(catalogMock.jobDiscard).toHaveBeenLastCalledWith(record.id, reason);
+    expect(store.get(record.id)).toMatchObject({ state: "discarded", review: { verdict: "discard", tags: ["too-slow", "voice"], note: "the voice drags" } });
   });
 });
 
@@ -372,12 +424,19 @@ describe("reconcile and cancel", () => {
     expect(result).toEqual({ interrupted: [running.id], adopted: [reviewed.id] });
     expect(store.get(running.id)?.state).toBe("interrupted");
     expect(store.get(reviewed.id)?.state).toBe("accepted");
+    // The interrupted job's finish carries its run record, from what the record holds.
+    const finish = catalogMock.jobFinish.mock.calls.map((call) => (call as unknown[])[0] as { jobId: string; runFile?: string }).find((input) => input.jobId === running.id);
+    expect(finish?.runFile).toBe(path.join(home, "jobs", running.id, "run.json"));
+    const run = JSON.parse(await readFile(finish!.runFile!, "utf8")) as Record<string, unknown>;
+    expect(run).toMatchObject({ harness: { name: "claude-code", version: null }, attempts: [], calls: {}, renderSeconds: null, transcriptPath: `jobs/${running.id}/session.ndjson` });
   });
 
-  it("cancels a job that has not started", async () => {
+  it("cancels a job that has not started, with a run record of no attempts", async () => {
     const made = await runner();
     const { record } = await made.enqueue(brief());
+    catalogMock.jobFinish.mockClear();
     expect((await made.cancel(record.id)).state).toBe("cancelled");
+    expect(catalogMock.jobFinish).toHaveBeenCalledWith(expect.objectContaining({ jobId: record.id, state: "cancelled", runFile: path.join(home, "jobs", record.id, "run.json") }));
     await expect(made.cancel(record.id)).rejects.toMatchObject({ status: 409 });
   });
 });

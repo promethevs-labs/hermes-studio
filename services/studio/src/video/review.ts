@@ -1,4 +1,5 @@
 import { jobDiscard, videoPut } from "../data/catalog";
+import { keepReview, reviewOf, type ReviewReason } from "../data/run-record";
 import { backendFor } from "./backend";
 import { briefTool } from "./tools";
 import type { VideoRunner, VideoStore } from "./runner";
@@ -77,7 +78,9 @@ export function acceptVideo(store: VideoStore, runner: VideoRunner, id: string):
       indexed: true,
     });
     await store.emit(id, { type: "done", state: "accepted", note: `accepted: ${updated.written.join(", ")} landed in the database` });
-    await runner.cleanup(updated, { candidate: true });
+    // The video has landed whatever this does: a review that does not land is a catalog error on the record.
+    await keepReview(store, id, "accept");
+    await runner.cleanup(store.get(id) ?? updated, { candidate: true });
     return {
       ok: true,
       status: 200,
@@ -88,20 +91,27 @@ export function acceptVideo(store: VideoStore, runner: VideoRunner, id: string):
   });
 }
 
-export function discardVideo(store: VideoStore, runner: VideoRunner, id: string): Promise<VideoReviewResult> {
+/**
+ * Discard, with the person's reason when they gave one (`parseReviewReason`):
+ * the catalog writes the reason in the same update as the discard, and the
+ * record keeps it as `review` for the job list. No reason discards exactly
+ * as a discard always has, and writes no review.
+ */
+export function discardVideo(store: VideoStore, runner: VideoRunner, id: string, reason: ReviewReason | null = null): Promise<VideoReviewResult> {
   return locked(id, async () => {
     const record = store.get(id);
     if (record === undefined) return { ok: false, status: 404, note: `no job ${id}` };
     if (record.state !== "awaiting_review") {
       return { ok: false, status: 409, note: `job ${id} is ${record.state}; only a video in review is discarded` };
     }
-    const discarded = await jobDiscard(record.id);
+    const discarded = await jobDiscard(record.id, reason ?? undefined);
     if (!discarded.ok && !discarded.offline) {
       return { ok: false, status: 409, note: `the catalog would not discard job ${id}: ${discarded.error ?? ""}` };
     }
     const updated: VideoJobRecord = await store.update(id, {
       state: "discarded",
       reviewedAt: new Date().toISOString(),
+      ...(reason === null ? {} : { review: reviewOf("discard", reason) }),
       ...(discarded.ok ? {} : { catalogErrors: [...record.catalogErrors, discarded.error ?? ""].slice(-20) }),
     });
     await store.emit(id, { type: "done", state: "discarded", note: "discarded: the renders are deleted and the source is kept" });

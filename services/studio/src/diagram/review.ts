@@ -3,6 +3,7 @@ import path from "node:path";
 
 import { canvas, EXIT, explainExit, type VerifyReport } from "../canvas/canvas";
 import { diagramPut, diagramShow, jobAccept, jobDiscard } from "../data/catalog";
+import { keepReview, reviewOf, type ReviewReason } from "../data/run-record";
 import { ensureCheckout, forgetDiagramList } from "../canvas/diagrams";
 import { absolute, ASSETS_DIR, REPO_ROOT, studioHome, workDir } from "../paths";
 import { run } from "../proc";
@@ -265,6 +266,10 @@ async function acceptLocked(
 
   /* 6. The job row. */
   const indexed = await jobAccept(record.id);
+  // The accept's review, after the job row and whatever it answered: it is
+  // no part of landing, so one that does not land is a catalog error on the
+  // record and changes nothing here.
+  await keepReview(store, record.id, "accept");
   const landed =
     `${record.targetPath} landed in the database` +
     (typeof revision === "number" ? ` as revision ${revision}` : "") +
@@ -456,12 +461,18 @@ async function reindexLocked(store: JobStore, record: JobRecord): Promise<Accept
   };
 }
 
-/** Discard: both candidates go and the lease is released. Nothing in the database changed. */
-export function discard(store: JobStore, record: JobRecord): Promise<AcceptResult> {
-  return withJobLock(record.id, () => discardLocked(store, store.get(record.id) ?? record));
+/**
+ * Discard: both candidates go and the lease is released. Nothing in the
+ * database changed. With the person's reason when they gave one
+ * (`parseReviewReason`): the record keeps it as `review`, and the catalog
+ * writes it in the same update as the discard. No reason discards exactly as
+ * a discard always has, and writes no review.
+ */
+export function discard(store: JobStore, record: JobRecord, reason: ReviewReason | null = null): Promise<AcceptResult> {
+  return withJobLock(record.id, () => discardLocked(store, store.get(record.id) ?? record, reason));
 }
 
-async function discardLocked(store: JobStore, record: JobRecord): Promise<AcceptResult> {
+async function discardLocked(store: JobStore, record: JobRecord, reason: ReviewReason | null): Promise<AcceptResult> {
   if (record.state !== "awaiting_review" && record.state !== "interrupted") {
     return {
       ok: false,
@@ -473,8 +484,12 @@ async function discardLocked(store: JobStore, record: JobRecord): Promise<Accept
   }
   await rm(absolute(record.candidatePath), { force: true });
   await rm(absolute(record.candidateSvgPath), { force: true });
-  await store.update(record.id, { state: "discarded", reviewedAt: new Date().toISOString() });
-  const recorded = await jobDiscard(record.id);
+  await store.update(record.id, {
+    state: "discarded",
+    reviewedAt: new Date().toISOString(),
+    ...(reason === null ? {} : { review: reviewOf("discard", reason) }),
+  });
+  const recorded = await jobDiscard(record.id, reason ?? undefined);
   if (!recorded.ok) await store.noteCatalogError(record.id, recorded.error ?? "discard not recorded");
   return {
     ok: true,
