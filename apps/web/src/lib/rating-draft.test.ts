@@ -5,6 +5,7 @@ import {
   cleanDraft,
   describeRating,
   discardReason,
+  discardTagsFor,
   keepOffered,
   parseRatingPrompt,
   ratingPromptValue,
@@ -25,6 +26,17 @@ describe("tagsOffered", () => {
     expect(tagsOffered(-1)).toEqual(RATING_TAGS_DOWN);
     expect(tagsOffered(1)).toEqual(RATING_TAGS_UP);
     expect(tagsOffered(0)).toEqual([]);
+  });
+});
+
+describe("discardTagsFor", () => {
+  it("offers a video every down tag", () => {
+    expect(discardTagsFor("video")).toEqual(RATING_TAGS_DOWN);
+  });
+
+  it("offers a diagram only the reasons a still picture can have", () => {
+    expect(discardTagsFor("diagram")).toEqual(["same-look", "too-much-text", "wrong"]);
+    for (const tag of discardTagsFor("diagram")) expect(RATING_TAGS_DOWN).toContain(tag);
   });
 });
 

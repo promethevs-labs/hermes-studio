@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/Button";
 import { cx } from "@/components/ui/classes";
 import { ErrorText } from "@/components/ui/ErrorText";
 import { FADE_IN } from "@/components/ui/motion";
-import { cleanDraft, DISCARD_TAGS, discardReason, toggleTag } from "@/lib/rating-draft";
+import { cleanDraft, discardReason, discardTagsFor, toggleTag } from "@/lib/rating-draft";
 import type { JobReview, RatingTagDown } from "@hermes/schema/shared";
 
 /** What a discard that gives a reason sends: the body of the runner's discard endpoint. */
@@ -66,6 +66,7 @@ export function DiscardReasonCard({
   const [pressed, setPressed] = useState<"skip" | "discard" | null>(null);
   const group = useRef<HTMLDivElement | null>(null);
   const headingId = useId();
+  const offered = discardTagsFor(subject);
 
   // The press that opened the card took the trigger off the page, so focus
   // goes to the first tag: the next thing to decide.
@@ -108,10 +109,10 @@ export function DiscardReasonCard({
         Why discard this {subject}?
       </h3>
       <RatingDetails
-        tags={DISCARD_TAGS}
+        tags={offered}
         chosen={tags}
         note={note}
-        onToggle={(tag) => setTags((held) => toggleTag(held, tag as RatingTagDown, DISCARD_TAGS))}
+        onToggle={(tag) => setTags((held) => toggleTag(held, tag as RatingTagDown, offered))}
         onNote={setNote}
         onSubmit={send}
         label="What was wrong"

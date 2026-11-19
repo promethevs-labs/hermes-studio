@@ -116,13 +116,13 @@ describe("the thumbs", () => {
     const ui = await mount();
     await click(ui.thumb("Good"));
     const names = [...ui.section().querySelectorAll('[role="group"][aria-label="What was good"] button')].map((b) => b.textContent);
-    expect(names).toEqual(["Clear", "Good visuals", "Good pacing"]);
+    expect(names).toEqual(["Easy to follow", "Good visuals", "Good pacing"]);
   });
 
   it("take the rating back on a press of the active thumb", async () => {
     const ui = await mount({ value: 1, tags: ["clear"], note: null });
     expect(ui.thumb("Good").getAttribute("aria-pressed")).toBe("true");
-    expect(ui.details()).toBe("Good (Clear)");
+    expect(ui.details()).toBe("Good (Easy to follow)");
     await click(ui.thumb("Good"));
     expect(actions.setRating).toHaveBeenCalledWith("manimkc:out/a.mp4", { value: 0 });
     expect(ui.thumb("Good").getAttribute("aria-pressed")).toBe("false");

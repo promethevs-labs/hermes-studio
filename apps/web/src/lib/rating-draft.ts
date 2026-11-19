@@ -38,6 +38,18 @@ export function tagsOffered(value: RatingValue): readonly RatingTag[] {
 /** The tags a discard may carry. */
 export const DISCARD_TAGS: readonly RatingTagDown[] = RATING_TAGS_DOWN;
 
+/** The down tags that can be true of a still picture: no pacing, no voice, no length. */
+const DIAGRAM_DISCARD_TAGS: readonly RatingTagDown[] = ["same-look", "too-much-text", "wrong"];
+
+/**
+ * The tags the discard card offers for a subject. A diagram has no pacing,
+ * narration or running time, so it is offered the three reasons that can
+ * apply to it; the runner takes any down tag for either kind.
+ */
+export function discardTagsFor(subject: "video" | "diagram"): readonly RatingTagDown[] {
+  return subject === "diagram" ? DIAGRAM_DISCARD_TAGS : DISCARD_TAGS;
+}
+
 /** The words for a tag, falling back to the tag itself for one this build does not know. */
 export function tagLabel(tag: string): string {
   return (RATING_TAG_LABELS as Record<string, string>)[tag] ?? tag;

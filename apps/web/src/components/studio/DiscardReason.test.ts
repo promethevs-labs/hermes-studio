@@ -34,7 +34,7 @@ vi.mock("@/components/studio/use-job-verb", async () => {
   };
 });
 
-const { DiscardedReason } = await import("./DiscardReason");
+const { DiscardedReason, DiscardReasonCard } = await import("./DiscardReason");
 const { Actions } = await import("./video/VideoJobPanel");
 
 /**
@@ -177,6 +177,24 @@ describe("Discard on a video job in review", () => {
     expect(button(host, "Accept").disabled).toBe(true);
     await act(async () => finish());
     expect(verb.run).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("the reason card for a diagram", () => {
+  it("offers only the reasons a still picture can have", async () => {
+    const host = await mountNode(
+      createElement(DiscardReasonCard, {
+        subject: "diagram",
+        discarding: false,
+        disabled: false,
+        onSkip: () => {},
+        onDiscard: () => {},
+        onKeep: () => {},
+      }),
+    );
+    expect(host.querySelector("h3")?.textContent).toBe("Why discard this diagram?");
+    const tags = [...host.querySelectorAll('[role="group"] button')].map((b) => b.textContent);
+    expect(tags).toEqual(["Looks like the others", "Too much text", "Wrong or misleading"]);
   });
 });
 
