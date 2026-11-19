@@ -7,6 +7,8 @@ import {
   assetJob,
   canonicalJson,
   canTransition,
+  checkJobReview,
+  checkJobRun,
   COST_SOURCES,
   job as jobTable,
   JOB_ACTIVE_STATES,
@@ -15,7 +17,10 @@ import {
   JOB_TRANSITIONS,
   type Job,
   type JobKind,
+  type JobReview,
+  type JobRun,
   type JobState,
+  type JobVerdict,
   type NewJob,
   readableOwners,
   diagram as diagramTable,
@@ -175,6 +180,10 @@ export interface ShowResult {
   brief: unknown;
   gate: unknown;
   errorDetail: unknown;
+  /** The runner's record of how the job ran (`job.run`), or null when none was stored. */
+  run: JobRun | null;
+  /** A person's verdict detail (`job.review`), or null when none was written. */
+  review: JobReview | null;
   session: { id: string; kind: string; state: string; startedAt: string } | null;
   outputs: JobOutput[];
   /** Jobs that revise this one. */
@@ -183,10 +192,19 @@ export interface ShowResult {
   next: string[];
 }
 
+/** What `job review` wrote. */
+export interface ReviewResult {
+  ok: true;
+  command: "review";
+  job: JobSummary;
+  review: JobReview;
+}
+
 export type JobResult =
   | EnqueueResult
   | ClaimResult
   | TransitionResult
+  | ReviewResult
   | ListResult
   | ShowResult;
 
@@ -968,8 +986,36 @@ export interface FinishOptions {
   errorKind?: string;
   error?: string;
   errorDetail?: Record<string, unknown>;
+  /**
+   * The runner's record of how the job ran, stored in `job.run` once
+   * `checkJobRun` takes it. Absent leaves the column as it was, so a finish
+   * from an older runner does not erase a record a newer one wrote.
+   */
+  run?: unknown;
   /** Whose job. Default: the CLI's owner. */
   owner?: string;
+}
+
+/**
+ * A run record checked as `job.run` stores it, or a `JobError` with the
+ * checker's reason. The column has no CHECK (a rebuild of `job` would be
+ * the price of one), so this is the only thing holding its shape.
+ */
+export function jobRunOf(value: unknown): JobRun {
+  const checked = checkJobRun(value);
+  if (!checked.ok) throw new JobError(`--run-file: ${checked.reason}`);
+  return checked.run;
+}
+
+/**
+ * A review as `job.review` stores it, dated now, or a `JobError` with the
+ * checker's reason: an unknown verdict, a tag outside `RATING_TAGS_DOWN`, a
+ * note past the limit.
+ */
+export function jobReviewOf(verdict: string, tags: readonly string[] | undefined, note: string | undefined): JobReview {
+  const checked = checkJobReview({ verdict, tags: tags ?? [], note: note ?? null, at: new Date().toISOString() });
+  if (!checked.ok) throw new JobError(checked.reason);
+  return checked.review;
 }
 
 /**
@@ -1001,6 +1047,8 @@ export async function runFinish(options: FinishOptions): Promise<TransitionResul
       `${to} is a person's verdict, not a runner's. Use \`catalog job ${to === "accepted" ? "accept" : "discard"}\`.`,
     );
   }
+  // Checked before the database is opened, so a bad record touches nothing.
+  const run = options.run === undefined ? undefined : jobRunOf(options.run);
   const from = sourcesOf(to);
   if (from.length === 0) {
     throw new JobError(`nothing can transition to ${to}.`);
@@ -1031,6 +1079,7 @@ export async function runFinish(options: FinishOptions): Promise<TransitionResul
         errorKind: options.errorKind ?? null,
         error: options.error ?? null,
         errorDetail: options.errorDetail ?? null,
+        ...(run === undefined ? {} : { run }),
         updatedAt: sql`cast(unixepoch('subsec') * 1000 as integer)`,
       })
       .where(and(eq(jobTable.id, options.jobId), inArray(jobTable.state, from), mine))
@@ -1051,6 +1100,19 @@ export interface VerdictOptions {
   jobId: string;
   /** Whose job. Default: the CLI's owner. */
   owner?: string;
+  /**
+   * Why, as `job review` records it: when either is given, the verdict's
+   * `job.review` (`accept` or `discard`) is written in the same update as
+   * the transition. Neither given leaves `job.review` as it was.
+   */
+  tags?: readonly string[];
+  note?: string;
+}
+
+/** The review a verdict's `--tags` and `--note` ask for, or undefined when neither was given. */
+function verdictReview(verdict: JobVerdict, options: VerdictOptions): JobReview | undefined {
+  if (options.tags === undefined && options.note === undefined) return undefined;
+  return jobReviewOf(verdict, options.tags, options.note);
 }
 
 /**
@@ -1066,7 +1128,8 @@ export interface VerdictOptions {
  */
 export async function runAccept(options: VerdictOptions): Promise<TransitionResult> {
   const owner = options.owner ?? CLI_OWNER;
-  return withDatabase(({ db }) => inTransaction(db, (tx) => acceptJobIn(tx, options.jobId, owner)));
+  const review = verdictReview("accept", options);
+  return withDatabase(({ db }) => inTransaction(db, (tx) => acceptJobIn(tx, options.jobId, owner, review)));
 }
 
 /**
@@ -1075,7 +1138,12 @@ export async function runAccept(options: VerdictOptions): Promise<TransitionResu
  * the transaction that lands the video, so a video is never in the catalog
  * with its job still in review (D49 of docs/STUDIO-VIDEOS.md, "Accept").
  */
-export async function acceptJobIn(tx: CatalogDatabase, jobId: string, owner: string): Promise<TransitionResult> {
+export async function acceptJobIn(
+  tx: CatalogDatabase,
+  jobId: string,
+  owner: string,
+  review?: JobReview,
+): Promise<TransitionResult> {
   const mine = await ownedJobs(tx, owner);
   const rows = await tx
     .select()
@@ -1115,6 +1183,7 @@ export async function acceptJobIn(tx: CatalogDatabase, jobId: string, owner: str
     .set({
       state: "accepted",
       reviewedAt: sql`cast(unixepoch('subsec') * 1000 as integer)`,
+      ...(review === undefined ? {} : { review }),
       updatedAt: sql`cast(unixepoch('subsec') * 1000 as integer)`,
     })
     .where(and(eq(jobTable.id, jobId), inArray(jobTable.state, sourcesOf("accepted")), mine))
@@ -1134,6 +1203,7 @@ export async function acceptJobIn(tx: CatalogDatabase, jobId: string, owner: str
 /** Discard: the candidate is gone and the lease is released. */
 export async function runDiscard(options: VerdictOptions): Promise<TransitionResult> {
   const owner = options.owner ?? CLI_OWNER;
+  const review = verdictReview("discard", options);
   return withDatabase(async ({ db }) => {
     const mine = await ownedJobs(db, owner);
     const before = await db
@@ -1143,7 +1213,12 @@ export async function runDiscard(options: VerdictOptions): Promise<TransitionRes
       .limit(1);
     const updated = await db
       .update(jobTable)
-      .set({ state: "discarded", reviewedAt: sql`cast(unixepoch('subsec') * 1000 as integer)`, updatedAt: sql`cast(unixepoch('subsec') * 1000 as integer)` })
+      .set({
+        state: "discarded",
+        reviewedAt: sql`cast(unixepoch('subsec') * 1000 as integer)`,
+        ...(review === undefined ? {} : { review }),
+        updatedAt: sql`cast(unixepoch('subsec') * 1000 as integer)`,
+      })
       .where(and(eq(jobTable.id, options.jobId), inArray(jobTable.state, sourcesOf("discarded")), mine))
       .returning();
     if (updated.length === 0) throw await explainRefusal(db, options.jobId, "discarded", owner);
@@ -1155,6 +1230,36 @@ export async function runDiscard(options: VerdictOptions): Promise<TransitionRes
       job: summarise(updated[0]!),
       outputs: [],
     };
+  });
+}
+
+export interface ReviewOptions {
+  jobId: string;
+  verdict: string;
+  tags?: readonly string[];
+  note?: string;
+  /** Whose job. Default: the CLI's owner. */
+  owner?: string;
+}
+
+/**
+ * Record a person's verdict detail on a job, `job.review`, dated now: why it
+ * was accepted, discarded or sent back for a revision. Writes only the
+ * review, never the state, so it can follow a verdict the studio already
+ * recorded, or stand alone for `revise`, which is no transition at all. A
+ * second review replaces the first.
+ */
+export async function runReview(options: ReviewOptions): Promise<ReviewResult> {
+  const review = jobReviewOf(options.verdict, options.tags, options.note);
+  const owner = options.owner ?? CLI_OWNER;
+  return withDatabase(async ({ db }) => {
+    const updated = await db
+      .update(jobTable)
+      .set({ review, updatedAt: sql`cast(unixepoch('subsec') * 1000 as integer)` })
+      .where(and(eq(jobTable.id, options.jobId), await ownedJobs(db, owner)))
+      .returning();
+    if (updated.length === 0) throw new JobError(`no job "${options.jobId}". \`catalog job ls\` lists them.`);
+    return { ok: true as const, command: "review" as const, job: summarise(updated[0]!), review };
   });
 }
 
@@ -1245,6 +1350,8 @@ export async function runShow(jobId: string, owner: string = CLI_OWNER): Promise
       brief: row.brief,
       gate: row.gate,
       errorDetail: row.errorDetail,
+      run: row.run ?? null,
+      review: row.review ?? null,
       session:
         session === undefined
           ? null
@@ -1298,6 +1405,11 @@ async function jobOutputs(db: CatalogDatabase, jobId: string): Promise<JobOutput
 /* Human output                                                               */
 /* -------------------------------------------------------------------------- */
 
+function reviewLine(review: JobReview): string {
+  const tags = review.tags.length === 0 ? "" : ` [${review.tags.join(", ")}]`;
+  return `${review.verdict}${tags}${review.note === null ? "" : `: ${review.note}`}`;
+}
+
 function line(job: JobSummary): string {
   return `${job.state.padEnd(15)} ${job.kind.padEnd(8)} ${job.topic.padEnd(22)} ${job.targetPath}  ${job.id}`;
 }
@@ -1326,6 +1438,8 @@ export function formatJob(result: JobResult): string {
       }
       return lines.join("\n");
     }
+    case "review":
+      return `${result.job.id}: review ${reviewLine(result.review)}`;
     case "ls": {
       if (result.jobs.length === 0) return "no jobs";
       const shown =
@@ -1349,6 +1463,11 @@ export function formatJob(result: JobResult): string {
         `  attempt   ${job.attempt}`,
       ];
       if (job.error !== null) lines.push(`  error     ${job.errorKind ?? "?"}: ${job.error}`);
+      if (result.run !== null) {
+        const model = result.run.model.resolved ?? result.run.model.passed ?? "(model unknown)";
+        lines.push(`  run       ${result.run.harness.name} ${model}, ${result.run.attempts.length} attempt(s)`);
+      }
+      if (result.review !== null) lines.push(`  review    ${reviewLine(result.review)}`);
       lines.push(`  outputs   ${result.outputs.length === 0 ? "(none)" : ""}`);
       for (const output of result.outputs) {
         const state = output.current === null ? "missing" : output.current ? "current" : "changed";

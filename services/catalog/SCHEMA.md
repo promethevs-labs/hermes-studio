@@ -43,8 +43,8 @@ directory being imported: an export, `seed/`, or `content-files-final`.
 
 | Half | Tables | Source of truth |
 | --- | --- | --- |
-| Content | `topic`, `concept`, `collection`, `curriculum_item`, `asset` and seven link tables; since 0010 also `tag`, `topic_relation`, `manimkc_topic`, `collection_tag`, `diagram`, `blob_object`, `session_log_entry` and `content_revision`; since 0015 `video` | The database, since the phase 3 cut-over: every type is authored here through the write seam, and files are an export (`catalog export --out`, and the nightly export under `$HERMES_HOME/archive/`). The manimkc rows and the mirror ledger are still rebuilt by `catalog import` from manimkc's own CLI. `content_revision` is the only record of who wrote what, and why. |
-| State | `learner`, `event`, `mastery`, `review`, `progress`, `recap`, `preference`, `provider_key`, `custom_provider`, `tutor_model`, `asset_name`, `check_distractor` | The database. `event` is the only copy; `mastery` and `review` are replayable from it. Filled by bundle 5's backfill: see [LEARN.md](LEARN.md). |
+| Content | `topic`, `concept`, `collection`, `curriculum_item`, `asset` and seven link tables; since 0010 also `tag`, `topic_relation`, `manimkc_topic`, `collection_tag`, `diagram`, `blob_object`, `session_log_entry` and `content_revision`; since 0015 `video`; since SQLite's 0005 `asset_ingredients` | The database, since the phase 3 cut-over: every type is authored here through the write seam, and files are an export (`catalog export --out`, and the nightly export under `$HERMES_HOME/archive/`). The manimkc rows and the mirror ledger are still rebuilt by `catalog import` from manimkc's own CLI. `content_revision` is the only record of who wrote what, and why. |
+| State | `learner`, `event`, `mastery`, `review`, `progress`, `recap`, `preference`, `provider_key`, `custom_provider`, `tutor_model`, `asset_name`, `asset_rating`, `check_distractor` | The database. `event` is the only copy; `mastery` and `review` are replayable from it. Filled by bundle 5's backfill: see [LEARN.md](LEARN.md). |
 | Operational | `index_run`, `mirror`, `content_source`, `catalog_instance` | Neither. What the indexers did, which content types the database owns, and whether this database is the primary. |
 | Studio | `session`, `draft`, `job`, `asset_job` | The database, and the only copy. Who asked for a file to be made, and what came out. |
 
@@ -103,6 +103,7 @@ which brief produced them.
 | `concept_prerequisite` | This concept `requires` or `assumes` that one. |
 | `collection_item` | This collection contains exactly one of a topic, a concept or an asset, at a position. A module holds one topic row (its topic, with `topic_position`, its place in that topic's `maps.courses`) and, since 0.5, one asset row per curated link in `resources:` order. |
 | `asset_derivation` | This asset was produced from that one: a transcript from a video, an SVG from a `.tldr`. |
+| `asset_ingredients` | What a video was made of, read from its source by a scanner ([`0005_eval_records.sql`](drizzle-sqlite/0005_eval_records.sql)): the tool, the scanner's version, the hash of the source it read, the scene count and duration, `calls` (helper name to count) and `metrics`, both JSON objects. One row per video asset, replaced on every scan. Derived like `asset_derivation`, so it carries no revisions and goes with its asset (`ON DELETE CASCADE`). `owner_id` is the asset's, stamped by the one writer, `src/index/ingredients.ts`; the two reads (`assetIngredients`, `listAssetIngredients`) take an owner scope and come through `@hermes/catalog/state`. |
 | `curriculum_item_topic` | This checklist row covers this topic. How a course reaches the assets. |
 | `concept_curriculum_item` | This note contributes to this checklist row, at this position. Written by the courses source from `topics[].concepts`. |
 | `curriculum_item_asset` | This reading goes with this lesson (0022): a curated `link` asset to a curriculum item of the same module, at the item's place in the reading's `lessons:` list. Written by the courses source and `course import` only. See "Readings on lessons and listed videos" below. |
@@ -131,6 +132,7 @@ which brief produced them.
 | `custom_provider` | The providers an owner added themselves: a name and an OpenAI-compatible base URL under an id `custom-<slug>`, which their `provider_key` row and `tutor_model` entries are filed under (migration `0028_custom_provider`, [docs/TUTOR-MODELS.md](../../docs/TUTOR-MODELS.md) T14). No secret. The base URL is `https://`, or `http://` to a loopback host, in the function and a CHECK. Written only by `src/state/custom-providers.ts`; a provider's Delete removes the row, its key and its models in one transaction (`deleteTutorProvider`). |
 | `tutor_model` | The tutor's model chain: an owner's ordered provider and model pairs, tried top to bottom, with `position` 0 to n-1 (migration `0020_tutor_model`, [docs/TUTOR-MODELS.md](../../docs/TUTOR-MODELS.md)). No secret. Written only by `src/state/tutor-models.ts`, which rewrites an owner's rows whole under the learner lock. |
 | `asset_name` | A learner's own name for an asset, read in place of `asset.title` by every `AssetRef` query, `catalog show`, `catalog search` and the studio's video list (migration `0024_asset_name`). State rather than a column on `asset`, because every import writes the whole asset row again and would undo an edit there; the learner's, so a name for a commons video is nobody else's. No foreign key on `asset_id`, so a name outlives a prune and comes back with an asset re-imported under the same id. Written only by `src/state/asset-names.ts`, from the library page through `POST /api/learner/asset-name`. |
+| `asset_rating` | A learner's thumbs up or down on an asset, with tags from `RATING_TAGS_DOWN` or `RATING_TAGS_UP` and a note ([`0005_eval_records.sql`](drizzle-sqlite/0005_eval_records.sql)). An append-only log: every change is a row, a clear (`value` 0) included, and the current rating is the newest row per learner and asset. `job_id` and `asset_hash` are snapshots of the studio job that made the asset and the bytes that were rated, taken when it was rated. No foreign key on `asset_id` (nor on `job_id`), for the reason `asset_name` has none. Written only by `src/state/asset-ratings.ts`. See [Ratings are a log](#ratings-are-a-log). |
 | `check_distractor` | The tutor's three wrong options for one check block in a note, cached per learner and keyed by the check's id with a sha256 of its question and answer, so an edited check reads as missing and is written again (migration `0003_check_distractor` of `drizzle-sqlite/`, [docs/LEARN.md](../../docs/LEARN.md) "Wrong options"). Derived: losing it costs one model call per check, so no exporter reads it. `cascade` on the learner and the concept. Written only by `src/state/check-distractors.ts`, from `checkOptionsTurn` in `packages/tutor`. |
 
 ### Operational
@@ -148,7 +150,7 @@ which brief produced them.
 | --- | --- |
 | `session` | One run of something that writes to the knowledge base. `kind` is `tutor` (a `/learn` session) or `studio` (a generation runner); both share one id space, which is what lets `event.session_id` be a foreign key. |
 | `draft` | One conversation with the studio's planner (docs/STUDIO-CHAT-FIRST.md, D32): the headless session every turn resumes, the transcript's path under the runner's `STUDIO_HOME`, the latest brief that passed and, when its topic does not exist yet, the proposed topic (`pending_topic`). One owner's, like a job. A mirror of the runner's `drafts/<id>/draft.json`, written by `catalog draft upsert`, so it has no transition guard of its own: the runner holds the record and the state machine (`DRAFT_TRANSITIONS`). `title` is the latest brief's, written by the planner; `name` (0027) is the owner's, set with the sidebar's Rename through the runner's `PUT /api/drafts/{id}/name`, one line of 1 to 200 characters or null (`draft_name_check`). Every page calls a conversation by its name, else its title. `updated_at` is the runner's own `updatedAt` when `draft.json` carries one, so a rename, which leaves it alone, does not move the conversation up Recent. |
-| `job` | One request to generate one file (`kind` `diagram` or, since 0015, `video`, whose `target_path` is `videos/<slug>.mp4`): the brief, the lease on a committed path, the state machine, the gate's verdict and what it cost. `draft_id` names the conversation that asked for it (D35), `ON DELETE SET NULL`, so pruning a draft never takes a job with it; a draft reports its newest job. |
+| `job` | One request to generate one file (`kind` `diagram` or, since 0015, `video`, whose `target_path` is `videos/<slug>.mp4`): the brief, the lease on a committed path, the state machine, the gate's verdict and what it cost. `draft_id` names the conversation that asked for it (D35), `ON DELETE SET NULL`, so pruning a draft never takes a job with it; a draft reports its newest job. Since SQLite's 0005, `run` (the runner's `JobRun`, from `job finish --run-file`) and `review` (a person's `JobReview`, from `job review` or `--tags`/`--note` on accept and discard), both nullable JSON; see [The run and review columns](#the-run-and-review-columns). |
 | `asset_job` | This job wrote this asset, at this hash, at this size. Provenance as a link table, so regenerating does not erase the earlier job's claim. Once the job is accepted the hash is a snapshot and is never rewritten: a repair assert over a file somebody has edited since would otherwise replace "what the job wrote" with "what a person wrote afterwards", which is the one comparison that makes the edit visible. |
 
 Three shapes here are worth stating outright.
@@ -188,6 +190,52 @@ refuse-never-skip can fire: a brief naming a slug that has no `topic` row
 fails the enqueue with a `23503` before any GPU time.
 
 ## Decisions
+
+### Ratings are a log
+
+`asset_rating` is appended to and never updated. A rating that went from down
+to up after a re-render says the re-render worked, and an updated row would
+have forgotten the down. The current rating is the newest row per learner and
+asset, by `at` and then by rowid, so two rows in one millisecond still have an
+order; a clear is a row with `value` 0 and no tags
+(`asset_rating_clear_check`), so "cleared" and "never rated" read apart.
+
+Append-only by convention, not by trigger. `event` has a trigger because
+`mastery` and `review` are projections of it, and an edit there would leave
+them unexplainable. Nothing projects from `asset_rating`, and its one writer,
+`src/state/asset-ratings.ts`, only inserts.
+
+`job_id` and `asset_hash` are copied in when the rating is written, not joined
+later. A re-render replaces the asset's bytes and may add a newer `asset_job`
+row; the rating judged the version it saw, and a join at read time would move
+it onto the new one. `asset_hash` is `asset.content_hash`, else the sha256 of
+the blob the asset points at, else null.
+
+### The run and review columns
+
+`job.run` and `job.review` are JSON text, added with a plain
+`ALTER TABLE job ADD COLUMN` and no CHECK. SQLite can add a column with a
+CHECK, but drizzle-kit writes any CHECK change on a table as a rebuild (copy
+every row into a new table, drop the old one, rename), and a rebuild of `job`
+on an owner's data is not worth a CHECK on two optional columns. The shapes
+are `JobRun` and `JobReview` in `@hermes/schema/shared`, and `checkJobRun` and
+`checkJobReview` hold them in the one writer, `src/commands/job.ts`:
+`job finish --run-file`, `job review`, and `--tags` and `--note` on
+`job accept` and `job discard`. `transcriptPath` in a run is relative to the
+runner's `STUDIO_HOME` and an absolute one is refused, as `candidate_path` is.
+
+They are columns rather than tables because each is one record per job, read
+with the job and never joined on. A run's attempts and a review's tags live
+inside the JSON, since nothing queries across jobs by them yet; a report that
+needs to can read the JSON with SQLite's `json_each`.
+
+`0005_eval_records.sql` is drizzle-kit's output with one cut, said in its
+header: it also wrote a rebuild of `asset`, because 0004 was written by hand
+with no snapshot, so the diff ran against 0003's snapshot and its old
+`asset_source_repo_check`. 0004 already made that change. The cut leaves the
+file creating two tables and adding two columns, and rebuilding nothing; 0005's
+snapshot holds the schema as it is now, so the next generate starts from the
+truth.
 
 ### Curriculum items are their own table, not assets
 

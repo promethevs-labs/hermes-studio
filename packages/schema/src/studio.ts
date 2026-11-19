@@ -23,6 +23,8 @@ import {
   JOB_ACTIVE_STATES,
   JOB_KINDS,
   JOB_STATES,
+  type JobReview,
+  type JobRun,
   SESSION_KINDS,
   SESSION_STATES,
 } from "./shared";
@@ -331,6 +333,25 @@ export const job = sqliteTable(
     ownerId: ownerId(() => learner.id),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
+    /**
+     * The runner's record of how the job ran (`JobRun`): harness, model,
+     * effort, manual, each attempt and its gate, the calls it made. Null
+     * until `catalog job finish --run-file` stores one.
+     *
+     * **No CHECK, on purpose.** SQLite can add a column with a CHECK, but
+     * drizzle-kit writes any CHECK change as a rebuild of the whole table
+     * (copy every row to a new `job`, drop the old, rename), and a rebuild of
+     * `job` on the owner's data is the risk this column is not worth. The
+     * shape is held by `checkJobRun` in the one writer, `commands/job.ts`.
+     */
+    run: text("run", { mode: "json" }).$type<JobRun>(),
+    /**
+     * A person's verdict detail (`JobReview`): accept, discard or revise,
+     * the tags and note that say why, and when. Null until a review is
+     * written. Unchecked in the table for the reason `run` is; `checkJobReview`
+     * holds it in the writer.
+     */
+    review: text("review", { mode: "json" }).$type<JobReview>(),
   },
   (t) => [
     uniqueIndex("job_idempotency_key_key").on(t.idempotencyKey),
