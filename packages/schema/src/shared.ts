@@ -770,6 +770,439 @@ export function cleanAssetName(value: unknown): string | null {
   return cleanDisplayName(value);
 }
 
+/* -------------------------------------------------------------------------- */
+/* Ratings: a learner's thumbs up or down on an asset                         */
+/* -------------------------------------------------------------------------- */
+
+/** What a thumbs down may say was wrong. Stored in `asset_rating.tags` and `job.review`. */
+export const RATING_TAGS_DOWN = [
+  "same-look",
+  "too-much-text",
+  "too-slow",
+  "too-fast",
+  "picture-mismatch",
+  "wrong",
+  "voice",
+  "too-long",
+] as const;
+export type RatingTagDown = (typeof RATING_TAGS_DOWN)[number];
+
+/** What a thumbs up may say was good. */
+export const RATING_TAGS_UP = ["clear", "good-visuals", "good-pacing"] as const;
+export type RatingTagUp = (typeof RATING_TAGS_UP)[number];
+
+export type RatingTag = RatingTagDown | RatingTagUp;
+
+/** The words a page shows for each tag, in sentence case. */
+export const RATING_TAG_LABELS: Readonly<Record<RatingTag, string>> = {
+  "same-look": "Looks like the others",
+  "too-much-text": "Too much text",
+  "too-slow": "Too slow",
+  "too-fast": "Too fast",
+  "picture-mismatch": "Picture does not match the words",
+  wrong: "Wrong or misleading",
+  voice: "Voice",
+  "too-long": "Too long",
+  clear: "Clear",
+  "good-visuals": "Good visuals",
+  "good-pacing": "Good pacing",
+};
+
+/** The longest note a rating or a review takes, and the most tags one carries. */
+export const RATING_LIMITS = { maxNoteChars: 2000, maxTags: 8 } as const;
+
+/** Where a rating was given: the library's asset page, or the studio's review. */
+export const RATING_SURFACES = ["library", "studio"] as const;
+export type RatingSurface = (typeof RATING_SURFACES)[number];
+
+/** Down, cleared, up. A 0 is a rating taken back, stored as a row of its own. */
+export const RATING_VALUES = [-1, 0, 1] as const;
+export type RatingValue = (typeof RATING_VALUES)[number];
+
+/** A rating as it is stored: a value, its tags, and a note or null. */
+export interface CleanRating {
+  value: RatingValue;
+  tags: RatingTag[];
+  note: string | null;
+}
+
+/**
+ * The tags a value may carry: down tags with -1, up tags with 1, none with 0.
+ * Readonly, so a caller cannot grow the vocabulary by pushing onto it.
+ */
+export function ratingTagsFor(value: RatingValue): readonly RatingTag[] {
+  if (value === -1) return RATING_TAGS_DOWN;
+  if (value === 1) return RATING_TAGS_UP;
+  return [];
+}
+
+/**
+ * A note as a rating or a review stores it: trimmed, null when blank. The
+ * inside is kept as typed, line breaks included, since a note is prose.
+ * Refuses rather than cuts one past `RATING_LIMITS.maxNoteChars`.
+ */
+function cleanNote(value: unknown): { ok: true; note: string | null } | { ok: false; reason: string } {
+  if (value === undefined || value === null) return { ok: true, note: null };
+  if (typeof value !== "string") return { ok: false, reason: "A note is text." };
+  const note = value.trim();
+  if (note === "") return { ok: true, note: null };
+  if (note.length > RATING_LIMITS.maxNoteChars) {
+    return { ok: false, reason: `A note is at most ${RATING_LIMITS.maxNoteChars} characters; this one has ${note.length}.` };
+  }
+  return { ok: true, note };
+}
+
+/** A tag list checked against `allowed`, in the order given, each tag once. */
+function cleanTags(
+  value: unknown,
+  allowed: readonly string[],
+  what: string,
+): { ok: true; tags: string[] } | { ok: false; reason: string } {
+  if (value === undefined || value === null) return { ok: true, tags: [] };
+  if (!Array.isArray(value)) return { ok: false, reason: "Tags are a list." };
+  const tags: string[] = [];
+  for (const tag of value) {
+    if (typeof tag !== "string") return { ok: false, reason: "Each tag is text." };
+    if (!allowed.includes(tag)) {
+      return {
+        ok: false,
+        reason:
+          allowed.length === 0
+            ? `${what} carries no tags, so "${tag}" cannot go on it.`
+            : `"${tag}" is not a tag ${what} takes. Known: ${allowed.join(", ")}.`,
+      };
+    }
+    if (!tags.includes(tag)) tags.push(tag);
+  }
+  if (tags.length > RATING_LIMITS.maxTags) {
+    return { ok: false, reason: `At most ${RATING_LIMITS.maxTags} tags; this has ${tags.length}.` };
+  }
+  return { ok: true, tags };
+}
+
+/**
+ * A rating from a form or a flag, checked and cleaned: `value` is -1, 0 or 1
+ * (0 takes a rating back); `tags` must belong to that value's list
+ * (`ratingTagsFor`), each kept once in the order given; `note` is trimmed and
+ * null when blank. Pure, so a page and the writer refuse the same input with
+ * the same sentence.
+ */
+export function cleanRating(input: {
+  value: unknown;
+  tags?: unknown;
+  note?: unknown;
+}): { ok: true; rating: CleanRating } | { ok: false; reason: string } {
+  const value = input.value;
+  if (value !== -1 && value !== 0 && value !== 1) {
+    return { ok: false, reason: "A rating is -1 (down), 0 (cleared) or 1 (up)." };
+  }
+  const what = value === -1 ? "a thumbs down" : value === 1 ? "a thumbs up" : "a cleared rating";
+  const tags = cleanTags(input.tags, ratingTagsFor(value), what);
+  if (!tags.ok) return tags;
+  const note = cleanNote(input.note);
+  if (!note.ok) return note;
+  return { ok: true, rating: { value, tags: tags.tags as RatingTag[], note: note.note } };
+}
+
+/**
+ * What every "the learner dismissed the rating prompt for this asset"
+ * preference key starts with: one `preference` row per asset,
+ * `ratingPrompt:<asset id>`, the shape `favorite:<asset id>` and
+ * `playback:<asset id>` already take (`@hermes/tutor/favorite`,
+ * `@hermes/tutor/playback`). Those two prefixes live with their features;
+ * this one is here because the rating vocabulary is.
+ */
+export const RATING_PROMPT_PREFERENCE_PREFIX = "ratingPrompt:";
+
+export function ratingPromptKey(assetId: string): string {
+  return `${RATING_PROMPT_PREFERENCE_PREFIX}${assetId}`;
+}
+
+/* -------------------------------------------------------------------------- */
+/* A job's run and review records (`job.run`, `job.review`)                   */
+/* -------------------------------------------------------------------------- */
+
+/** One gate pass over an attempt's output. */
+export interface JobRunGate {
+  ok: boolean;
+  steps: Array<{ name: string; ok: boolean }>;
+  findings: number;
+  warnings: number;
+}
+
+/** One attempt of a job, as the runner saw it. */
+export interface JobRunAttempt {
+  /** 1, 2, 3: the attempt's number. */
+  n: number;
+  /** ISO 8601, or null when not known. */
+  startedAt: string | null;
+  endedAt: string | null;
+  turns: number | null;
+  costUsd: number | null;
+  gate: JobRunGate | null;
+}
+
+/**
+ * The runner's record of how a job was run (`job.run`): which harness and
+ * model, with what effort and manual, and what each attempt did.
+ * `transcriptPath` is relative to the runner's `STUDIO_HOME`, as
+ * `job.candidate_path` is, and an absolute one is refused.
+ */
+export interface JobRun {
+  harness: { name: string; version: string | null };
+  /** The model the job asked for, and the one the stream said answered. */
+  model: { passed: string | null; resolved: string | null };
+  effort: string | null;
+  manualHash: string | null;
+  auth: string | null;
+  attempts: JobRunAttempt[];
+  /** How many times the job called each tool or helper, by name. */
+  calls: Record<string, number>;
+  renderSeconds: number | null;
+  transcriptPath: string | null;
+}
+
+/** What a person decided about a job's output. */
+export const JOB_VERDICTS = ["accept", "discard", "revise"] as const;
+export type JobVerdict = (typeof JOB_VERDICTS)[number];
+
+/** A person's verdict detail on a job (`job.review`). Tags are from `RATING_TAGS_DOWN`. */
+export interface JobReview {
+  verdict: JobVerdict;
+  tags: RatingTagDown[];
+  note: string | null;
+  /** When the review was written, ISO 8601. */
+  at: string;
+}
+
+/** Bounds on a `JobRun`, so one record cannot grow without limit. */
+export const JOB_RUN_LIMITS = { maxAttempts: 20, maxGateSteps: 100, maxCalls: 500, maxChars: 500 } as const;
+
+type Check<T> = { ok: true; value: T } | { ok: false; reason: string };
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const isInstant = (value: unknown): value is string =>
+  typeof value === "string" && value.length <= 64 && !Number.isNaN(Date.parse(value));
+
+const isCount = (value: unknown): value is number => Number.isInteger(value) && (value as number) >= 0;
+
+const isAmount = (value: unknown): value is number =>
+  typeof value === "number" && Number.isFinite(value) && value >= 0;
+
+/** The keys `value` has that `known` does not name, so a misspelt field is refused rather than dropped. */
+function strayKeys(value: Record<string, unknown>, known: readonly string[]): string[] {
+  return Object.keys(value).filter((key) => !known.includes(key));
+}
+
+function shortText(value: unknown, field: string, nullable: boolean): Check<string | null> {
+  if (value === null && nullable) return { ok: true, value: null };
+  if (typeof value !== "string" || value === "" || value.length > JOB_RUN_LIMITS.maxChars) {
+    return {
+      ok: false,
+      reason: `${field} is ${nullable ? "null or " : ""}text of 1 to ${JOB_RUN_LIMITS.maxChars} characters.`,
+    };
+  }
+  return { ok: true, value };
+}
+
+/**
+ * A path relative to the runner's `STUDIO_HOME`: no leading slash, no drive
+ * letter, no backslash, no `.` or `..` segment. The same rule
+ * `job.candidate_path` holds to, since `STUDIO_HOME` moves between machines
+ * and an absolute path would carry this one's into the database.
+ */
+export function isStudioRelativePath(value: string): boolean {
+  if (value === "" || value.length > JOB_RUN_LIMITS.maxChars) return false;
+  if (value.startsWith("/") || value.includes("\\") || /^[A-Za-z]:/.test(value)) return false;
+  return value.split("/").every((segment) => segment !== "" && segment !== "." && segment !== "..");
+}
+
+function checkGate(value: unknown, field: string): Check<JobRunGate | null> {
+  if (value === null) return { ok: true, value: null };
+  if (!isPlainObject(value)) return { ok: false, reason: `${field} is null or an object.` };
+  const stray = strayKeys(value, ["ok", "steps", "findings", "warnings"]);
+  if (stray.length > 0) return { ok: false, reason: `${field} has unknown fields: ${stray.join(", ")}.` };
+  if (typeof value.ok !== "boolean") return { ok: false, reason: `${field}.ok is true or false.` };
+  if (!Array.isArray(value.steps) || value.steps.length > JOB_RUN_LIMITS.maxGateSteps) {
+    return { ok: false, reason: `${field}.steps is a list of at most ${JOB_RUN_LIMITS.maxGateSteps}.` };
+  }
+  const steps: JobRunGate["steps"] = [];
+  for (const [index, step] of value.steps.entries()) {
+    const at = `${field}.steps[${index}]`;
+    if (!isPlainObject(step) || strayKeys(step, ["name", "ok"]).length > 0) {
+      return { ok: false, reason: `${at} is { name, ok }.` };
+    }
+    const name = shortText(step.name, `${at}.name`, false);
+    if (!name.ok) return name;
+    if (typeof step.ok !== "boolean") return { ok: false, reason: `${at}.ok is true or false.` };
+    steps.push({ name: name.value as string, ok: step.ok });
+  }
+  if (!isCount(value.findings)) return { ok: false, reason: `${field}.findings is a whole number, 0 or more.` };
+  if (!isCount(value.warnings)) return { ok: false, reason: `${field}.warnings is a whole number, 0 or more.` };
+  return { ok: true, value: { ok: value.ok, steps, findings: value.findings, warnings: value.warnings } };
+}
+
+function checkAttempt(value: unknown, field: string): Check<JobRunAttempt> {
+  if (!isPlainObject(value)) return { ok: false, reason: `${field} is an object.` };
+  const stray = strayKeys(value, ["n", "startedAt", "endedAt", "turns", "costUsd", "gate"]);
+  if (stray.length > 0) return { ok: false, reason: `${field} has unknown fields: ${stray.join(", ")}.` };
+  if (!Number.isInteger(value.n) || (value.n as number) < 1) {
+    return { ok: false, reason: `${field}.n is a whole number, 1 or more.` };
+  }
+  for (const key of ["startedAt", "endedAt"] as const) {
+    if (value[key] !== null && !isInstant(value[key])) {
+      return { ok: false, reason: `${field}.${key} is null or an ISO 8601 instant.` };
+    }
+  }
+  if (value.turns !== null && !isCount(value.turns)) {
+    return { ok: false, reason: `${field}.turns is null or a whole number, 0 or more.` };
+  }
+  if (value.costUsd !== null && !isAmount(value.costUsd)) {
+    return { ok: false, reason: `${field}.costUsd is null or a number, 0 or more.` };
+  }
+  const gate = checkGate(value.gate, `${field}.gate`);
+  if (!gate.ok) return gate;
+  return {
+    ok: true,
+    value: {
+      n: value.n as number,
+      startedAt: value.startedAt as string | null,
+      endedAt: value.endedAt as string | null,
+      turns: value.turns as number | null,
+      costUsd: value.costUsd as number | null,
+      gate: gate.value,
+    },
+  };
+}
+
+const JOB_RUN_KEYS = [
+  "harness",
+  "model",
+  "effort",
+  "manualHash",
+  "auth",
+  "attempts",
+  "calls",
+  "renderSeconds",
+  "transcriptPath",
+] as const;
+
+/**
+ * A `JobRun` checked field by field, the way `catalog job finish --run-file`
+ * stores it: every field present (null where the shape allows it), no field
+ * the shape does not name, and `transcriptPath` relative to `STUDIO_HOME`.
+ * The value comes back rebuilt from the checked fields, never the input
+ * object itself.
+ */
+export function checkJobRun(input: unknown): { ok: true; run: JobRun } | { ok: false; reason: string } {
+  if (!isPlainObject(input)) return { ok: false, reason: "A run record is a JSON object." };
+  const stray = strayKeys(input, JOB_RUN_KEYS);
+  if (stray.length > 0) return { ok: false, reason: `The run record has unknown fields: ${stray.join(", ")}.` };
+  const missing = JOB_RUN_KEYS.filter((key) => !Object.hasOwn(input, key));
+  if (missing.length > 0) return { ok: false, reason: `The run record is missing: ${missing.join(", ")}.` };
+
+  const harness = input.harness;
+  if (!isPlainObject(harness) || strayKeys(harness, ["name", "version"]).length > 0) {
+    return { ok: false, reason: "harness is { name, version }." };
+  }
+  const harnessName = shortText(harness.name, "harness.name", false);
+  if (!harnessName.ok) return harnessName;
+  const harnessVersion = shortText(harness.version, "harness.version", true);
+  if (!harnessVersion.ok) return harnessVersion;
+
+  const model = input.model;
+  if (!isPlainObject(model) || strayKeys(model, ["passed", "resolved"]).length > 0) {
+    return { ok: false, reason: "model is { passed, resolved }." };
+  }
+  const passed = shortText(model.passed, "model.passed", true);
+  if (!passed.ok) return passed;
+  const resolved = shortText(model.resolved, "model.resolved", true);
+  if (!resolved.ok) return resolved;
+
+  const texts: Record<"effort" | "manualHash" | "auth", string | null> = { effort: null, manualHash: null, auth: null };
+  for (const key of ["effort", "manualHash", "auth"] as const) {
+    const checked = shortText(input[key], key, true);
+    if (!checked.ok) return checked;
+    texts[key] = checked.value;
+  }
+
+  if (!Array.isArray(input.attempts) || input.attempts.length > JOB_RUN_LIMITS.maxAttempts) {
+    return { ok: false, reason: `attempts is a list of at most ${JOB_RUN_LIMITS.maxAttempts}.` };
+  }
+  const attempts: JobRunAttempt[] = [];
+  for (const [index, attempt] of input.attempts.entries()) {
+    const checked = checkAttempt(attempt, `attempts[${index}]`);
+    if (!checked.ok) return checked;
+    attempts.push(checked.value);
+  }
+
+  if (!isPlainObject(input.calls)) return { ok: false, reason: "calls is an object of name to count." };
+  const entries = Object.entries(input.calls);
+  if (entries.length > JOB_RUN_LIMITS.maxCalls) {
+    return { ok: false, reason: `calls names at most ${JOB_RUN_LIMITS.maxCalls} tools; this names ${entries.length}.` };
+  }
+  const calls: Record<string, number> = {};
+  for (const [name, count] of entries) {
+    if (name === "" || name.length > JOB_RUN_LIMITS.maxChars) {
+      return { ok: false, reason: `calls has a name of ${name.length} characters; a name is 1 to ${JOB_RUN_LIMITS.maxChars}.` };
+    }
+    if (!isCount(count)) return { ok: false, reason: `calls["${name}"] is a whole number, 0 or more.` };
+    calls[name] = count;
+  }
+
+  if (input.renderSeconds !== null && !isAmount(input.renderSeconds)) {
+    return { ok: false, reason: "renderSeconds is null or a number, 0 or more." };
+  }
+  const transcriptPath = input.transcriptPath;
+  if (transcriptPath !== null && (typeof transcriptPath !== "string" || !isStudioRelativePath(transcriptPath))) {
+    return {
+      ok: false,
+      reason: `transcriptPath ${JSON.stringify(transcriptPath)} is not relative to the runner's STUDIO_HOME. Pass a path such as jobs/<id>/transcript.ndjson, or null.`,
+    };
+  }
+
+  return {
+    ok: true,
+    run: {
+      harness: { name: harnessName.value as string, version: harnessVersion.value },
+      model: { passed: passed.value, resolved: resolved.value },
+      effort: texts.effort,
+      manualHash: texts.manualHash,
+      auth: texts.auth,
+      attempts,
+      calls,
+      renderSeconds: input.renderSeconds as number | null,
+      transcriptPath: transcriptPath as string | null,
+    },
+  };
+}
+
+/**
+ * A `JobReview` checked: a verdict from `JOB_VERDICTS`, tags from
+ * `RATING_TAGS_DOWN` (each once), a note cleaned as a rating's is, and `at`
+ * an ISO 8601 instant.
+ */
+export function checkJobReview(input: unknown): { ok: true; review: JobReview } | { ok: false; reason: string } {
+  if (!isPlainObject(input)) return { ok: false, reason: "A review is a JSON object." };
+  const stray = strayKeys(input, ["verdict", "tags", "note", "at"]);
+  if (stray.length > 0) return { ok: false, reason: `The review has unknown fields: ${stray.join(", ")}.` };
+  const verdict = input.verdict;
+  if (typeof verdict !== "string" || !(JOB_VERDICTS as readonly string[]).includes(verdict)) {
+    return { ok: false, reason: `A verdict is one of ${JOB_VERDICTS.join(", ")}.` };
+  }
+  const tags = cleanTags(input.tags, RATING_TAGS_DOWN, "a review");
+  if (!tags.ok) return tags;
+  const note = cleanNote(input.note);
+  if (!note.ok) return note;
+  if (!isInstant(input.at)) return { ok: false, reason: "at is an ISO 8601 instant." };
+  return {
+    ok: true,
+    review: { verdict: verdict as JobVerdict, tags: tags.tags as RatingTagDown[], note: note.note, at: input.at },
+  };
+}
+
 /**
  * What the app renders before anything is known: a fresh learner, and also the
  * honest answer when the database is unreachable. Nothing distinguishes the
