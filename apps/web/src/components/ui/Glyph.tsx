@@ -81,6 +81,11 @@ const PATHS = {
   data: "M4 5.5c0-1.1 2.7-2 6-2s6 .9 6 2-2.7 2-6 2-6-.9-6-2zM4 5.5v9c0 1.1 2.7 2 6 2s6-.9 6-2v-9M4 10c0 1.1 2.7 2 6 2s6-.9 6-2",
   // A five-point star: a favourite. `fill-current` draws it starred.
   star: "M10 3.2l2.1 4.3 4.7.7-3.4 3.3.8 4.7-4.2-2.2-4.2 2.2.8-4.7-3.4-3.3 4.7-.7z",
+  // A thumb up and a thumb down: the rating of a video. `fill-current` draws the chosen one.
+  thumbUp:
+    "M3.5 9h3v7.5h-3zM6.5 9.5l3-6c1.2 0 2 .9 1.8 2L10.8 8H15a1.5 1.5 0 0 1 1.5 1.8l-1 5.5a1.5 1.5 0 0 1-1.5 1.2H6.5",
+  thumbDown:
+    "M3.5 11h3V3.5h-3zM6.5 10.5l3 6c1.2 0 2-.9 1.8-2L10.8 12H15a1.5 1.5 0 0 0 1.5-1.8l-1-5.5A1.5 1.5 0 0 0 14 3.5H6.5",
   // Two sparkles: a question for the tutor on the page in front of you.
   sparkle:
     "M9 3c.5 3.3 1.7 4.5 5 5-3.3.5-4.5 1.7-5 5-.5-3.3-1.7-4.5-5-5 3.3-.5 4.5-1.7 5-5zM15 12.5c.2 1.2.6 1.6 1.8 1.8-1.2.2-1.6.6-1.8 1.8-.2-1.2-.6-1.6-1.8-1.8 1.2-.2 1.6-.6 1.8-1.8z",
