@@ -203,6 +203,12 @@ export interface JobFinishInput {
   costSource?: string | null;
   errorKind?: string;
   error?: string;
+  /**
+   * The runner's record of how the job ran (`JobRun`), a JSON file in the
+   * job's own workspace, already checked with `checkJobRun`. Left out, the
+   * row's `run` stays as it was.
+   */
+  runFile?: string;
 }
 
 export function jobFinish(input: JobFinishInput): Promise<CatalogResult> {
@@ -228,6 +234,7 @@ export function jobFinish(input: JobFinishInput): Promise<CatalogResult> {
       : ["--cost-source", input.costSource]),
     ...(input.errorKind === undefined ? [] : ["--error-kind", input.errorKind]),
     ...(input.error === undefined ? [] : ["--error", input.error.slice(0, 500)]),
+    ...(input.runFile === undefined ? [] : ["--run-file", input.runFile]),
     ...owned(),
   ]);
 }
@@ -386,8 +393,41 @@ export function topicAdd(entry: TopicProposal, reason: string): Promise<CatalogR
   ));
 }
 
-export function jobDiscard(jobId: string): Promise<CatalogResult> {
-  return catalog(["job", "discard", "--job", jobId, ...owned()]);
+/** Why a person decided what they did about a job: down tags and a note, either possibly empty. */
+export interface ReviewFlags {
+  tags: readonly string[];
+  note: string | null;
+}
+
+/**
+ * `--tags` and `--note` for a review, in `--flag=value` form so a note that
+ * begins with `--` is a note and never an option. Empty tags and a null note
+ * send nothing.
+ */
+function reviewFlags(review: ReviewFlags | undefined): string[] {
+  if (review === undefined) return [];
+  return [
+    ...(review.tags.length === 0 ? [] : [`--tags=${review.tags.join(",")}`]),
+    ...(review.note === null ? [] : [`--note=${review.note}`]),
+  ];
+}
+
+/**
+ * `job discard --job <id>`, with the person's reason when they gave one: the
+ * catalog writes `job.review` in the same update as the move to `discarded`.
+ */
+export function jobDiscard(jobId: string, reason?: ReviewFlags): Promise<CatalogResult> {
+  return catalog(["job", "discard", "--job", jobId, ...reviewFlags(reason), ...owned()]);
+}
+
+/**
+ * `job review --job <id> --verdict <v>`: a person's verdict detail on a job,
+ * `job.review`, and nothing else on the row. An accept's (after `video put`
+ * or `diagram put` has moved the job) and a revise's (which is no
+ * transition), so a failure here never undoes either.
+ */
+export function jobReview(jobId: string, verdict: "accept" | "discard" | "revise", review?: ReviewFlags): Promise<CatalogResult> {
+  return catalog(["job", "review", "--job", jobId, "--verdict", verdict, ...reviewFlags(review), ...owned()]);
 }
 
 export function jobShow(jobId: string): Promise<CatalogResult> {

@@ -3,6 +3,7 @@ import { appendFile, mkdir, readdir, readFile, rename, rm, writeFile } from "nod
 import path from "node:path";
 
 import type { JobState } from "@hermes/schema";
+import type { JobReview, JobRunAttempt } from "@hermes/schema/shared";
 
 import type { ValidBrief } from "../diagram/brief";
 import type { CanvasLint, VerifyCheck } from "../canvas/canvas";
@@ -229,6 +230,23 @@ export interface JobRecord {
   catalogErrors: string[];
   /** True when the reconcile pass, not the runner, wrote the current state. */
   reconciled?: boolean;
+  /**
+   * One entry per agent attempt, appended as it ends, its gate summary filled
+   * in once the gate has judged it (`data/run-record.ts`). The `attempts` of
+   * the run record `job finish --run-file` stores. Absent on a job recorded
+   * before it existed, which loads as an empty list.
+   */
+  attempts?: JobRunAttempt[];
+  /** The CLI's version, from the session's `system/init` event (`claude_code_version`). Null when it named none. */
+  harnessVersion?: string | null;
+  /** Why the run record was not stored, when it failed `checkJobRun` or could not be written. */
+  runRecordError?: string | null;
+  /**
+   * A person's verdict detail, kept beside the catalog's `job.review`: a
+   * discard's reason when one was given, an accept's, or a revise's on the
+   * job it revised. Null until one is written.
+   */
+  review?: JobReview | null;
 }
 
 export type StudioEventType = "phase" | "step" | "gate" | "done" | "error";
@@ -289,7 +307,13 @@ const atomicWrite = async (file: string, body: string): Promise<void> => {
  * at each of the surfaces. Caught by Greptile on the phase 7 PR.
  */
 function normalise<R extends StoredRecord>(record: R): R {
-  return { ...record, costSource: record.costSource ?? null, draftId: record.draftId ?? null };
+  return {
+    ...record,
+    costSource: record.costSource ?? null,
+    draftId: record.draftId ?? null,
+    attempts: record.attempts ?? [],
+    review: record.review ?? null,
+  };
 }
 
 /**
@@ -314,6 +338,10 @@ export interface StoredRecord {
   costSource: CostSource | null;
   draftId?: string | null;
   catalogErrors: string[];
+  /** Absent on a record from before the attempt history; `load` makes it an empty list. */
+  attempts?: JobRunAttempt[];
+  /** Absent on a record from before reviews; `load` makes it null. */
+  review?: JobReview | null;
 }
 
 export class RecordStore<R extends StoredRecord> {

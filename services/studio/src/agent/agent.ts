@@ -87,6 +87,8 @@ export interface AgentInit {
    */
   apiKeySource: string | null;
   model: string | null;
+  /** The CLI's own version, `claude_code_version` on the same event, or null when it names none. */
+  version: string | null;
 }
 
 /** `dead-tools`: the video runner stopped a session whose wrapper calls show tools that cannot start (`video/dead-tools.ts`). */
@@ -274,6 +276,8 @@ export class AgentRun {
             this.options.onInit?.({
               apiKeySource,
               model: typeof event.model === "string" ? event.model : null,
+              version:
+                typeof event.claude_code_version === "string" && event.claude_code_version !== "" ? event.claude_code_version : null,
             });
             continue;
           }

@@ -89,6 +89,7 @@ describe("the runner's catalog calls", () => {
         "jobDiscard",
         "jobEnqueue",
         "jobFinish",
+        "jobReview",
         "jobShow",
         "sessionEnd",
         "sessionStart",
