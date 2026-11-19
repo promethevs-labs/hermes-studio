@@ -237,6 +237,61 @@ file creating two tables and adding two columns, and rebuilding nothing; 0005's
 snapshot holds the schema as it is now, so the next generate starts from the
 truth.
 
+### Ingredients and the evaluation report
+
+`catalog ingredients scan` fills `asset_ingredients`, and `catalog eval report`
+reads it back with the ratings and the jobs.
+
+```
+catalog ingredients scan [--only manimkc|remotionkc|revideokc|blenderkc|studio] [--owner ID] [--force] [--json]
+catalog eval report [--owner ID] [--json]
+```
+
+**The scan** runs no import and writes no table but `asset_ingredients`. For
+each tool it runs `topics --json` through the same reader the import uses,
+reads each rendered video's scene source, and upserts one row through
+`upsertAssetIngredients`. manimkc and blenderkc read the files the report names
+under the topic folder. remotionkc and revideokc read every `.ts` and `.tsx` in
+the topic folder (not `node_modules`, `dist` or a dot folder). The topic
+folders are where the report's `topicsRoot` says (manimkc), else
+`$<TOOL>_TOPICS`, else the same line in the checkout's `.env`, else
+`<checkout>/topics`: the order the tools' own CLIs use. The studio's videos
+(`video:<slug>`) are read from `video.source.files`, with the brief's tool.
+
+It is safe on a real catalog. It is idempotent: a row is left alone when its
+`source_hash`, `scanner_version` and `duration_seconds` are the ones the scan
+just computed, and `--force` rewrites it anyway. It never deletes: a row for a
+video that is gone went with the video through the foreign key, and a video
+whose source cannot be read keeps the row it had and is listed as skipped with
+the reason. A tool with no CLI on the machine, or whose CLI fails, is a note
+(`not run`), and the exit code is 0 unless the database is unreachable (3) or
+behind the journal (4). A wrong `--only` is exit 2.
+
+`catalog import` runs the same two steps for each video tool after its rows
+land, and `catalog video put` runs them for the video it just wrote. In both a
+failure is a note (`ingredients not recorded: ...`) and never fails or undoes
+the import or the put; the scan verb makes up what they missed.
+
+**The report** is read-only. It groups the owner's videos by tool, by model and
+by prompt version (the first eight characters of the run's `manualHash`), and
+adds the jobs that made no video (failed, discarded, cancelled, and diagram
+jobs) for the accept rate and the discard tags. The model is the run record's
+resolved one, else the one the job passed; a job with no run record has none
+and is grouped as `unknown`.
+
+What the numbers mean:
+
+| Name | Meaning |
+| --- | --- |
+| Accept rate | Accepted jobs over accepted, discarded and failed ones. A cancelled job is left out. |
+| Helper top five share | Of the calls a video makes to its tool's library helpers, the share that go to its five most-called ones. 100% means five helpers do all the work. |
+| Fade share | Fade in and fade out calls over every animation call. High means the video mostly fades things in and out. |
+| Variety | How evenly the calls spread over the distinct helpers and animations the video uses, from 0 (one name does it all) to 1 (every name equally often). Empty with fewer than two names. |
+
+The three look numbers are averaged over videos that have a scan. Variety and
+the top five share are cheap signs of videos that look alike; none of them says
+a video is good.
+
 ### Curriculum items are their own table, not assets
 
 A course topic like `cs4263-m1-t1` could have been an `asset` row of kind

@@ -206,7 +206,7 @@ describe("evalReport", () => {
     expect(r.corpus.underusedHelpers).toEqual([]);
   });
 
-  it("computes the helper share and unused helpers from the library names", () => {
+  it("lists unused helpers from the library names and leaves the share alone", () => {
     const withLib = evalReport(sample, [], [
       "body",
       "caption",
@@ -215,7 +215,7 @@ describe("evalReport", () => {
       "stack",
       "card",
     ]);
-    expect(withLib.corpus.helperTop5Share).toBe(1);
+    expect(withLib.corpus.helperTop5Share).toBe(0.8);
     expect(withLib.corpus.underusedHelpers).toEqual(["card", "heading", "mono", "stack"]);
   });
 

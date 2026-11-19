@@ -264,26 +264,17 @@ function corpusSummary(
     share: total === 0 ? 0 : round(n / total, 4),
   }));
 
-  // The share of the five busiest helpers. With the library's names it is
-  // exact; without them, the per-video shares are averaged by helper calls.
-  let helperTop5Share: number | null;
-  if (libraryNames !== undefined) {
-    const lib = new Set(libraryNames);
-    const helperCounts = sorted.filter(([name]) => lib.has(name));
-    const all = helperCounts.reduce((s, [, n]) => s + n, 0);
-    const top = helperCounts.slice(0, 5).reduce((s, [, n]) => s + n, 0);
-    helperTop5Share = all === 0 ? null : round(top / all, 4);
-  } else {
-    let weight = 0;
-    let acc = 0;
-    for (const ing of withIng) {
-      const share = ing.metrics.helperTop5Share;
-      if (share === null) continue;
-      weight += ing.metrics.helperCalls;
-      acc += share * ing.metrics.helperCalls;
-    }
-    helperTop5Share = weight === 0 ? null : round(acc / weight, 4);
+  // The share of the five busiest helpers: each video's own share, averaged
+  // by its helper calls. The calls table cannot say which names are helpers.
+  let weight = 0;
+  let acc = 0;
+  for (const ing of withIng) {
+    const share = ing.metrics.helperTop5Share;
+    if (share === null) continue;
+    weight += ing.metrics.helperCalls;
+    acc += share * ing.metrics.helperCalls;
   }
+  const helperTop5Share = weight === 0 ? null : round(acc / weight, 4);
 
   let animations = 0;
   let fades = 0;
@@ -314,8 +305,8 @@ function corpusSummary(
 /**
  * Builds the report. `extraJobs` are jobs that made no video (failed,
  * discarded, cancelled); they feed the accept rates and the discard tags.
- * `libraryNames` are the library's helper names, which let the corpus section
- * list helpers nobody uses.
+ * `libraryNames` are the library's helper names; they only fill the corpus
+ * section's list of helpers nobody uses.
  */
 export function evalReport(
   videos: ReportVideo[],
