@@ -32,6 +32,8 @@ import {
   LOCAL_LEARNER_ID,
   PROVIDER_IDS,
   PROVIDER_KEY_LIMITS,
+  RATING_LIMITS,
+  RATING_SURFACES,
   RECAP_SOURCES,
   SCHEDULE_LIMITS,
   TUTOR_MODEL_LIMITS,
@@ -516,6 +518,74 @@ export const assetName = sqliteTable(
       "asset_name_title_check",
       sql.raw(`length(title) between 1 and ${ASSET_NAME_MAX} and title = trim(title) and not (title regexp '\\s{2}|[\\n\\r\\t]')`),
     ),
+  ],
+);
+
+/**
+ * A learner's thumbs up or down on an asset, with the tags and note that say
+ * why. Written only by `services/catalog/src/state/asset-ratings.ts`.
+ *
+ * **State, not content**, for the reason `asset_name` is: the rating is the
+ * learner's, no import writes it, and one learner's rating of a commons video
+ * is nobody else's.
+ *
+ * **Append-only, by convention.** Every change is a new row, a clear (`value`
+ * 0) included, and the current rating is the newest row per learner and
+ * asset (by `at`, then by rowid for two in one millisecond). The history is
+ * the point: a rating that went from down to up after a re-render says the
+ * re-render worked, which an updated row would forget. No trigger holds it,
+ * unlike `event`: nothing projects from this table, so an edit by hand would
+ * mislead only a report, and the writer never issues one. No `updated_at`,
+ * as `event` has none.
+ *
+ * **Snapshots, not links.** `job_id` is the studio job that made the asset
+ * when it was rated (from `asset_job`) and `asset_hash` the bytes that were
+ * rated (`asset.content_hash`, else its blob's sha256), so a rating stays
+ * tied to the version it judged after a re-render replaces the asset. Neither
+ * is a foreign key, and neither is `asset_id`: an import that prunes an asset
+ * and writes it back under the same id keeps its ratings, as it keeps its
+ * names, and a job's row is not held by a learner's opinion of it. The writer
+ * checks the asset exists and is readable before it rates it. `cascade` on
+ * the learner, as `asset_name`.
+ */
+export const assetRating = sqliteTable(
+  "asset_rating",
+  {
+    /** A uuid minted by the writer, as `job.id` is. */
+    id: text("id").primaryKey(),
+    learnerId: text("learner_id")
+      .notNull()
+      .references(() => learner.id, { onDelete: "cascade", onUpdate: "cascade" }),
+    assetId: text("asset_id").notNull(),
+    /** -1 down, 1 up, 0 a rating taken back. */
+    value: integer("value").notNull(),
+    /** A JSON array of tags from `RATING_TAGS_DOWN` or `RATING_TAGS_UP`, by `value`. */
+    tags: text("tags").notNull().default(sql`'[]'`),
+    note: text("note"),
+    /** Where it was given: `RATING_SURFACES`. */
+    surface: text("surface").notNull(),
+    jobId: text("job_id"),
+    assetHash: text("asset_hash"),
+    /** When the learner rated it. */
+    at: instant("at").notNull().default(NOW_MS),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("asset_rating_learner_asset_at_idx").on(t.learnerId, t.assetId, t.at),
+    index("asset_rating_asset_id_idx").on(t.assetId),
+    check("asset_rating_value_check", sql`value in (-1, 0, 1)`),
+    check(
+      "asset_rating_tags_check",
+      sql.raw(`json_valid(tags) and json_type(tags) = 'array' and json_array_length(tags) <= ${RATING_LIMITS.maxTags}`),
+    ),
+    // A cleared rating says nothing, so it carries no tags (`ratingTagsFor`).
+    check("asset_rating_clear_check", sql`value <> 0 or tags = '[]'`),
+    // Stored cleaned (`cleanRating`): trimmed, and null rather than blank.
+    check(
+      "asset_rating_note_check",
+      sql.raw(`note is null or (length(note) between 1 and ${RATING_LIMITS.maxNoteChars} and note = trim(note))`),
+    ),
+    check("asset_rating_surface_check", inList("surface", RATING_SURFACES)),
   ],
 );
 

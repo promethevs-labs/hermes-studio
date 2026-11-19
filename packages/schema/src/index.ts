@@ -19,6 +19,7 @@ import {
   asset,
   assetConcept,
   assetDerivation,
+  assetIngredients,
   assetTopic,
   blobObject,
   collection,
@@ -41,6 +42,7 @@ import {
 import { indexRun, mirror } from "./operations";
 import {
   assetName,
+  assetRating,
   checkDistractor,
   event,
   learner,
@@ -81,6 +83,7 @@ export const tables = {
   conceptPrerequisite,
   collectionItem,
   assetDerivation,
+  assetIngredients,
   curriculumItemTopic,
   conceptCurriculumItem,
   curriculumItemAsset,
@@ -96,6 +99,7 @@ export const tables = {
   customProvider,
   tutorModel,
   assetName,
+  assetRating,
   checkDistractor,
   draft,
   job,
@@ -133,6 +137,9 @@ export const CONTENT_TABLES = [
   "conceptPrerequisite",
   "collectionItem",
   "assetDerivation",
+  // What a video was made of, read from its source by a scanner: derived,
+  // like `assetDerivation`, and written only from `index/`.
+  "assetIngredients",
   "curriculumItemTopic",
   "conceptCurriculumItem",
   "curriculumItemAsset",
@@ -176,6 +183,8 @@ export const STATE_TABLES = [
   "tutorModel",
   // A learner's own names for assets, read in place of `asset.title`.
   "assetName",
+  // A learner's ratings of assets, an append-only log: the only copy.
+  "assetRating",
   // The tutor's wrong options per note check, a cache: no exporter reads it.
   "checkDistractor",
 ] as const satisfies readonly TableName[];
@@ -205,6 +214,8 @@ export type CollectionItem = typeof collectionItem.$inferSelect;
 export type NewCollectionItem = typeof collectionItem.$inferInsert;
 export type AssetDerivation = typeof assetDerivation.$inferSelect;
 export type NewAssetDerivation = typeof assetDerivation.$inferInsert;
+export type AssetIngredients = typeof assetIngredients.$inferSelect;
+export type NewAssetIngredients = typeof assetIngredients.$inferInsert;
 export type CurriculumItemTopic = typeof curriculumItemTopic.$inferSelect;
 export type NewCurriculumItemTopic = typeof curriculumItemTopic.$inferInsert;
 export type ConceptCurriculumItem = typeof conceptCurriculumItem.$inferSelect;
@@ -252,6 +263,8 @@ export type ProviderKey = typeof providerKey.$inferSelect;
 export type NewProviderKey = typeof providerKey.$inferInsert;
 export type AssetName = typeof assetName.$inferSelect;
 export type NewAssetName = typeof assetName.$inferInsert;
+export type AssetRating = typeof assetRating.$inferSelect;
+export type NewAssetRating = typeof assetRating.$inferInsert;
 export type CheckDistractor = typeof checkDistractor.$inferSelect;
 export type NewCheckDistractor = typeof checkDistractor.$inferInsert;
 export type TutorModel = typeof tutorModel.$inferSelect;

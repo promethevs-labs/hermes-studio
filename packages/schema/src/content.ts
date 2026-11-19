@@ -11,7 +11,7 @@ import {
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
-import { archivedAt, createdAt, instant, ownerId, updatedAt } from "./columns";
+import { archivedAt, createdAt, instant, NOW_MS, ownerId, updatedAt } from "./columns";
 import { inList, quoted } from "./sql-in-list";
 // `content` and `state` reference each other: every content entity carries
 // `owner_id` pointing at `learner`, and `mastery`, `progress` and the rest
@@ -678,6 +678,55 @@ export const assetDerivation = sqliteTable(
     primaryKey({ columns: [t.assetId, t.sourceAssetId] }),
     check("asset_derivation_no_self_check", sql`asset_id <> source_asset_id`),
     index("asset_derivation_source_asset_id_idx").on(t.sourceAssetId),
+  ],
+);
+
+/**
+ * What a video was made of, read from its source: how many scenes, how long,
+ * which helpers its scene code called and how often, and the tool's own
+ * measures. One row per video asset, written by a scanner that reads the
+ * tool's source for that video, and only through
+ * `services/catalog/src/index/ingredients.ts`.
+ *
+ * **Derived**, as `asset_derivation` is: a scan rebuilds the row from the
+ * source, so it carries no revisions, and it goes with its asset (`cascade`)
+ * when an import prunes the video. `source_hash` is the source the scan read
+ * and `scanner_version` the scanner that read it, so a stale row is one whose
+ * either differs from what a scan would see now. `owner_id` is the asset's,
+ * stamped by the writer, so a scoped read keeps another owner's rows out.
+ *
+ * `calls` (helper name to count) and `metrics` are JSON objects whose keys
+ * are the scanner's to choose, so neither is held to a key list here.
+ */
+export const assetIngredients = sqliteTable(
+  "asset_ingredients",
+  {
+    assetId: text("asset_id")
+      .primaryKey()
+      .references(() => asset.id, { onDelete: "cascade", onUpdate: "cascade" }),
+    ownerId: ownerId(() => learner.id),
+    /** The video tool whose source was read: `manimkc`, `remotionkc` and the rest. */
+    tool: text("tool").notNull(),
+    scannerVersion: integer("scanner_version").notNull(),
+    /** sha256 of the source the scan read. */
+    sourceHash: text("source_hash").notNull(),
+    sceneCount: integer("scene_count"),
+    durationSeconds: real("duration_seconds"),
+    calls: text("calls", { mode: "json" }).$type<Record<string, number>>().notNull(),
+    metrics: text("metrics", { mode: "json" }).$type<Record<string, unknown>>().notNull(),
+    computedAt: instant("computed_at").notNull().default(NOW_MS),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    check("asset_ingredients_tool_check", sql`length(tool) between 1 and 64`),
+    check("asset_ingredients_scanner_version_check", sql`scanner_version >= 1`),
+    check("asset_ingredients_source_hash_check", sql`length(source_hash) between 1 and 128`),
+    check("asset_ingredients_scene_count_check", sql`scene_count is null or scene_count >= 0`),
+    check("asset_ingredients_duration_check", sql`duration_seconds is null or duration_seconds >= 0`),
+    check("asset_ingredients_calls_check", sql`json_valid(calls) and json_type(calls) = 'object'`),
+    check("asset_ingredients_metrics_check", sql`json_valid(metrics) and json_type(metrics) = 'object'`),
+    index("asset_ingredients_owner_id_idx").on(t.ownerId),
   ],
 );
 
