@@ -24,6 +24,15 @@ import {
 } from "../config";
 import { costFromLog, JobCostMeter, spendWindow, type CostReading, type SpendEntry } from "../cost";
 import { diagramShow, jobClaim, jobEnqueue, jobFinish, sessionEnd, sessionStart } from "../data/catalog";
+import {
+  appendAttempt,
+  endAttempt,
+  gateSummary,
+  runFileFor,
+  startAttempt,
+  withAttemptGate,
+  type AttemptStart,
+} from "../data/run-record";
 import { diagramPathProblem } from "./diagram-guard";
 import { checkoutRevision, documentHashOf, ensureCheckout } from "../canvas/diagrams";
 import { narrate, runGate } from "./gate";
@@ -282,6 +291,8 @@ export class Runner {
         ...(cost?.usd === undefined || cost.usd === null
           ? {}
           : { costUsd: cost.usd, costSource: cost.source }),
+        // The attempts that ended before the runner died; the one it died in left no end.
+        ...(await runFileFor(this.store, record.id)),
       });
       if (!finished.ok) await this.store.noteCatalogError(record.id, finished.error ?? "");
       if (record.sessionId !== null) await sessionEnd(record.sessionId, "interrupted");
@@ -499,6 +510,8 @@ export class Runner {
       written: [],
       indexed: false,
       catalogErrors: [],
+      attempts: [],
+      review: null,
     };
     // Before `create`, which puts the record in the store before its write
     // does, so there is no moment a kick can see it and not this.
@@ -979,6 +992,7 @@ export class Runner {
       // the log ahead of the line saying which key it used, and a write that
       // failed would be an unhandled rejection. Caught in review on this PR.
       let credentialNoted: Promise<void> = Promise.resolve();
+      const begun = startAttempt(attempt, entry.meter.read().usd);
       const agent = await startAgent({
         jobId: id,
         slug: record.slug,
@@ -1004,6 +1018,9 @@ export class Runner {
       if (outcome.apiKeySource !== null) {
         record = await this.store.update(id, { apiKeySource: outcome.apiKeySource });
       }
+      // Every attempt the agent ran is in the history, however it ended:
+      // before the cancel and every other exit below.
+      record = await this.recordAttempt(id, begun, outcome, entry.meter.read().usd);
 
       if (entry.cancelled || outcome.stopReason === "cancelled") break;
 
@@ -1120,6 +1137,7 @@ export class Runner {
         comparison: buildComparison(before, sideFromGate(gate), {
           beforeHash: record.targetHashBefore,
         }),
+        attempts: withAttemptGate(this.store.get(id)?.attempts, attempt, gateSummary(gate)),
       });
       findings = gate.findings;
       if (gate.ok) break;
@@ -1259,7 +1277,14 @@ export class Runner {
   private async onAgentInit(id: string, auth: AgentAuth, init: AgentInit): Promise<void> {
     // The one record here: which model the session says it is, since a
     // `--model` alias, or no flag at all, names it only indirectly.
-    if (init.model !== null) await this.store.update(id, { resolvedModel: init.model });
+    // And which CLI it is, for the run record: `claude_code_version` on the same event.
+    const version = init.version ?? null;
+    if (init.model !== null || version !== null) {
+      await this.store.update(id, {
+        ...(init.model === null ? {} : { resolvedModel: init.model }),
+        ...(version === null ? {} : { harnessVersion: version }),
+      });
+    }
     await this.store.appendRaw(id, credentialRecord(auth, init.apiKeySource));
     await this.store.emit(id, {
       type: "step",
@@ -1449,6 +1474,10 @@ export class Runner {
       ...(record.costSource === null ? {} : { costSource: record.costSource }),
       ...(record.errorKind === null ? {} : { errorKind: record.errorKind }),
       ...(record.error === null ? {} : { error: record.error }),
+      // How the job ran, every attempt included. The runner has no count of
+      // the canvas verbs the agent ran, so `calls` is empty and nothing here
+      // renders on a clock (`data/run-record.ts`).
+      ...(await runFileFor(this.store, id)),
     });
     if (!finished.ok) await this.store.noteCatalogError(id, finished.error ?? "");
     if (record.sessionId !== null) {
@@ -1458,6 +1487,17 @@ export class Runner {
         record.error ?? undefined,
       );
     }
+  }
+
+  /** One attempt into the record's history, as it ended: its gate is filled in once the gate has judged it. */
+  private async recordAttempt(
+    id: string,
+    begun: AttemptStart,
+    outcome: Awaited<AgentRun["done"]> | null,
+    usdAfter: number | null,
+  ): Promise<JobRecord> {
+    const attempt = endAttempt(begun, outcome, usdAfter);
+    return this.store.update(id, { attempts: appendAttempt(this.store.get(id)?.attempts, attempt) });
   }
 
   /* ------------------------------------------------------------------ */
@@ -1494,6 +1534,7 @@ export class Runner {
         state: "cancelled",
         errorKind: "cancelled",
         error: "cancelled before it started",
+        ...(await runFileFor(this.store, id)),
       });
       if (!finished.ok) await this.store.noteCatalogError(id, finished.error ?? "");
       return updated;
