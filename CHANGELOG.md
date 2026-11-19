@@ -53,6 +53,19 @@ This project is continuously deployed and not versioned; entries are grouped by 
   [services/catalog/SCHEMA.md](services/catalog/SCHEMA.md), "Ratings are a
   log" and "The run and review columns".
 
+- **Rate a video, and say why a job was discarded.** A library video has two
+  thumbs after Download and PDF, Good and Not good. A press saves the rating
+  at once and opens a card under the player for tags and a note; the card also
+  opens once, on its own, when the video is watched through and has no rating,
+  and dismissing or saving it remembers that under `ratingPrompt:<asset id>`
+  (now an accepted key family of `POST /api/learner/preference`). The Details
+  tab shows "Your rating". `POST /api/learner/rating` takes `{ assetId, value,
+  tags, note }` and writes through `rateAsset`. In the studio, Discard on a
+  video or diagram job in review opens a "Why discard" card (Skip, or Discard
+  with tags and a note, sent as the JSON body of the discard verb), and a
+  discarded job shows its reason. Both cards share
+  [`RatingDetails`](apps/web/src/components/RatingDetails.tsx).
+
 - **The catalog's learner tables moved to SQLite** (`24b5cec0`). What was
   stored in Postgres under the `self-learn` line now lives in
   `<data home>/catalog.db` (the mirrored catalog) and `<data
