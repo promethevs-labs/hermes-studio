@@ -47,9 +47,11 @@ import {
   runEnqueue,
   runFinish,
   runList,
+  runReview,
   runShow as runJobShow,
   type JobResult,
 } from "./commands/job";
+import { formatRating, RatingUsage, runRatingAdd, runRatingList, type RatingResult } from "./commands/rating";
 import { formatLs, parseKinds, runLs } from "./commands/ls";
 import { formatDoctor, runDoctor } from "./commands/doctor";
 import { formatMigrate, runMigrate } from "./commands/migrate";
@@ -166,8 +168,16 @@ Commands:
   job <verb>               The generation jobs behind the studio (diagrams
                            and videos):
                            enqueue --brief FILE, claim, finish --state S,
-                           accept, discard, ls, show ID. --owner ID acts on
-                           that owner's jobs only (default: local).
+                           accept, discard, review --verdict V, ls, show ID.
+                           --owner ID acts on that owner's jobs only
+                           (default: local).
+  rating <verb>            A learner's thumbs up or down on an asset, an
+                           append-only log: add --asset ID --value
+                           up|down|clear [--tags a,b] [--note T] [--surface
+                           library|studio], and ls [--asset ID] (every
+                           asset's current rating, or one asset's whole
+                           history). --owner ID: whose ratings (default:
+                           local).
   draft <verb>             The studio's planner conversations: upsert --file
                            FILE (the runner's draft.json), show --id ID, ls
                            [--state S] [--limit N], delete --id ID (only when
@@ -359,6 +369,7 @@ Options:
                            docs/STUDIO-VIDEOS.md). A refusal changes neither.
   --key K                  preference get/set: which preference.
   --value JSON             preference set: the value, {"model":...,"effort":...}.
+                           rating add: up, down or clear.
   --state S                job finish: the state to move to, one of
                            awaiting_review, failed, cancelled, interrupted.
                            job ls: filter by state.
@@ -372,6 +383,17 @@ Options:
   --cost-source S          job finish: result | stream. Whether --cost is the
                            agent's own figure or the runner's estimate.
   --gate FILE              job finish: the gate's findings, as JSON.
+  --run-file FILE          job finish: the runner's record of how the job
+                           ran (JobRun), as JSON, stored in job.run. Left
+                           out, job.run stays as it was.
+  --verdict V              job review: accept, discard or revise.
+  --tags a,b               job review, accept, discard: down tags saying why
+                           (RATING_TAGS_DOWN). rating add: tags for the
+                           value, down tags with down, up tags with up.
+  --note T                 job review, accept, discard, rating add: a note,
+                           at most 2000 characters.
+  --asset ID               rating: which asset.
+  --surface S              rating add: library (the default) or studio.
   --error-kind K           job finish: a short machine-readable reason.
   --error M                job finish: the message a person reads.
   --limit N                job ls: rows to return. Default 20, max 100.
@@ -423,6 +445,7 @@ Environment:
 `;
 
 type Command =
+  | "rating"
   | "migrate"
   | "status"
   | "index"
@@ -451,6 +474,7 @@ type Command =
   | "item";
 
 const COMMANDS: readonly Command[] = [
+  "rating",
   "migrate",
   "status",
   "index",
@@ -561,6 +585,12 @@ export async function main(argv: string[]): Promise<number> {
         cost: { type: "string" },
         "cost-source": { type: "string" },
         gate: { type: "string" },
+        "run-file": { type: "string" },
+        verdict: { type: "string" },
+        tags: { type: "string" },
+        note: { type: "string" },
+        asset: { type: "string" },
+        surface: { type: "string" },
         "error-kind": { type: "string" },
         error: { type: "string" },
         limit: { type: "string" },
@@ -918,6 +948,11 @@ export async function main(argv: string[]): Promise<number> {
         emit(result, formatJob(result));
         break;
       }
+      case "rating": {
+        const result = await ratingCommand(positionals, values);
+        emit(result, formatRating(result));
+        break;
+      }
       case "draft": {
         const result = await draftCommand(positionals, values);
         emit(result, formatDraft(result));
@@ -987,7 +1022,7 @@ export async function main(argv: string[]): Promise<number> {
     }
     return 0;
   } catch (error) {
-    if (error instanceof Usage || error instanceof RevisionUsage || error instanceof TopicUsage) {
+    if (error instanceof Usage || error instanceof RevisionUsage || error instanceof TopicUsage || error instanceof RatingUsage) {
       process.stderr.write(`${error.message}\n\n${USAGE}`);
       return 2;
     }
@@ -1059,7 +1094,7 @@ function reportFailure(error: unknown, command: string, verb: string | undefined
     );
     if (reason !== null) {
       const named =
-        command === "job" || command === "draft" || command === "session" || command === "diagram" || command === "video" || command === "preference"
+        command === "job" || command === "draft" || command === "session" || command === "diagram" || command === "video" || command === "preference" || command === "rating"
           ? verb
           : undefined;
       process.stderr.write(`catalog ${named === undefined ? command : `${command} ${named}`} failed: ${reason}\n`);
@@ -1140,6 +1175,13 @@ type Values = {
   cost?: string;
   "cost-source"?: string;
   gate?: string;
+  "run-file"?: string;
+  verdict?: string;
+  tags?: string;
+  note?: string;
+  asset?: string;
+  surface?: string;
+  value?: string;
   "error-kind"?: string;
   error?: string;
   id?: string;
@@ -1190,7 +1232,7 @@ async function sessionCommand(
   }
 }
 
-/** `catalog job <verb>`. Split out because it is seven verbs, not one. */
+/** `catalog job <verb>`. Split out because it is eight verbs, not one. */
 async function job(positionals: string[], values: Values): Promise<JobResult> {
   const verb = positionals[1];
   const needsJob = (): string => {
@@ -1229,6 +1271,7 @@ async function job(positionals: string[], values: Values): Promise<JobResult> {
         costUsd: number(values.cost, "--cost"),
         costSource: values["cost-source"],
         gate: await jsonFile(values.gate, "--gate"),
+        run: await jsonFile(values["run-file"], "--run-file"),
         errorKind: values["error-kind"],
         error: values.error,
         owner: values.owner,
@@ -1241,9 +1284,19 @@ async function job(positionals: string[], values: Values): Promise<JobResult> {
             "and accept records what that wrote",
         );
       }
-      return runAccept({ jobId: needsJob(), owner: values.owner });
+      return runAccept({ jobId: needsJob(), owner: values.owner, tags: tagList(values.tags), note: values.note });
     case "discard":
-      return runDiscard({ jobId: needsJob(), owner: values.owner });
+      return runDiscard({ jobId: needsJob(), owner: values.owner, tags: tagList(values.tags), note: values.note });
+    case "review": {
+      if (values.verdict === undefined) throw new Usage("job review needs --verdict accept|discard|revise");
+      return runReview({
+        jobId: needsJob(),
+        verdict: values.verdict,
+        tags: tagList(values.tags),
+        note: values.note,
+        owner: values.owner,
+      });
+    }
     case "ls":
       return runList({
         state: values.state,
@@ -1255,8 +1308,41 @@ async function job(positionals: string[], values: Values): Promise<JobResult> {
       return runJobShow(needsJob(), values.owner);
     default:
       throw new Usage(
-        "usage: job enqueue|claim|finish|accept|discard|ls|show",
+        "usage: job enqueue|claim|finish|accept|discard|review|ls|show",
       );
+  }
+}
+
+/** `--tags a,b` as a list, or undefined when the flag was not given. */
+function tagList(raw: string | undefined): string[] | undefined {
+  if (raw === undefined) return undefined;
+  return raw
+    .split(",")
+    .map((tag) => tag.trim())
+    .filter((tag) => tag !== "");
+}
+
+/** `catalog rating <verb>`: a learner's ratings of assets. */
+async function ratingCommand(positionals: string[], values: Values): Promise<RatingResult> {
+  const verb = positionals[1];
+  switch (verb) {
+    case "add": {
+      if (values.asset === undefined || values.value === undefined) {
+        throw new Usage("rating add needs --asset <id> and --value up|down|clear");
+      }
+      return runRatingAdd({
+        assetId: values.asset,
+        value: values.value,
+        tags: tagList(values.tags),
+        note: values.note,
+        surface: values.surface,
+        owner: values.owner,
+      });
+    }
+    case "ls":
+      return runRatingList({ assetId: values.asset, owner: values.owner });
+    default:
+      throw new Usage("usage: rating add --asset ID --value up|down|clear | rating ls [--asset ID]");
   }
 }
 
