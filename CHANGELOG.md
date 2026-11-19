@@ -19,6 +19,25 @@ This project is continuously deployed and not versioned; entries are grouped by 
 
 ### Added
 
+- **Eval records in the catalog.**
+  [`0005_eval_records.sql`](services/catalog/drizzle-sqlite/0005_eval_records.sql)
+  adds `asset_rating`, a learner's thumbs up or down on an asset with tags
+  and a note, kept as an append-only log whose newest row per asset is the
+  current rating; `asset_ingredients`, what a video was made of, one derived
+  row per video for a later scanner to fill; and two nullable JSON columns on
+  `job`, `run` (the runner's record of how the job ran) and `review` (a
+  person's verdict detail). The `job` columns are a plain `ADD COLUMN`, and no
+  existing table is rebuilt. The vocabulary (`RATING_TAGS_DOWN`,
+  `RATING_TAGS_UP`, `RATING_TAG_LABELS`, `cleanRating`, `JobRun`,
+  `JobReview`, `checkJobRun`, `checkJobReview`) is in `@hermes/schema/shared`;
+  `rateAsset`, `currentRating`, `ratingHistory` and `listCurrentRatings` come
+  through `@hermes/catalog/state`. The CLI gains `job finish --run-file`,
+  `job review --verdict`, `--tags` and `--note` on `job accept` and
+  `job discard`, `run` and `review` in `job show --json`, and
+  `catalog rating add` and `rating ls`. See
+  [services/catalog/SCHEMA.md](services/catalog/SCHEMA.md), "Ratings are a
+  log" and "The run and review columns".
+
 - **The catalog's learner tables moved to SQLite** (`24b5cec0`). What was
   stored in Postgres under the `self-learn` line now lives in
   `<data home>/catalog.db` (the mirrored catalog) and `<data
