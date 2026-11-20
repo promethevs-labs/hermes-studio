@@ -1421,6 +1421,37 @@ as `awaiting_review` and adopts `accepted` where the row says so. A second
 return the landed revision and write nothing; anything else is refused by
 name. So a repeated Accept press or a retry after a timeout is safe.
 
+**The catalog's rows at start.** `job.json` is written before the catalog,
+so a stop between the two leaves a finished record over a live row, and the
+row holds its video's lease (`JOB_ACTIVE_STATES`). On 2026-11-20 a restart
+during a video job left a `cancelled` record over a `running` row, and the
+next job for that video was refused with a 409 until someone ran `catalog
+job finish` by hand. So both runners, after the reconcile above, read every
+live row of their kind once (`catalog job ls --active`) and compare each with
+its record (`services/studio/src/data/catalog-rows.ts`). A row whose record
+has reached a terminal state is moved there with the `job finish` the live
+path sends, run record and gate included; a queued row of a job that did run
+is claimed first, and a discarded record's row goes through review to
+`discarded`. An accepted record's row stops at review, where Reindex records
+the accept.
+
+Left alone, and listed under `catalogRows` in `/api/health`
+(`video.catalogRows` for this kind): a job still running here, a job whose
+claim the catalog refused (its row is the holder's), a row another runner
+claimed, and a row no record in this studio home names. The last is never
+written, since nothing here can tell a job directory deleted by hand from a
+job of another studio home on the same catalog and owner, and only the first
+proves no process is running it.
+
+A catalog that is down at start owes the
+reconcile, as does any `job finish` that fails later, and the next
+`/api/health` that sees the catalog answer runs it. An enqueue refused by
+the lease of a job this runner already finished moves that row and tries
+once more. Shutdown waits up to 15 seconds for the stopped jobs' verdicts,
+and catalog calls run in their own process group, so the Ctrl-C that stops
+the runner does not also kill the `job finish` it waits on; the reconcile is
+the backstop for anything that wait gives up on.
+
 A change to an accepted video writes the same ids again, a new revision each,
 with the previous revision as `--base`, so a concurrent write refuses rather
 than overwrites. The previous mp4's blob stays in the store: nothing deletes

@@ -1442,6 +1442,18 @@ replays it into the catalog. Decided when the catalog was Postgres; it is one
 SQLite file now ([SQLITE-MIGRATION.md](SQLITE-MIGRATION.md)) and the split is
 unchanged.
 
+Until 2026-11-20 that replay covered only a record still `running`, which it
+marks `interrupted`. A record that had reached a terminal state over a row
+that never heard (a stop between the two writes, or a `job finish` that
+failed) kept the row's lease on its path for good. The reconcile now also
+reads every live diagram row once (`catalog job ls --active`) and moves each
+one whose record has finished to the record's state, with the same `job
+finish` the live path sends; a catalog that is down at start owes it, and
+the next `/api/health` that sees the catalog answer runs it. The rules, and
+what it leaves alone, are in [STUDIO-VIDEOS.md](STUDIO-VIDEOS.md), "The
+catalog's rows at start", since both runners share them
+(`services/studio/src/data/catalog-rows.ts`).
+
 **Why:** the two sections disagreed because they were answering different
 questions. The API section is right that a local tool which will not start
 because a database is down fails at the worst moment, so the runner starts,
