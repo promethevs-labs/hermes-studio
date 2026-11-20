@@ -643,40 +643,101 @@ async function run() {
 
   // D2 and D4: a card opens its domain's picture, a topic's title narrows it,
   // and the breadcrumb and Back go back up.
-  await step('learn: a domain card opens its picture, a topic narrows it, and Back goes up', page, async () => {
+  await step('learn: a domain card opens its path, a topic narrows it to its groups, and Back goes up', page, async () => {
     await go('/learn');
     const card = main.locator('[data-domain-card="machine-learning"]');
     const total = Number((await card.textContent())?.match(/(\d+) concepts?/)?.[1]);
     await clickHydrated(page, card);
     await page.waitForFunction(() => new URL(location.href).searchParams.get('domain') === 'machine-learning');
-    const graph = main.getByRole('group', { name: /^Machine learning map/ });
-    await graph.waitFor();
-    assert((await graph.locator('[data-concept]').count()) === total, `the picture drew ${await graph.locator('[data-concept]').count()} of ${total}`);
-    // Every concept the picture draws is in this domain; the edge out to foundations is listed instead.
+    // D12: a domain opens on the path, with no layout written into the URL.
+    const spine = main.getByRole('list', { name: /^Machine learning as a path/ });
+    await spine.waitFor();
+    assert(!new URL(page.url()).searchParams.has('layout'), 'the default layout wrote layout= into the URL');
+    assert((await main.locator('svg[data-domain-graph]').count()) === 0, 'the path also drew the groups picture');
+    assert((await spine.locator('[data-spine-concept]').count()) === total, `the path drew ${await spine.locator('[data-spine-concept]').count()} of ${total}`);
+    // Every concept the path draws is in this domain; the edge out to foundations is listed instead.
     await main.locator('[data-outside]').getByRole('button', { name: /^Foundations/ }).waitFor();
     const crumbs = main.getByRole('navigation', { name: 'Breadcrumb' });
     assert((await crumbs.getByRole('listitem').allTextContents()).join('/') === 'Learn/Machine learning', 'the breadcrumb is wrong');
 
-    const title = graph.locator('[data-topic-title]').first();
-    const topic = await title.getAttribute('data-topic-title');
-    await title.click();
+    // D12 to D16: the path is topics on one spine; a topic folds and opens, hover lights a concept's edges,
+    // nothing drags, and the layout switch goes to Groups and back with the URL following. All of it runs on
+    // this page load, since the sidebar's reads are rate limited at 60 a minute and the run is close to that.
+    // A legend chip's preview is exercised on Groups below: every group of a seed domain is one topic, so a
+    // preview on the path has nothing outside it to fade.
+    const topic = await spine.locator('[data-spine-node]').first().getAttribute('data-spine-node');
+    const layout = main.getByRole('radiogroup', { name: 'Layout' });
+    await hydrated(page, layout.getByRole('radio', { name: 'Groups' }));
+    assert((await layout.getByRole('radio', { name: 'Path' }).getAttribute('aria-checked')) === 'true', 'the path is not the checked layout');
+    const nodes = spine.locator('[data-spine-node]');
+    assert((await nodes.count()) > 0, 'the path has no topic on it');
+    // D13: each node is a topic with its concepts in steps; D15: an unmastered topic starts open.
+    const node = nodes.first();
+    assert((await node.locator('[data-spine-concept]').count()) > 0, `${topic}'s node holds no concepts`);
+    const toggle = node.locator('[data-spine-toggle]');
+    await hydrated(page, toggle);
+    // D15: a topic starts folded only when all its concepts are mastered (a --copy run can hold one), open otherwise.
+    const startsOpen = (await toggle.getAttribute('aria-expanded')) === 'true';
+    if (!startsOpen) assert((await node.getAttribute('data-done')) === 'true', `${topic} starts folded though it is not mastered`);
+    const pressTo = async (open) => {
+      await toggle.click();
+      await node.and(page.locator(`[data-open="${open}"]`)).waitFor();
+      assert((await toggle.getAttribute('aria-expanded')) === String(open), `a press did not ${open ? 'open' : 'fold'} the topic`);
+    };
+    // Press it away from its starting state and back, then leave it open for what follows.
+    await pressTo(!startsOpen);
+    await pressTo(startsOpen);
+    if (!startsOpen) await pressTo(true);
+
+    // D16: hovering a concept keeps it and its neighbours lit, fades the rest, and the list follows.
+    const attention = spine.locator('[data-spine-concept="self-attention"]');
+    await attention.hover();
+    await spine.locator('[data-spine-concept="self-attention"][data-hover="true"]').waitFor();
+    assert((await spine.locator('[data-spine-concept="attention-weights"]').getAttribute('data-related')) === 'true', 'a prerequisite is not lit on the path');
+    assert((await spine.locator('[data-faded="true"]').count()) > 0, 'nothing faded on the path');
+    assert((await main.locator('[data-list-concept="self-attention"]').getAttribute('data-hover')) === 'true', 'the list did not follow the hover');
+    await page.mouse.move(2, 2);
+    await page.waitForFunction(() => document.querySelectorAll('[data-spine] [data-faded="true"]').length === 0);
+
+    // Nothing drags on the path, and the path draws no edges.
+    const box = await attention.boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    for (let i = 1; i <= 10; i++) await page.mouse.move(box.x + box.width / 2 + i * 8, box.y + box.height / 2 + i * 4);
+    await page.mouse.up();
+    await page.mouse.move(2, 2);
+    assert((await main.locator('[data-moved]').count()) === 0, 'a drag on the path showed the moved pill');
+    assert((await main.locator('[data-edge]').count()) === 0, 'the path drew an edge');
+    await page.evaluate(() => sessionStorage.clear()).catch(() => {});
+
+    // The switch: Groups writes layout=groups, a reload keeps it, and Path takes it out of the URL again.
+    await layout.getByRole('radio', { name: 'Groups' }).click();
+    await page.waitForFunction(() => new URL(location.href).searchParams.get('layout') === 'groups');
+    await main.getByRole('group', { name: /^Machine learning map/ }).waitFor();
+    assert((await spine.count()) === 0, 'Groups still drew the path');
+    assert((await layout.getByRole('radio', { name: 'Groups' }).getAttribute('aria-checked')) === 'true', 'the switch does not show Groups');
+    await layout.getByRole('radio', { name: 'Path' }).click();
+    await page.waitForFunction(() => !new URL(location.href).searchParams.has('layout'));
+    await spine.waitFor();
+
+    // A topic is always drawn as groups: its node's Open topic narrows to it.
+    await node.getByRole('button', { name: 'Open topic' }).click();
     await page.waitForFunction((t) => new URL(location.href).searchParams.get('topic') === t, topic);
     assert((await crumbs.getByRole('listitem').count()) === 3, 'the topic is not in the breadcrumb');
+    await main.getByRole('group', { name: /^Machine learning map/ }).locator('[data-topic-title]').first().waitFor();
 
     await page.goBack();
     await page.waitForFunction(() => !new URL(location.href).searchParams.has('topic'));
-    await main.getByRole('group', { name: /^Machine learning map/ }).locator('[data-topic-title]').first().waitFor();
+    await main.getByRole('list', { name: /^Machine learning as a path/ }).waitFor();
     await page.goBack();
     await main.getByRole('region', { name: 'Domains' }).waitFor();
     assert(!new URL(page.url()).searchParams.has('domain'), 'Back did not leave the domain');
   });
 
-  // D4 and D8: a concept opens its panel, a pick there crosses into the
-  // prerequisite's domain, and search and filters work on both levels.
   await step('learn: a concept opens its panel, a pick crosses domains, and search and filters work', page, async () => {
     await go('/learn?domain=machine-learning');
-    const graph = main.getByRole('group', { name: /^Machine learning map/ });
-    await clickHydrated(page, graph.locator('[data-concept="softmax"]'));
+    const spine = main.getByRole('list', { name: /^Machine learning as a path/ });
+    await clickHydrated(page, spine.locator('[data-spine-concept="softmax"]'));
     await page.waitForFunction(() => new URL(location.href).searchParams.get('concept') === 'softmax');
     const panel = main.getByRole('region', { name: 'Concept details' });
     await panel.getByRole('heading', { name: 'Softmax' }).waitFor();
@@ -685,7 +746,7 @@ async function run() {
     await vector.click();
     await page.waitForFunction(() => new URL(location.href).searchParams.get('domain') === 'foundations');
     assert(
-      (await main.getByRole('group', { name: /^Foundations map/ }).locator('[data-concept="vector-as-a-list-of-numbers"]').getAttribute('aria-pressed')) === 'true',
+      (await main.getByRole('list', { name: /^Foundations as a path/ }).locator('[data-spine-concept="vector-as-a-list-of-numbers"]').getAttribute('aria-pressed')) === 'true',
       'the picked concept is not selected in its domain',
     );
 
@@ -701,7 +762,7 @@ async function run() {
     assert(new URL(page.url()).searchParams.get('domain') === 'agentic-ai', 'Enter did not open the match in its domain');
 
     // Inside a domain, a filter dims what it would hide.
-    await go('/learn?domain=machine-learning&filter=untouched');
+    await go('/learn?domain=machine-learning&layout=groups&filter=untouched');
     const filtered = main.getByRole('group', { name: /^Machine learning map/ });
     await filtered.locator('[data-concept]').first().waitFor();
     const marks = await filtered.locator('[data-concept]').evaluateAll((els) =>
@@ -713,7 +774,7 @@ async function run() {
   // D5 and D6: hover lights a concept's edges and fades the rest, the list
   // follows, and a concept drags, its place kept for the session until Reset.
   await step('learn: hover lights a concept\'s edges, and a dragged concept stays until Reset', page, async () => {
-    await go('/learn?domain=machine-learning');
+    await go('/learn?domain=machine-learning&layout=groups');
     const graph = main.getByRole('group', { name: /^Machine learning map/ });
     const dot = graph.locator('[data-concept="self-attention"] circle[data-dot]');
     await hydrated(page, graph.locator('[data-concept="self-attention"]'));
@@ -750,7 +811,7 @@ async function run() {
   // many concepts need it; the choice is in the URL and survives a reload,
   // hover still lights a concept's edges, nothing drags, and Groups comes back.
   await step('learn: a domain switches to axes and back, hover still lights edges and nothing drags', page, async () => {
-    await go('/learn?domain=machine-learning');
+    await go('/learn?domain=machine-learning&layout=groups');
     const graph = main.getByRole('group', { name: /^Machine learning map/ });
     const layout = main.getByRole('radiogroup', { name: 'Layout' });
     const dot = graph.locator('[data-concept="self-attention"] circle[data-dot]');
@@ -791,7 +852,7 @@ async function run() {
     await page.mouse.move(2, 2);
 
     await layout.getByRole('radio', { name: 'Groups' }).click();
-    await page.waitForFunction(() => !new URL(location.href).searchParams.has('layout'));
+    await page.waitForFunction(() => new URL(location.href).searchParams.get('layout') === 'groups');
     await page.waitForFunction(
       (p) => {
         const c = document.querySelector('[data-concept="self-attention"] circle[data-dot]');
@@ -822,7 +883,7 @@ async function run() {
     // A domain and a group with some concepts in it and some out, so a preview has something to fade.
     let found = null;
     for (const slug of ['machine-learning', 'foundations', 'agentic-ai']) {
-      await go(`/learn?domain=${slug}`);
+      await go(`/learn?domain=${slug}&layout=groups`);
       await hydrated(page, main.locator('[data-legend-chip="mastered"]'));
       const concepts = await read();
       for (const key of ['learning', 'mastered', 'ready', 'untouched']) {
@@ -896,7 +957,7 @@ async function run() {
       await page.keyboard.press('Tab');
     }
     assert(seen.size === total, `Tab reached ${seen.size} of ${total} concepts in the list`);
-    assert((await main.getByRole('group', { name: /^Machine learning map/ }).locator('[data-concept]').count()) === total, 'the list and the picture disagree');
+    assert((await main.getByRole('list', { name: /^Machine learning as a path/ }).locator('[data-spine-concept]').count()) === total, 'the list and the path disagree');
     await first.focus();
     await page.keyboard.press('Enter');
     await page.waitForFunction(() => new URL(location.href).searchParams.has('concept'));
@@ -907,11 +968,11 @@ async function run() {
     await page.setViewportSize({ width: 390, height: 844 });
     try {
       await go('/learn?concept=vector-as-a-list-of-numbers');
-      const graph = main.getByRole('group', { name: /^Foundations map/ });
+      const graph = main.getByRole('list', { name: /^Foundations as a path/ });
       await graph.waitFor();
       const overflow = await page.evaluate(() => document.scrollingElement.scrollWidth - window.innerWidth);
       assert(overflow <= 0, `the page scrolls sideways by ${overflow}px on a phone`);
-      await clickHydrated(page, graph.locator('[data-concept="dot-product"]'));
+      await clickHydrated(page, graph.locator('[data-spine-concept="dot-product"]'));
       await page.waitForFunction(() => new URL(location.href).searchParams.get('concept') === 'dot-product');
       await main.getByRole('region', { name: 'Concept details' }).getByRole('heading', { name: 'Dot product' }).waitFor();
       // The cards stack in one column.
@@ -931,7 +992,7 @@ async function run() {
   await step('learn: labels stay readable on a phone, and a culled one shows on hover', page, async () => {
     await page.setViewportSize({ width: 390, height: 844 });
     try {
-      await go('/learn?domain=machine-learning');
+      await go('/learn?domain=machine-learning&layout=groups');
       const graph = main.getByRole('group', { name: /^Machine learning map/ });
       await hydrated(page, graph.locator('[data-concept="positional-encoding"]'));
       const overflow = await page.evaluate(() => document.scrollingElement.scrollWidth - window.innerWidth);
@@ -986,7 +1047,7 @@ async function run() {
   await step('learn: topic titles stay readable on a phone, inside their groups', page, async () => {
     await page.setViewportSize({ width: 390, height: 844 });
     try {
-      await go('/learn?domain=machine-learning');
+      await go('/learn?domain=machine-learning&layout=groups');
       const graph = main.getByRole('group', { name: /^Machine learning map/ });
       await hydrated(page, graph.locator('[data-topic-title]').first());
       // The title's size follows the scale measured after hydration: wait for it to settle.
@@ -1037,7 +1098,7 @@ async function run() {
       // A seed domain is one topic with a group wide enough that its title fits on most phones; the narrowest
       // (320px) draws the picture small enough that the title outgrows it.
       await page.setViewportSize({ width: 320, height: 640 });
-      await go('/learn?domain=machine-learning');
+      await go('/learn?domain=machine-learning&layout=groups');
       const graph = main.locator('svg[data-domain-graph]');
       await hydrated(page, graph.locator('[data-topic-title]').first());
       // The title's size follows the scale measured after hydration: wait for it to settle.
@@ -1095,9 +1156,9 @@ async function run() {
     assert((await link.getAttribute('href')) === `/learn?concept=${state.concept}`, `the link is ${await link.getAttribute('href')}`);
     await clickHydrated(page, link);
     await page.waitForURL((url) => url.pathname === '/learn' && url.searchParams.has('domain'));
-    const graph = main.locator('svg[data-domain-graph]');
-    await graph.waitFor();
-    assert((await graph.locator(`[data-concept="${state.concept}"]`).getAttribute('aria-pressed')) === 'true', 'the concept is not selected on the map');
+    const spine = main.locator('[data-spine]');
+    await spine.waitFor();
+    assert((await spine.locator(`[data-spine-concept="${state.concept}"]`).getAttribute('aria-pressed')) === 'true', 'the concept is not selected on the map');
   });
 
   await step('workspace: a concept renders three panels', page, async () => {
@@ -1354,11 +1415,11 @@ async function run() {
   // the background it builds on included, and nothing outside it.
   await step('learn: the map marks the ready concepts of the course opened recently', page, async () => {
     await go('/learn?domain=foundations');
-    const graph = main.getByRole('group', { name: /^Foundations map/ });
+    const graph = main.getByRole('list', { name: /^Foundations as a path/ });
     await graph.waitFor();
-    assert((await graph.locator('[data-concept="vector-as-a-list-of-numbers"]').getAttribute('data-ready')) === 'true', 'the background of the course (vector) is not marked ready');
+    assert((await graph.locator('[data-spine-concept="vector-as-a-list-of-numbers"]').getAttribute('data-ready')) === 'true', 'the background of the course (vector) is not marked ready');
     // dot-product needs vector, which nobody has mastered.
-    assert((await graph.locator('[data-concept="dot-product"]').getAttribute('data-ready')) !== 'true', 'dot-product is marked ready before its prerequisite');
+    assert((await graph.locator('[data-spine-concept="dot-product"]').getAttribute('data-ready')) !== 'true', 'dot-product is marked ready before its prerequisite');
   });
 
   await step('library: a type, a sort and the list layout all land in the URL', page, async () => {

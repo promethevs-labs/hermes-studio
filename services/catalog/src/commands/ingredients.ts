@@ -4,13 +4,13 @@ import { CLI_OWNER } from "../content/scope";
 import { withDatabase } from "../db";
 import { REPO_ROOT } from "../env";
 import {
-  computeIngredientsForTool,
   manimkcLibraryNames,
   scanStudioVideos,
   storeToolIngredients,
   type IngredientsSkip,
   type StoreSummary,
 } from "../index/ingredients-scan";
+import { computeIngredientsForTool } from "../index/ingredients-tools";
 import { hasToolCli, MANIMKC, readToolReport, toolCliPath, VIDEO_TOOLS } from "../index/video-tool";
 import { assertMigrated } from "../migrations";
 
