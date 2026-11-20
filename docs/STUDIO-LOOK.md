@@ -5,8 +5,11 @@ the change. This is the milestone plan and the decisions behind it. Each
 piece ships as its own pull request and records its details in the document
 that owns that part of the studio; this page is where to start.
 
-**Status: accepted 2026-11-20, every default taken by the owner. In
-progress.** The table under "The pieces" says what is built.
+**Status: accepted 2026-11-20, every default taken by the owner. Every
+piece is built and the benchmark ran before and after on 2026-11-20.**
+Variety rose and the top five share fell on the same twelve briefs; no video
+passed the critic on either side, and a video cost about three and a half
+times as much. "Results" below has the numbers and what they do not show.
 
 ## What was measured
 
@@ -200,6 +203,87 @@ critic as D116 defines it (no defect on its last attempt), and the manuals no
 longer rank anything by past use. The final report gives the five scores for
 both runs beside that pass or fail, and says plainly what a paid run did not
 verify.
+
+## Results
+
+Both runs were made on 2026-11-20 on the owner's Mac with `npm run
+bench:video`: the twelve briefs, remotionkc, the `sonnet` model, a scratch
+home, a $50 cap each. The baseline ran the code as it was before the shot
+plan (#722), on remotionkc before its shot library; the run after ran main
+with every piece merged and `run --shots --critic`. All 24 videos passed the
+gate and were accepted.
+
+| Measure | Before | After | Change |
+| --- | --- | --- | --- |
+| Variety (look metric, mean of 12) | 0.61 | 0.78 | +0.17, higher on 10 briefs, level on 1, lower on 1 |
+| Top five helper share | 95% | 71% | 24 points lower, lower on all 12 |
+| Fade share | not measured for remotionkc | the same | |
+| Videos with 3D | 0 | 0 | |
+| Critic: accuracy | 3.9 | 4.0 | +0.1 |
+| Critic: layout | 3.3 | 3.3 | level |
+| Critic: relevance | 4.7 | 4.4 | 0.3 lower |
+| Critic: variety | 2.7 | 3.4 | +0.8 |
+| Critic: pacing | 3.4 | 3.4 | level |
+| Critic: mean of the five | 3.60 | 3.70 | +0.10 |
+| Videos that pass the critic (D116) | 0 of 12 | 0 of 12 | |
+| Defects the critic named | 40 | 45 | |
+| Gate pass | 12 of 12 | 12 of 12 | |
+| Attempts | 13 | 24 | every video took the critic's one retry |
+| Turns | 276 | 728 | |
+| Cost | $10.21 | $35.38 | 3.5 times: $0.85 a video became $2.95 |
+| Wall time | 110 minutes | 190 minutes | 9 minutes a video became 16 |
+
+The milestone's test has three parts. The first two hold: a video made from
+the same brief scores higher variety and a lower top five share. The third
+does not: no video passes the critic, before or after.
+
+What the numbers say about each piece:
+
+- **The shot plan, the library and the manual do the work.** The first
+  attempts of the run after, before any critic had spoken, already scored
+  3.4 for variety from the critic against the baseline's 2.7. The one brief
+  whose shot plan failed (the art director wrote a layout line of 203
+  characters twice, three over the limit) was made with no plan, from the
+  manual and the library alone, and had the highest variety of the run
+  (0.90).
+- **The critic's retry costs more than it returns.** First attempts cost
+  $13.60 and the retries $20.22. Across the retry the critic's mean went
+  from 3.55 to 3.70 and the defects it named from 48 to 45. The retry fixed
+  what it was sent, and the second read named new defects of the same kinds.
+- **Zero defects is a bar no video here meets.** The critic is asked for
+  defects it can point to and found three to five on every video of both
+  runs. As a pass mark, "no defect" does not separate a good video from a
+  poor one; the five scores do.
+- **Most defects are small text and empty space.** By a keyword count, 26 of
+  the 45 defects left after the retries are about text too small or too
+  faint to read and 10 about empty or lopsided frames, against 18 and 4 of
+  the baseline's 40. The library's patterns draw smaller type than the
+  hand-built scenes did. The library is where to fix that.
+- **A reading costs cents.** A shot plan cost $0.02 to $0.06 and a critic
+  read about $0.05, so $0.36 and $1.20 of the run after.
+
+What these runs do not show:
+
+- One run a side. The same brief run twice would differ, and nothing here
+  measures by how much, so a difference of a few hundredths is noise.
+- One tool and one model. Nothing was run on manimkc or revideokc, whose
+  manuals also changed, or on another model.
+- The two critic columns are not read the same way. The baseline's scores
+  are a standalone read made after the run; the scores after are the
+  critic's read of a second attempt that had already been sent its first
+  read's defects.
+- The critic judges its own kind: the same model family wrote the videos.
+  No person has rated these 24 videos, and the critic's scores have not been
+  compared with a person's.
+- A video made through the studio's chat. Every job here was posted by the
+  bench, so the planner, the card and Accept in the web app were not part of
+  a paid run. The card was checked in a browser with a stand-in model.
+- No video used 3D, so the 3D patterns have not been in a finished video.
+
+The run files, each job's source and contact sheets are in the scratch home
+the runs used, `~/.hermes-bench/look-20261120` on the owner's Mac. `npm run
+bench:video -- compare --home ~/.hermes-bench/look-20261120 baseline after`
+prints the tables these numbers come from.
 
 ## What this does not do
 
