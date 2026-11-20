@@ -525,6 +525,71 @@ describe("the diagram card (bug 11)", () => {
   });
 });
 
+describe("the video card's shot plan", () => {
+  const SHOTS = [
+    { type: "data-chart" as const, layout: "Bars in the right two thirds", motion: "Each bar grows as its year is said", emphasis: "The tallest bar, in the accent" },
+    { type: "recap-map" as const, layout: "A small map, centred", motion: "Each idea lights in turn", emphasis: "The idea named last" },
+  ];
+  const planned: VideoBrief = {
+    ...VIDEO,
+    scenes: [
+      { ...VIDEO.scenes[0]!, shot: SHOTS[0] },
+      { name: "two", beats: VIDEO.scenes[0]!.beats, shot: SHOTS[1] },
+    ],
+  };
+
+  it("says how many shot types, chips each scene's, and lays out the shot above its beats", async () => {
+    const view = pair();
+    view.transcript[1] = { ...view.transcript[1]!, briefs: [view.transcript[1]!.briefs![0]!, { kind: "video", brief: planned, requestSeq: 1 }] };
+    view.slots!.video = slot({ brief: planned, briefSeq: 2, requestSeq: 1, state: "briefed" }) as never;
+    const host = await mount(view);
+    const card = host.querySelector('[data-card="video"]') as HTMLElement;
+    expect(card.textContent).toContain("2 shot types across 2 scenes");
+    const rows = [...card.querySelectorAll('[aria-label="Storyboard"] > li')];
+    expect(rows.map((row) => row.querySelector("button")?.textContent)).toEqual([
+      expect.stringContaining("Data chart"),
+      expect.stringContaining("Recap map"),
+    ]);
+    const shot = card.querySelector('dl[aria-label="Shot"]') as HTMLElement;
+    expect([...shot.querySelectorAll("dt")].map((dt) => dt.textContent)).toEqual(["Layout", "Motion", "Emphasis"]);
+    expect(shot.textContent).toContain("Each bar grows as its year is said");
+    expect(card.textContent).not.toContain("No shot plan");
+  });
+
+  it("wraps the title and the chip together, so on a phone the chip drops under the title (#722)", async () => {
+    const long: VideoBrief = {
+      ...planned,
+      scenes: [{ name: "where_the_bytes_live", beats: VIDEO.scenes[0]!.beats, shot: { ...SHOTS[0], type: "array-or-memory" } }, planned.scenes[1]!],
+    };
+    const view = pair();
+    view.transcript[1] = { ...view.transcript[1]!, briefs: [view.transcript[1]!.briefs![0]!, { kind: "video", brief: long, requestSeq: 1 }] };
+    view.slots!.video = slot({ brief: long, briefSeq: 2, requestSeq: 1, state: "briefed" }) as never;
+    const host = await mount(view);
+    const row = host.querySelector('[data-card="video"] [aria-label="Storyboard"] > li button') as HTMLElement;
+    expect(row.className).toContain("min-h-11");
+    const head = row.querySelector("[data-scene-head]") as HTMLElement;
+    expect(head.className.split(" ")).toEqual(expect.arrayContaining(["flex", "min-w-0", "flex-1", "flex-wrap"]));
+    const [title, chip] = [...head.children] as HTMLElement[];
+    expect(title!.textContent).toBe("Where the bytes live");
+    // A floor, so the title never breaks a word a line beside the chip.
+    expect(title!.className).toContain("basis-32");
+    expect(chip!.textContent).toBe("Array or memory view");
+    expect(chip!.className).toContain("max-w-full");
+    // The length and the chevron stay on the right, outside the wrapping box.
+    const rest = [...row.children].slice(2) as HTMLElement[];
+    expect(rest[0]!.textContent).toMatch(/beats? · /);
+    expect(rest.every((node) => node.getAttribute("class")?.includes("shrink-0"))).toBe(true);
+  });
+
+  it("says the video agent will choose the pictures when a live brief has no plan", async () => {
+    const host = await mount(pair());
+    const card = host.querySelector('[data-card="video"]') as HTMLElement;
+    expect(card.textContent).toContain("No shot plan. The video agent will choose the pictures.");
+    expect(card.textContent).not.toMatch(/shot types? across/);
+    expect(card.querySelector('dl[aria-label="Shot"]')).toBeNull();
+  });
+});
+
 describe("what arrives while the conversation is open", () => {
   /** The thread's child box that holds `text`: an entry's, the pending turn's, the reply being written's. */
   const boxOf = (host: HTMLElement, text: string) =>

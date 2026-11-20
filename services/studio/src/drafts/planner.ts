@@ -630,6 +630,10 @@ export interface PlannerOptions {
   /** The reply so far, whole, each time a text delta arrives. */
   onDelta?: (text: string) => void;
   onInit?: (init: PlannerInit) => void;
+  /** The whole turn's limit; absent is `STUDIO_PLANNER_TURN_MS`. The art director passes its own. */
+  turnMs?: number;
+  /** Silence on stdout before the turn is stopped; absent is `STUDIO_PLANNER_IDLE_MS`. */
+  idleMs?: number;
 }
 
 /**
@@ -651,7 +655,7 @@ export class PlannerRun {
 
   private touch(): void {
     if (this.idle !== null) clearTimeout(this.idle);
-    this.idle = setTimeout(() => void this.stop("idle-timeout"), PLANNER_IDLE_MS);
+    this.idle = setTimeout(() => void this.stop("idle-timeout"), this.options.idleMs ?? PLANNER_IDLE_MS);
   }
 
   private watch(): Promise<PlannerOutcome> {
@@ -667,7 +671,7 @@ export class PlannerRun {
       let sealBroken: string | null = null;
       let stderr = "";
 
-      this.timers.push(setTimeout(() => void this.stop("turn-timeout"), PLANNER_TURN_MS));
+      this.timers.push(setTimeout(() => void this.stop("turn-timeout"), this.options.turnMs ?? PLANNER_TURN_MS));
       this.touch();
 
       const handle = (line: string): void => {
@@ -1044,6 +1048,25 @@ function plannerFields(raw: Record<string, unknown>, fields: readonly string[] =
   return picked;
 }
 
+/**
+ * A video brief's planner fields, with any `shot` taken off its scenes: the
+ * shot plan is the art director's, written after the script is valid
+ * (docs/STUDIO-VIDEOS.md, "The shot plan"), so a planner that writes one,
+ * whole or in part, is never refused or believed for it.
+ */
+export function plannerVideoFields(raw: Record<string, unknown>): Record<string, unknown> {
+  const picked = plannerFields(raw, PLANNER_VIDEO_FIELDS);
+  if (!Array.isArray(picked.scenes)) return picked;
+  picked.scenes = picked.scenes.map((scene: unknown) => {
+    const object = record(scene);
+    if (object === null || !("shot" in object)) return scene;
+    const kept = { ...object };
+    delete kept.shot;
+    return kept;
+  });
+  return picked;
+}
+
 function strip<T extends { idempotencyKey: string }>(brief: T): Omit<T, "idempotencyKey"> {
   // The key the validator minted is not the draft's: Draw mints its own.
   const kept: Partial<T> = { ...brief };
@@ -1128,10 +1151,8 @@ export async function evaluateBrief(
   const validate = (raw: Record<string, unknown>, against: Vocabulary): AnyDraftBrief =>
     briefKind === "video" ? strip(validateVideoBrief(raw, against)) : strip(validateBrief(raw, against));
   try {
-    const raw = prepare(
-      plannerFields(parseJsonObject(body, "brief"), briefKind === "video" ? PLANNER_VIDEO_FIELDS : PLANNER_BRIEF_FIELDS),
-      vocabulary,
-    );
+    const parsed = parseJsonObject(body, "brief");
+    const raw = prepare(briefKind === "video" ? plannerVideoFields(parsed) : plannerFields(parsed, PLANNER_BRIEF_FIELDS), vocabulary);
     try {
       return { kind: "valid", brief: validate(raw, vocabulary), pendingTopic: null };
     } catch (error) {

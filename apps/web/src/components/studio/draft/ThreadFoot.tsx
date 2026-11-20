@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/Button";
 import { Callout } from "@/components/ui/Callout";
 import { TutorMessage } from "@/components/ui/Message";
 import { TypingDots } from "@/components/ui/TypingDots";
-import { CHECKING_BRIEF, splitReply, THINKING, type ThreadProblem } from "@/lib/studio-chat";
+import { CHECKING_BRIEF, PLANNING_SHOTS, splitReply, THINKING, type ThreadProblem } from "@/lib/studio-chat";
 import type { DraftKind } from "@/lib/studio-drafts";
 
 /**
@@ -17,14 +17,15 @@ import type { DraftKind } from "@/lib/studio-drafts";
 /**
  * A reply being written: "The planner is thinking" until the first words
  * arrive, and "Checking the brief" once a reply has landed while the turn is
- * still open, as the runner validates its brief (and may ask for a fix).
+ * still open, as the runner validates its brief (and may ask for a fix), or
+ * "Planning the shots" while the art director plans a video brief's shots.
  */
-export function Streaming({ text, checking }: { text: string | null; checking: boolean }) {
+export function Streaming({ text, checking, shots = false }: { text: string | null; checking: boolean; shots?: boolean }) {
   const reply = text === null ? null : splitReply(text, true);
   if (reply === null && checking) {
     return (
       <p className="flex items-center gap-2 rounded-xl border-2 border-dashed border-border px-4 py-3 text-[14px] text-text3" role="status">
-        {CHECKING_BRIEF}
+        {shots ? PLANNING_SHOTS : CHECKING_BRIEF}
         <TypingDots />
       </p>
     );

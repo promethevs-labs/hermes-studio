@@ -1,6 +1,7 @@
 import { DATA_FENCE, DATA_FENCE_END } from "../diagram/prompt";
-import { isNarrated, type ValidVideoBrief } from "./brief";
+import { hasShotPlan, isNarrated, type ValidVideoBrief } from "./brief";
 import type { VideoPaths } from "./paths";
+import { SHOT_PLAN_STEP } from "./shots";
 
 /**
  * The video agent's user messages, built as the diagram agent's are: what
@@ -19,9 +20,24 @@ export function videoPromptFacing(brief: ValidVideoBrief, classes: readonly stri
     audience: brief.audience,
     targetSeconds: brief.targetSeconds,
     narrated: isNarrated(brief),
-    scenes: brief.scenes.map((scene, i) => ({ class: classes[i], name: scene.name, beats: scene.beats })),
+    scenes: brief.scenes.map((scene, i) => ({
+      class: classes[i],
+      name: scene.name,
+      ...(scene.shot === undefined ? {} : { shot: scene.shot }),
+      beats: scene.beats,
+    })),
     ...(brief.concepts.length === 0 ? {} : { concepts: brief.concepts }),
   };
+}
+
+/**
+ * The first prompt's "What to do" steps, numbered: the tool's own, with the
+ * shot plan's step after the labels when the brief has shots (`atLabels` is
+ * the index of the labels step, which it follows).
+ */
+export function numberedSteps(steps: readonly string[], brief: Pick<ValidVideoBrief, "scenes">, atLabels: number): string[] {
+  const all = hasShotPlan(brief) ? [...steps.slice(0, atLabels + 1), SHOT_PLAN_STEP, ...steps.slice(atLabels + 1)] : [...steps];
+  return all.map((step, i) => `${i + 1}. ${step}`);
 }
 
 const AUDIENCE: Record<ValidVideoBrief["audience"], string> = {
@@ -56,13 +72,19 @@ export function buildVideoPrompt(input: {
     ``,
     `# What to do`,
     ``,
-    `1. Write every scene into the scene file, keeping the class names and their order: ${input.classes.join(", ")}.`,
-    narrated
-      ? `2. Start from the brief's lines: each beat is one \`with self.voiceover("...")\` block holding its \`say\`, and its \`show\` is what the screen does inside that block. Where a line names things in the order the screen shows them, cue each on its word (your manual's "Word cues").`
-      : `2. Each beat's \`say\` is its caption, shown with CaptionBar exactly as written, held for the beat's \`seconds\`; there is no voice.`,
-    `3. Every beat's \`labels\` must be on screen during that beat, as text inside a string literal in that scene's class.`,
-    `4. \`lint\`, \`preview\`, Read every sheet it prints, fix, preview what you changed, and when every sheet is clean, \`build\`.`,
-    `5. Your final message: the length, every line you changed and why, and anything you could not check.`,
+    ...numberedSteps(
+      [
+        `Write every scene into the scene file, keeping the class names and their order: ${input.classes.join(", ")}.`,
+        narrated
+          ? `Start from the brief's lines: each beat is one \`with self.voiceover("...")\` block holding its \`say\`, and its \`show\` is what the screen does inside that block. Where a line names things in the order the screen shows them, cue each on its word (your manual's "Word cues").`
+          : `Each beat's \`say\` is its caption, shown with CaptionBar exactly as written, held for the beat's \`seconds\`; there is no voice.`,
+        `Every beat's \`labels\` must be on screen during that beat, as text inside a string literal in that scene's class.`,
+        `\`lint\`, \`preview\`, Read every sheet it prints, fix, preview what you changed, and when every sheet is clean, \`build\`.`,
+        `Your final message: the length, every line you changed and why, and anything you could not check.`,
+      ],
+      brief,
+      2,
+    ),
     ``,
     `Pitch it for ${AUDIENCE[brief.audience]}. Aim for about ${brief.targetSeconds} seconds.`,
     ...(input.seededNote === undefined ? [] : [``, input.seededNote]),

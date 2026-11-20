@@ -19,6 +19,8 @@ import { canvas, doctor, doctorChecks, type InspectReport } from "../canvas/canv
 import { conceptShow, draftUpsert, topicAdd, topicAddDryRun, videoList, videoShow, type CatalogResult } from "../data/catalog";
 import {
   agentAuth,
+  artDirectorEnabled,
+  artDirectorModel,
   CODEX_BIN,
   PLANNER_CONCURRENCY,
   PLANNER_TURNS,
@@ -27,6 +29,7 @@ import {
   studioOwner,
   VERB_TIMEOUT_MS,
 } from "../config";
+import { directShots, unrecordedShotSpend, type ShotSpend } from "./art-director";
 import { costFromLog, JobCostMeter, type CostSource, type SpendEntry } from "../cost";
 import { checkoutRevision, documentHashOf, ensureCheckout, isDiagramName, listDiagrams } from "../canvas/diagrams";
 import {
@@ -91,7 +94,16 @@ import {
 } from "./planner-prompt";
 import { JobRefused, type Runner } from "../diagram/runner";
 import type { JobRecord, JobStore } from "../data/store";
-import { validateVideoBrief, type ValidVideoBrief } from "../video/brief";
+import {
+  hasShotPlan,
+  shotPlanHash,
+  shotPlanOf,
+  validateVideoBrief,
+  withoutShots,
+  withShots,
+  type ValidVideoBrief,
+} from "../video/brief";
+import type { VideoShot } from "@hermes/schema/shared";
 import { videoKindBuilt } from "../video/config";
 import { videoAbbreviations } from "../video/narration";
 import { briefTool } from "../video/tools";
@@ -132,6 +144,20 @@ export interface TurnSpend extends SpendEntry {
   finishedAt: string | null;
   costUsd: number | null;
   costSource: CostSource | null;
+  /** Set on an art director spawn's spend (docs/STUDIO-VIDEOS.md, "The shot plan"); absent on a planner turn's. */
+  what?: "shots";
+}
+
+/** How the last video brief a turn landed got its shots, or why it has none. */
+export type ShotPlanState = "planned" | "reused" | "failed" | "off" | "skipped";
+
+/** The last shot plan outcome on a video slot, kept for the record and the card. */
+export interface ShotPlanNote {
+  state: ShotPlanState;
+  /** Why there are no shots, when there are none. */
+  reason: string | null;
+  at: string;
+  costUsd: number | null;
 }
 
 /** A slot's own state: today's draft states, for one kind alone (D62). */
@@ -171,6 +197,15 @@ export interface KindSlot {
    * tells the planner (`abbreviationCheck`). Absent on a draft from before.
    */
   abbreviationsTold?: string[] | null;
+  /**
+   * A video slot only: the last shot plan the art director wrote, and the
+   * hash of the scenes it was written for (`shotPlanHash`: each scene's name
+   * and every beat's `say`, `show` and `labels`). A later brief with the same
+   * hash takes these shots without another call.
+   */
+  shotPlan?: { hash: string; shots: VideoShot[] } | null;
+  /** A video slot only: how the brief in force got its shots, or why it has none. */
+  shotNote?: ShotPlanNote | null;
   state: SlotState;
 }
 
@@ -450,6 +485,8 @@ export interface SlotView {
    * button reads "Replace and make video". Null otherwise.
    */
   replaces: { jobId: string } | null;
+  /** A video slot only: how the brief in force got its shots, or why it has none; null before any. */
+  shotNote?: ShotPlanNote | null;
 }
 
 /** What `GET /api/drafts/{id}` answers. */
@@ -507,6 +544,8 @@ export interface DraftView {
   costUsd: number | null;
   costSource: CostSource | null;
   inFlight: boolean;
+  /** True while the art director plans the shots of a video brief this turn landed, before its card is shown. */
+  planningShots: boolean;
   error: { kind: DraftErrorKind; message: string; field?: string; briefKind?: BriefKind } | null;
   created: string;
   updated: string;
@@ -798,6 +837,18 @@ export class Drafts {
   private readonly readsInFlight = new Set<Promise<unknown>>();
   /** The last vocabulary this service read, reused by a turn's C4 check for a short while. */
   private lastVocabulary: { at: number; value: Vocabulary } | null = null;
+  /** The art director spawn planning each draft's shots, while one is, for a stop to reach. */
+  private readonly directing = new Map<string, PlannerRun>();
+  /** Drafts whose shot plan is being made right now: what `planningShots` reports. */
+  private readonly planning = new Set<string>();
+  /** Each draft's last shot plan outcome, with the brief it is for, until that brief lands or another replaces it. */
+  private readonly shotOutcomes = new Map<string, { brief: DraftVideoBrief; note: ShotPlanNote; plan?: { hash: string; shots: VideoShot[] } }>();
+  /** Art director spawns `POST /api/video/shots` started, which belong to no draft, so a drain can stop them. */
+  private readonly routeDirecting = new Set<PlannerRun>();
+  /** `POST /api/video/shots` plans running now, against `PLANNER_CONCURRENCY`. */
+  private routePlans = 0;
+  /** The spend of `POST /api/video/shots`, on disk in `shots/spend.ndjson`, for the daily cap. */
+  private routeSpend: ShotSpend[] = [];
 
   constructor(
     private readonly store: JobStore,
@@ -839,6 +890,14 @@ export class Drafts {
 
   /** Read every draft workspace back into memory. Called once, at start. */
   async load(): Promise<void> {
+    this.routeSpend = await readRouteSpend();
+    // A route plan the studio stopped during: priced from its log and put on
+    // the ledger, so the cap counts it after the restart and only once.
+    const recovered = await unrecordedRouteSpend(this.routeSpend);
+    if (recovered.length > 0) {
+      await appendRouteSpend(recovered);
+      this.routeSpend = [...this.routeSpend, ...recovered];
+    }
     let entries: string[];
     try {
       entries = await readdir(`${studioHome()}/drafts`);
@@ -902,6 +961,7 @@ export class Drafts {
    * draft is left `open`. Nothing is resent by itself (D15).
    */
   async reconcile(): Promise<string[]> {
+    await this.recoverShotSpend();
     const interrupted: string[] = [];
     for (const record of this.records.values()) {
       if (record.inFlight === null) continue;
@@ -969,6 +1029,34 @@ export class Drafts {
       interrupted.push(record.id);
     }
     return interrupted;
+  }
+
+  /**
+   * Art director spawns a stopped studio never wrote down: every draft's
+   * `shots/<turn>-<id>/session.ndjson` is read against the draft's own
+   * `what: "shots"` spend, and each spawn missing from it is priced from its
+   * log and added, so the conversation's cost and the daily cap see it after
+   * a restart. Run once at start, before anything new can spawn.
+   */
+  private async recoverShotSpend(): Promise<void> {
+    for (const record of this.records.values()) {
+      const root = path.join(draftDir(record.id), "shots");
+      const plans = await readdir(root).catch(() => [] as string[]);
+      if (plans.length === 0) continue;
+      const recorded = new Set(record.spend.filter((entry) => entry.what === "shots").map((entry) => entry.startedAt));
+      const found: TurnSpend[] = [];
+      for (const plan of plans) {
+        const turn = Number.parseInt(plan.split("-")[0] ?? "", 10);
+        for (const entry of await unrecordedShotSpend(path.join(root, plan, "session.ndjson"), recorded)) {
+          found.push({ ...entry, turn: Number.isFinite(turn) ? turn : 0, what: "shots" });
+        }
+      }
+      if (found.length === 0) continue;
+      await this.write(record.id, async () => {
+        const nextSpend = [...this.require(record.id).spend, ...found];
+        await this.save(record.id, { spend: nextSpend, ...sumCost(nextSpend) });
+      });
+    }
   }
 
   /**
@@ -1063,14 +1151,22 @@ export class Drafts {
       }));
   }
 
-  /** Every planner turn's spend, for the daily cap (D36). */
-  spendEntries(): TurnSpend[] {
-    return [...this.records.values()].flatMap((record) => record.spend);
+  /**
+   * Every planner turn's spend, for the daily cap (D36), with every art
+   * director spawn's: a draft's on its record beside its turns, and the
+   * route's from its own ledger.
+   */
+  spendEntries(): SpendEntry[] {
+    return [...[...this.records.values()].flatMap((record) => record.spend), ...this.routeSpend];
   }
 
-  /** How many planner turns are running right now. */
+  /**
+   * How many `claude -p` spawns this service is running right now: planner
+   * turns and art director calls, a draft's and the route's, so the idle
+   * check never takes shot work for quiet.
+   */
   get busy(): number {
-    return this.running.size;
+    return this.running.size + this.directing.size + this.routeDirecting.size;
   }
 
   async events(id: string): Promise<TranscriptEvent[]> {
@@ -1113,6 +1209,7 @@ export class Drafts {
       costUsd: record.costUsd,
       costSource: record.costSource,
       inFlight: record.inFlight !== null,
+      planningShots: this.planning.has(id),
       error:
         record.errorKind === null
           ? null
@@ -1257,6 +1354,7 @@ export class Drafts {
       live: slot.brief !== null && (slot.state === "briefed" || slot.state === "drawing"),
       busy: press.busy,
       replaces: press.replaces,
+      ...(kind === "video" ? { shotNote: slot.shotNote ?? null } : {}),
     };
   }
 
@@ -1293,6 +1391,7 @@ export class Drafts {
       state: record.state,
       jobId: record.jobIds.at(-1) ?? null,
       inFlight: record.inFlight !== null,
+      planningShots: this.planning.has(record.id),
       turns: record.turns,
       costUsd: record.costUsd,
       costSource: record.costSource,
@@ -1714,7 +1813,8 @@ export class Drafts {
     }
     // The job cap's own refusal, body and all: spend is spend (D36).
     this.runner.assertUnderCap();
-    if (this.turnsInFlight.size >= PLANNER_CONCURRENCY) {
+    // The route's shot plans share the budget (`planShots`).
+    if (this.turnsInFlight.size + this.routePlans >= PLANNER_CONCURRENCY) {
       throw new JobRefused(503, `every planner slot is busy (${PLANNER_CONCURRENCY}); try again in a few seconds`, {
         reason: "planner-busy",
         concurrency: PLANNER_CONCURRENCY,
@@ -1896,7 +1996,9 @@ export class Drafts {
     const unprompted = conversational
       ? trusted.filter((kind) => !asked.includes(kind) && briefBlocks(first.text).some((block) => block.kind === kind))
       : [];
-    const judged = await this.judgeReply(first.text, [...asked, ...unprompted], conversational, record.concept);
+    // A valid video brief gets its shots before the turn settles, so its card
+    // carries them the first time it is drawn.
+    const judged = await this.withShotPlan(id, turn, await this.judgeReply(first.text, [...asked, ...unprompted], conversational, record.concept));
     const refused = await this.write(id, () =>
       this.settleReply(id, { replySeq: first.seq, messageSeq: turn, tagged: taggedBriefs, judged, hold: first.hold, retry: false }),
     );
@@ -1958,11 +2060,15 @@ export class Drafts {
     if (second === null) return;
     // Read for the refused kinds only: a brief of a kind that already passed
     // is ignored, so the retry cannot replace a card the person is reading.
-    const again = await this.judgeReply(
-      second.text,
-      toRetry.map((verdict) => verdict.kind),
-      conversational,
-      record.concept,
+    const again = await this.withShotPlan(
+      id,
+      turn,
+      await this.judgeReply(
+        second.text,
+        toRetry.map((verdict) => verdict.kind),
+        conversational,
+        record.concept,
+      ),
     );
     await this.write(id, async () => {
       const stillRefused = await this.settleReply(id, {
@@ -2125,6 +2231,8 @@ export class Drafts {
           // A job in flight keeps the slot at `drawing`; the new brief is
           // what the next press makes once that job is over.
           state: slot.state === "drawing" ? "drawing" : "briefed",
+          // The shot plan this brief got, saved with it (`shotsFor`).
+          ...(kind === "video" ? this.takeShotOutcome(id, verdict.brief) : {}),
         }),
       );
     }
@@ -2184,6 +2292,196 @@ export class Drafts {
     const prepare = (raw: Record<string, unknown>, against: Vocabulary): Record<string, unknown> => withConcept(raw, concept, against);
     for (const { kind, body } of wanted) verdicts.set(kind, await evaluateBrief(kind, body, text, vocabulary, topics, prepare));
     return { verdicts, ignored };
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* The shot plan (docs/STUDIO-VIDEOS.md, "The shot plan")             */
+  /* ------------------------------------------------------------------ */
+
+  /**
+   * A reply's verdicts with the valid video brief's shots laid on it. Run
+   * inside the turn, after the verdict and before `settleReply`, so the card
+   * the person first sees carries them. Every other verdict passes through.
+   */
+  private async withShotPlan(
+    id: string,
+    turn: number,
+    judged: { verdicts: Map<BriefKind, KindVerdict>; ignored: string[] },
+  ): Promise<{ verdicts: Map<BriefKind, KindVerdict>; ignored: string[] }> {
+    const verdict = judged.verdicts.get("video");
+    if (verdict?.kind !== "valid" || !isVideoBrief(verdict.brief)) return judged;
+    const brief = await this.shotsFor(id, turn, verdict.brief);
+    const verdicts = new Map(judged.verdicts);
+    verdicts.set("video", { ...verdict, brief });
+    return { ...judged, verdicts };
+  }
+
+  /**
+   * One video brief's shots: the slot's last plan when the scenes are the
+   * ones it was written for, else a new plan from the art director. Off,
+   * over the cap, stopping, or a plan that failed: the brief as it came,
+   * with no shots. Never throws, so a shot plan cannot fail a turn.
+   */
+  private async shotsFor(id: string, turn: number, planned: DraftVideoBrief): Promise<DraftVideoBrief> {
+    const brief = withoutShots(planned);
+    // Kept beside the brief it describes and saved only when that brief
+    // lands (`settleReply`): a brief dropped after its plan (its request
+    // stopped, a trust revoked) leaves no slot behind it.
+    const outcome = (
+      out: DraftVideoBrief,
+      state: ShotPlanState,
+      reason: string | null,
+      costUsd: number | null,
+      plan?: { hash: string; shots: VideoShot[] },
+    ): DraftVideoBrief => {
+      this.shotOutcomes.set(id, { brief: out, note: { state, reason, at: new Date().toISOString(), costUsd }, ...(plan === undefined ? {} : { plan }) });
+      return out;
+    };
+    try {
+      const record = this.require(id);
+      const hash = shotPlanHash(brief);
+      const last = slotOf(record, "video").shotPlan;
+      if (last != null && last.hash === hash && last.shots.length === brief.scenes.length) {
+        return outcome(withShots(brief, last.shots), "reused", null, 0);
+      }
+      if (!artDirectorEnabled()) {
+        return outcome(brief, "off", "the art director is off on this studio (STUDIO_ART_DIRECTOR=off)", null);
+      }
+      try {
+        this.runner.assertUnderCap();
+      } catch (error) {
+        return outcome(brief, "skipped", `the shots were not planned: ${(error as Error).message}`, null);
+      }
+      if (this.draining || record.state === "abandoned") return brief;
+      const harness = record.harness ?? "claude";
+      const model = artDirectorModel(harness === "claude" ? (record.model ?? null) : null);
+      this.planning.add(id);
+      this.publish(id, { event: "state", data: this.stateOf(record) });
+      const result = await directShots({
+        brief,
+        dir: path.resolve(draftDir(id), "shots", `${turn}-${randomUUID().slice(0, 8)}`),
+        model,
+        track: (run) => {
+          if (run === null) this.directing.delete(id);
+          else this.directing.set(id, run);
+        },
+        stopped: () => this.draining || this.records.get(id)?.state === "abandoned",
+        // Each spawn's spend is on the record as it ends, dated at its own
+        // end and counted in the rolling window beside the planner's turns
+        // (D36) and in the conversation's own cost, whether or not the brief
+        // it planned for lands. A crash between two spawns loses neither;
+        // one during a spawn is priced from its log at the next start
+        // (`recoverShotSpend`).
+        onSpend: (entry) =>
+          this.write(id, async () => {
+            const current = this.require(id);
+            const nextSpend = [...current.spend, { ...entry, turn, what: "shots" as const }];
+            await this.save(id, { spend: nextSpend, ...sumCost(nextSpend) });
+          }),
+      });
+      this.directing.delete(id);
+      if (result.status === "planned" && result.shots !== null) {
+        return outcome(withShots(brief, result.shots), "planned", null, result.costUsd, { hash, shots: result.shots });
+      }
+      process.stderr.write(`draft ${id}: no shot plan: ${result.reason ?? "no reason given"}\n`);
+      return outcome(brief, "failed", result.reason, result.costUsd);
+    } catch (error) {
+      this.directing.delete(id);
+      process.stderr.write(`draft ${id}: the shot plan failed: ${(error as Error).message}\n`);
+      return outcome(brief, "failed", `the studio failed while planning the shots: ${(error as Error).message}`, null);
+    } finally {
+      if (this.planning.delete(id)) {
+        const after = this.records.get(id);
+        if (after !== undefined) this.publish(id, { event: "state", data: this.stateOf(after) });
+      }
+    }
+  }
+
+  /** The shot plan outcome `shotsFor` kept for exactly this brief, taken off the shelf; nothing for any other. */
+  private takeShotOutcome(id: string, brief: AnyDraftBrief): Pick<KindSlot, "shotNote" | "shotPlan"> {
+    const kept = this.shotOutcomes.get(id);
+    if (kept === undefined || kept.brief !== brief) return {};
+    this.shotOutcomes.delete(id);
+    return { shotNote: kept.note, ...(kept.plan === undefined ? {} : { shotPlan: kept.plan }) };
+  }
+
+  /**
+   * `POST /api/video/shots` `{ brief }`: plan the shots of a whole video
+   * brief with no draft, for tools such as the benchmark harness. The brief
+   * is validated against the vocabulary as `POST /api/jobs` validates one;
+   * one that already carries a whole plan is answered `reused` with no call.
+   * Over the daily cap it is refused as a job is (429); a failed plan is an
+   * answer, not an error.
+   */
+  async planShots(input: unknown): Promise<{ brief: Record<string, unknown>; shotPlan: "planned" | "reused" | "failed" | "off"; costUsd: number; reason?: string }> {
+    if (this.draining) throw new JobRefused(503, "the studio is shutting down", { reason: "shutdown" });
+    const body = typeof input === "object" && input !== null && !Array.isArray(input) ? (input as Record<string, unknown>) : null;
+    if (body === null || typeof body.brief !== "object" || body.brief === null || Array.isArray(body.brief)) {
+      throw new JobRefused(400, `the body is { brief }, with a whole video brief`, { field: "brief" });
+    }
+    const raw = { ...(body.brief as Record<string, unknown>) };
+    delete raw.kind;
+    let vocabulary: Vocabulary;
+    try {
+      vocabulary = await this.readVocabulary();
+    } catch (error) {
+      throw vocabularyDown(error);
+    }
+    let valid: ValidVideoBrief;
+    try {
+      valid = validateVideoBrief(raw, vocabulary);
+    } catch (error) {
+      if (error instanceof BriefError) throw new JobRefused(400, error.message, { field: error.field });
+      throw error;
+    }
+    // The key the validator mints for a brief with none is not the caller's.
+    const answerOf = (brief: DraftVideoBrief): Record<string, unknown> =>
+      typeof raw.idempotencyKey === "string" && raw.idempotencyKey.trim() !== "" ? { ...brief, idempotencyKey: valid.idempotencyKey } : { ...brief };
+    const brief = withoutVideoKey(valid);
+    if (hasShotPlan(brief)) return { brief: answerOf(brief), shotPlan: "reused", costUsd: 0 };
+    if (!artDirectorEnabled()) {
+      return { brief: answerOf(brief), shotPlan: "off", costUsd: 0, reason: "the art director is off on this studio (STUDIO_ART_DIRECTOR=off)" };
+    }
+    // The job cap's own refusal, body and all: spend is spend (D36).
+    this.runner.assertUnderCap();
+    // One budget for every `claude -p` this service starts: planner turns
+    // (each with its own shot plan inside it) and the route's plans.
+    if (this.turnsInFlight.size + this.routePlans >= PLANNER_CONCURRENCY) {
+      throw new JobRefused(503, `every planner slot is busy (${PLANNER_CONCURRENCY}); try again in a few seconds`, {
+        reason: "planner-busy",
+        concurrency: PLANNER_CONCURRENCY,
+      });
+    }
+    this.routePlans += 1;
+    const work = (async () => {
+      let current: PlannerRun | null = null;
+      try {
+        const result = await directShots({
+          brief,
+          dir: path.resolve(studioHome(), "shots", randomUUID()),
+          model: artDirectorModel(),
+          track: (run) => {
+            if (current !== null) this.routeDirecting.delete(current);
+            current = run;
+            if (run !== null) this.routeDirecting.add(run);
+          },
+          stopped: () => this.draining,
+          // On the ledger as each spawn ends, as a draft's are on its record.
+          onSpend: async (entry) => {
+            this.routeSpend = [...this.routeSpend, entry];
+            await appendRouteSpend([entry]);
+          },
+        });
+        if (result.status === "planned" && result.shots !== null) {
+          return { brief: answerOf(withShots(brief, result.shots)), shotPlan: "planned" as const, costUsd: result.costUsd ?? 0 };
+        }
+        return { brief: answerOf(brief), shotPlan: "failed" as const, costUsd: result.costUsd ?? 0, reason: result.reason ?? "no reason given" };
+      } finally {
+        if (current !== null) this.routeDirecting.delete(current);
+        this.routePlans -= 1;
+      }
+    })();
+    return this.tracked(work);
   }
 
   /**
@@ -3353,6 +3651,7 @@ export class Drafts {
               `${kind === "video" ? "Video brief. " : conversationalPrefix(now)}${told}\n\n` +
               `This is the brief in force; build on it, and a change is still a whole new brief:\n${JSON.stringify(brief, null, 1)}`,
           },
+          ...(kind === "video" ? shotCacheAfterEdit(slotOf(now, "video"), brief as DraftVideoBrief) : {}),
         }),
       );
       return { record: this.require(id), changed: true, kind };
@@ -3651,8 +3950,9 @@ export class Drafts {
         { reason: record.state, state: record.state },
       );
     }
-    // Stops an in-flight turn first.
+    // Stops an in-flight turn first, and its shot plan.
     await this.running.get(id)?.stop("abandoned");
+    await this.directing.get(id)?.stop("abandoned");
     await this.write(id, async () => {
       await this.append(id, { type: "abandoned", by: "person" });
       await this.save(id, { state: "abandoned" });
@@ -3691,6 +3991,7 @@ export class Drafts {
   async drain(): Promise<void> {
     this.draining = true;
     for (const run of this.running.values()) await run.stop("shutdown");
+    for (const run of [...this.directing.values(), ...this.routeDirecting]) await run.stop("shutdown");
     await Promise.all([...this.turnsInFlight.values()].map((turn) => turn.catch(() => undefined)));
     await this.settledAll();
   }
@@ -3973,6 +4274,74 @@ async function readVideoCorpus(): Promise<VideoCorpusEntry[] | null> {
 
 /** The fields a person's edit of a video brief may set: the planner's, and the concept note it draws from. */
 export const EDITABLE_VIDEO_FIELDS = [...PLANNER_VIDEO_FIELDS, "source"] as const;
+
+/**
+ * The video slot's cached shot plan after a person saves a brief: the shots
+ * the saved brief carries become the plan for its scenes, so a later planner
+ * brief with the same scenes brings back the person's shots, never older
+ * ones. A saved brief with no shots clears a cached plan written for the
+ * same scenes, since the person took those shots off; a plan for other
+ * scenes stays, as it could not be reused here anyway.
+ */
+export function shotCacheAfterEdit(slot: Pick<KindSlot, "shotPlan">, brief: DraftVideoBrief): Pick<KindSlot, "shotPlan"> {
+  const hash = shotPlanHash(brief);
+  const shots = shotPlanOf(brief);
+  if (shots !== null) return { shotPlan: { hash, shots } };
+  if (slot.shotPlan != null && slot.shotPlan.hash === hash) return { shotPlan: null };
+  return {};
+}
+
+/** `POST /api/video/shots`'s spend ledger: one `ShotSpend` per line, appended, read back at start. */
+function routeSpendPath(): string {
+  return path.join(studioHome(), "shots", "spend.ndjson");
+}
+
+/** Two days of the ledger, which is more than the cap's 24-hour window ever reads. */
+const ROUTE_SPEND_KEEP_MS = 48 * 60 * 60 * 1000;
+
+async function readRouteSpend(): Promise<ShotSpend[]> {
+  const body = await readFile(routeSpendPath(), "utf8").catch(() => "");
+  const floor = Date.now() - ROUTE_SPEND_KEEP_MS;
+  return body
+    .split("\n")
+    .map((line) => safeJson(line))
+    .filter((entry): entry is Record<string, unknown> => entry !== null && typeof entry.startedAt === "string" && typeof entry.finishedAt === "string")
+    .map(
+      (entry): ShotSpend => ({
+        startedAt: entry.startedAt as string,
+        finishedAt: entry.finishedAt as string,
+        costUsd: typeof entry.costUsd === "number" ? entry.costUsd : null,
+        costSource: entry.costSource === "result" || entry.costSource === "stream" ? entry.costSource : null,
+      }),
+    )
+    .filter((entry) => Date.parse(entry.finishedAt) >= floor);
+}
+
+/**
+ * The route's spawns the ledger misses: each `shots/<id>/session.ndjson`
+ * read against the ledger by start, inside the ledger's own two days (a
+ * spawn older than that was either written down or is past every window).
+ */
+async function unrecordedRouteSpend(ledger: readonly ShotSpend[]): Promise<ShotSpend[]> {
+  const root = path.dirname(routeSpendPath());
+  const plans = await readdir(root).catch(() => [] as string[]);
+  const recorded = new Set(ledger.map((entry) => entry.startedAt));
+  const floor = Date.now() - ROUTE_SPEND_KEEP_MS;
+  const found: ShotSpend[] = [];
+  for (const plan of plans) {
+    if (plan === path.basename(routeSpendPath())) continue;
+    for (const entry of await unrecordedShotSpend(path.join(root, plan, "session.ndjson"), recorded)) {
+      if (Date.parse(entry.startedAt) >= floor) found.push(entry);
+    }
+  }
+  return found;
+}
+
+async function appendRouteSpend(entries: readonly ShotSpend[]): Promise<void> {
+  if (entries.length === 0) return;
+  await mkdir(path.dirname(routeSpendPath()), { recursive: true });
+  await appendFile(routeSpendPath(), entries.map((entry) => `${JSON.stringify(entry)}\n`).join(""), "utf8");
+}
 
 function withoutVideoKey(brief: ValidVideoBrief): DraftVideoBrief {
   const kept: Partial<ValidVideoBrief> = { ...brief };

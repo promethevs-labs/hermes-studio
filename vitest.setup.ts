@@ -201,6 +201,12 @@ process.env.REVIDEOKC_ROOT = path.join(temp, "hermes-test-no-revideokc");
 // files name gpu-architecture, which the seed does not hold.
 process.env.BLENDERKC_ROOT = path.join(temp, "hermes-test-no-blenderkc");
 
+// The studio's art director, off. With it on, every valid video brief a
+// planner suite's stand-in `claude` proposes spawns one more `claude -p`,
+// which takes the suite's next scripted reply as its own. The suites that
+// test the shot plan turn it on for themselves (`STUDIO_ART_DIRECTOR=on`).
+process.env.STUDIO_ART_DIRECTOR = "off";
+
 // ffmpeg, as a stand-in. `catalog import` cuts a poster and makes a PDF for
 // every rendered video it stores (2026-10-05 and 2026-10-20) and fails when
 // it cannot, and the suites' renders are a few bytes of text, which a real
