@@ -42,6 +42,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 | [docs/STUDIO-TUTOR-HANDOFF.md](docs/STUDIO-TUTOR-HANDOFF.md) | Accepted, phases 1 (the runner) and 2 (the web app) built and measured, the paid hand-offs and the iOS Safari touch check included; Android Chrome and VoiceOver are the owner's to run: the concept tutor on `/learn/<concept>` gets the @ composer, and a Diagram or Video tag hands the concept to a new studio conversation (the note and the last tutor turns as data blocks, the message sent on arrival). When tags show, when Lexical loads, the runner change, D64 to D70 |
 | [docs/VIDEO-TOOLS.md](docs/VIDEO-TOOLS.md) | Which of the four video tools (manimkc, remotionkc, revideokc, blenderkc) makes a given video: what each is good for, a capability matrix with where each claim was proven, the risks, and the routing procedure the `video-router` skill runs |
 | [docs/STUDIO-VIDEO-TOOLS.md](docs/STUDIO-VIDEO-TOOLS.md) | Built in phases, phase 3 (remotionkc) the last: the studio picks a video tool. The planner proposes manimkc, remotionkc or revideokc in the brief with a reason (a TOOLS block pinned to VIDEO-TOOLS.md), the card shows it as a switchable chip, the runner gets a backend per tool, and headless Chrome runs inside the job's Seatbelt profile (measured). D71 to D80 |
+| [docs/STUDIO-LOOK.md](docs/STUDIO-LOOK.md) | Accepted 2026-11-20, in progress: making agent-made videos look different from each other, and proving it. What the audit measured, a series' fixed part (palette, typeface, heading position, voice) against what must vary, remotionkc as the default studio engine, the art-director turn that writes each scene's shot, the twelve shot types, the critic's five scores and its one retry, Lucide icons, the capped paid runs, and the table of pieces with their state. Decisions D111 to D119 |
 | [docs/CONTENT-MIGRATION.md](docs/CONTENT-MIGRATION.md) | Moving authored content out of files in git into the database (Postgres at the time) and object storage, built through the phase 3 cut-over: the phases, the revision table, the blob store and the decisions behind them |
 | [docs/SQLITE-MIGRATION.md](docs/SQLITE-MIGRATION.md) | The catalog moved from a Postgres server to one SQLite file, `$HERMES_HOME/catalog.db` (default `~/.hermes/catalog.db`): where the file is, `CATALOG_DB` and `DATABASE_URL`, porting an old Postgres database with `services/catalog/scripts/pg-to-sqlite.mjs`, and what changed under the same API |
 | [docs/design/DESIGN.md](docs/design/DESIGN.md) | The redesign: sixteen decisions, the routes and screens, the hi-fi tokens and where each came from |
@@ -136,8 +137,12 @@ draw well. **Before making a video, run the `video-router` skill**
 (`.claude/skills/video-router/`); it applies
 [docs/VIDEO-TOOLS.md](docs/VIDEO-TOOLS.md), picks a tool, says why, and hands
 over to that tool's skill. Change the routing in that page, never in the
-skill. Each tool's own capability doc is where to look for what it can do
-beyond the videos made so far.
+skill. Since 2026-11-20 a series keeps its palette, typeface, heading
+position and voice while its shots and layouts vary, and a studio video no
+row of that page claims goes to remotionkc; at a terminal the default is
+still manimkc (D111 and D112 of [docs/STUDIO-LOOK.md](docs/STUDIO-LOOK.md)).
+Each tool's own capability doc is where to look for what it can do beyond
+the videos made so far.
 
 ## Asset generation: tools/manimkc/
 

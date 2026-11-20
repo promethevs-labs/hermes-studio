@@ -67,14 +67,18 @@ describe("a draft without a concept", () => {
     // moved when docs/STUDIO-CONSENT.md added the offer's `line`, the TRUSTED
     // and DECLINED blocks and the untagged-svg blessing to the shared core,
     // and again when the review fixed the opening and the conversation rule
-    // to name the trusted exception instead of contradicting it.
+    // to name the trusted exception instead of contradicting it. The two
+    // with the video kind moved again when D111 and D112 of STUDIO-LOOK.md
+    // reworded the TOOLS block's series row and sent its last row, and the
+    // line under the rows, to remotionkc, and again when a silent video got
+    // its own manimkc row and matrix row; the prose prompt did not change.
     const hash = (input: CombinedPromptInput): string => createHash("sha256").update(buildCombinedSystemPrompt(input)).digest("hex");
-    expect(hash(base)).toBe("d2583724f0198ceecc184d5f9fdf7cf2658c40c1693d89d5a0a8f54d629a3fb5");
+    expect(hash(base)).toBe("470811182061b00389eb2bd4195d79035addffb09db9ae34b323a136e0051b6b");
     expect(hash({ kinds: ["diagram"], vocabulary: vocabulary.entries, corpus: [], extending: "slug: a" })).toBe(
       "f3e89ac8ff25f4001f688f2be4dc970bb6be508c0e962783b8b75598a7c1f07b",
     );
     expect(hash({ kinds: ["diagram", "video"], vocabulary: vocabulary.entries, corpus: [], videos: null, changing: "slug: b" })).toBe(
-      "a85f09f496b1ecd793f6cc63639604a0d3b23027c2a4707e57ea7356222636a0",
+      "baa88a01c0a9847e1caccb7a1de6520689a6d77dd360c52c05f4d78208efb493",
     );
     expect(buildCombinedSystemPrompt({ ...base, concept: null, tutor: null })).toBe(buildCombinedSystemPrompt(base));
     expect(combinedPrompt(["diagram", "video"])).not.toContain(CONCEPT_PARAGRAPH);
