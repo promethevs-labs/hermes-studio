@@ -537,6 +537,44 @@ describe('the critic on a run', () => {
     expect(knownCostOf(asked.results[0])).toBeCloseTo(1.25);
   });
 
+  it('counts the job just finished, and its own checks, before paying for a standalone check', async () => {
+    // A resume with $4 already recorded under a $5 cap: the next job costs
+    // $2, so the run is at $6 once it lands and no standalone check is paid for.
+    mkdirSync(join(dir, 'runs'), { recursive: true });
+    writeFileSync(
+      runFile,
+      JSON.stringify({
+        label: 'base',
+        tool: 'manimkc',
+        model: 'sonnet',
+        capUsd: 5,
+        shotsAsked: false,
+        criticAsked: true,
+        startedAt: '2026-11-19T10:00:00.000Z',
+        endedAt: '2026-11-19T11:00:00.000Z',
+        manualHashes: [],
+        results: [{ id: 'a-old', jobId: 'job-old', state: 'accepted', costUsd: 4, tries: 1 }],
+      }),
+    );
+    stand = await standIn({ studioHome, scripts: { 'b-new': { cost: 2, critic: null } } });
+    const d = deps();
+    const run = await runBench(options(['b-new'].map(brief), { critic: true, resume: true }), d.deps);
+    expect(stand.seen.posts).toHaveLength(1);
+    expect(stand.seen.critics).toEqual([]);
+    expect(d.lines).toContain("b-new: no standalone critic, the run's recorded cost has reached the cap");
+    expect(run.results.find((result) => result.id === 'b-new')).toMatchObject({ state: 'accepted', costUsd: 2, checkCostUsd: null });
+
+    // Its own critic's cost counts too: $2.50 recorded, a $1 job, $1.75 of
+    // the runner's checks on it, under a $5 cap.
+    await new Promise((resolve) => stand.server.close(resolve));
+    rmSync(runFile);
+    writeFileSync(runFile, JSON.stringify({ label: 'base', tool: 'manimkc', model: 'sonnet', capUsd: 5, shotsAsked: false, results: [{ id: 'a-old', jobId: 'job-old', state: 'accepted', costUsd: 2.5, tries: 1 }] }));
+    const stale = { attempt: 1, attempts: 2, build: 2, current: false, unscoredReason: 'the check timed out', scores: SCORES, defects: [], notes: [], sentBack: [] };
+    stand = await standIn({ studioHome, scripts: { 'c-new': { cost: 1, critic: stale, criticCost: 1.75 } } });
+    await runBench(options(['c-new'].map(brief), { critic: true, resume: true }), deps().deps);
+    expect(stand.seen.critics).toEqual([]);
+  });
+
   it('stops after the video when the runner cannot run the critic, unless --keep-going', async () => {
     stand = await standIn({ studioHome, scripts: { 'a-one': { critic: null, standalone: { status: 503 } }, 'b-two': { critic: null, standalone: { status: 503 } } } });
     const run = await runBench(options(['a-one', 'b-two'].map(brief), { critic: true }), deps().deps);

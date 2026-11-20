@@ -390,6 +390,15 @@ export async function runBench(options, deps) {
       // the build in review. Never a standalone check of a job that has one.
       let critic = null;
       let criticStop = null;
+      // What the job just cost, and what the runner's own checks of it cost,
+      // go into the run file before any decision about another paid call, so
+      // the cap below counts them.
+      const settledCost = recordFields(deps.readJob(jobId));
+      put({
+        ...results.get(entry.id),
+        costUsd: settledCost.costUsd ?? (typeof view.costUsd === 'number' ? view.costUsd : null),
+        criticCostUsd: settledCost.criticCostUsd,
+      });
       if (state === 'accepted') {
         const after = await call(base, 'GET', `/api/jobs/${encodeURIComponent(jobId)}`).catch(() => null);
         const jobView = after?.status === 200 ? after.json : view;
