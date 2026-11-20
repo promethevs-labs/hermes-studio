@@ -705,7 +705,7 @@ export function formatEvalReport(report: EvalReport): string {
     })),
     "Manual",
   );
-  if (mixed) promptVersions.splice(-1, 0, "  *: an older job with no manual version, grouped by its manual's hash.");
+  if (mixed) promptVersions.splice(-1, 0, "  *: no manual version recorded, grouped by the manual's hash.");
   out.push(...promptVersions);
 
   const c = report.corpus;

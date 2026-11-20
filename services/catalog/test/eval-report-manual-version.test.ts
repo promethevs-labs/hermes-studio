@@ -111,8 +111,15 @@ describe("by prompt version: grouping on the manual's version", () => {
     const mixed = formatEvalReport(evalReport([...sameManual, video("old", { manualHash: "oldoldoldold0000" })]));
     expect(mixed).toContain("11111111  ");
     expect(mixed).toContain("oldoldol*");
-    expect(mixed).toContain("*: an older job with no manual version, grouped by its manual's hash.");
+    expect(mixed).toContain("*: no manual version recorded, grouped by the manual's hash.");
     expect(mixed.split("\n").every((line) => line.length <= 100)).toBe(true);
+    // The note claims no age: a diagram job made today records a hash and no version, and is footnoted the same.
+    const diagram = formatEvalReport(
+      evalReport(sameManual, [extra({ kind: "diagram", tool: "tldrawkc", state: "accepted", manualHash: "ddddddddeeeeeeee" })]),
+    );
+    expect(diagram).toContain("dddddddd*");
+    expect(diagram).toContain("*: no manual version recorded");
+    expect(diagram).not.toContain("an older job");
     // A report of one kind adds nothing.
     expect(formatEvalReport(evalReport(sameManual))).not.toContain("*:");
     expect(formatEvalReport(evalReport([video("old", { manualHash: "oldoldoldold0000" })]))).not.toContain("*:");
