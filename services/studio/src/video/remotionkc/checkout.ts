@@ -21,10 +21,16 @@ import type { RemotionkcToolchain } from "./toolchain";
  *   render reads the job's, and the agent may Read `lib/` and never edit it.
  *   `package.json` carries the `#lib` import map, and `tsconfig.json` the
  *   lint's settings.
- * - `docs/remotion/` holds copies of Remotion's own markup guides (the
- *   `remotion-markup` part of the skill remotionkc vendors under the Remotion
- *   License: timing, sequencing, transitions, 3D, fonts and the rest), which
- *   the agent may Read; the manual names them.
+ * - `docs/SHOTS.md` is the shot library's guide (D113 of
+ *   docs/STUDIO-LOOK.md): each pattern by shot type, its props and an
+ *   example, copied with its thumbnail lines taken out, since the pictures
+ *   are not copied. The agent may Read it; the manual sends it there before
+ *   it uses a pattern.
+ * - `docs/remotion/` holds copies of Remotion's own markup guides only when
+ *   the real checkout has them where remotionkc once vendored them (the
+ *   `remotion-markup` part of Remotion's skill). remotionkc stopped
+ *   vendoring them (its REMOTION-SKILLS.md says why), so on most machines
+ *   there are none, and the manual names them only when they are there.
  * - `node_modules` and `.venv` are **links** to the real checkout's, which the
  *   profiles allow reading by their real paths and nothing writes: webpack's
  *   cache is off in the job (`REMOTIONKC_BUNDLE_CACHE=off`), and Chrome
@@ -40,8 +46,23 @@ import type { RemotionkcToolchain } from "./toolchain";
 
 const COPIED_DIRS = ["lib", "src", "tools"] as const;
 const COPIED_FILES = ["package.json", "tsconfig.json", "remotion.config.ts", "requirements-narration.txt"] as const;
-/** Where remotionkc vendors Remotion's markup guides. */
+/** Where remotionkc once vendored Remotion's markup guides, and an owner may have installed them. */
 const MARKUP_GUIDES = path.join(".claude", "skills", "remotion-best-practices", "remotion-markup");
+/** The shot library's guide, relative to the checkout. */
+const SHOTS_GUIDE = path.join("docs", "SHOTS.md");
+
+/**
+ * SHOTS.md as a job gets it: every line that is only an image (a gallery
+ * thumbnail) taken out, and the blank lines that leaves collapsed, since the
+ * pictures are not in the job and a Read of one would fail.
+ */
+export function shotsGuideText(text: string): string {
+  return text
+    .split("\n")
+    .filter((line) => !/^\s*!\[[^\]]*\]\([^)]*\)\s*$/.test(line))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n");
+}
 
 /** Copy a directory of regular files and directories, dropping links, caches and tests. */
 async function copyTree(from: string, to: string): Promise<void> {
@@ -74,7 +95,7 @@ export async function checkoutFingerprint(root: string): Promise<string> {
       hash.update(`${relative}\u0000${createHash("sha256").update(await readFile(full)).digest("hex")}\n`);
     }
   };
-  for (const name of [...COPIED_DIRS, ...COPIED_FILES]) await add(name);
+  for (const name of [...COPIED_DIRS, ...COPIED_FILES, SHOTS_GUIDE]) await add(name);
   return hash.digest("hex");
 }
 
@@ -89,9 +110,13 @@ export async function buildRemotionkcCheckout(tools: RemotionkcToolchain, paths:
     });
   }
   await mkdir(job.docs, { recursive: true });
+  const shots = await readFile(path.join(own.root, SHOTS_GUIDE), "utf8").catch(() => null);
+  if (shots !== null) await writeFile(job.shotsGuide, shotsGuideText(shots), "utf8");
   const guides = path.join(own.root, MARKUP_GUIDES);
   for (const name of await readdir(guides).catch(() => [] as string[])) {
-    if (/^[A-Za-z0-9_-]+\.md$/.test(name)) await copyFile(path.join(guides, name), path.join(job.docs, name));
+    if (!/^[A-Za-z0-9_-]+\.md$/.test(name)) continue;
+    await mkdir(job.remotionGuides, { recursive: true });
+    await copyFile(path.join(guides, name), path.join(job.remotionGuides, name));
   }
   for (const [name, target] of [
     ["node_modules", own.nodeModules],

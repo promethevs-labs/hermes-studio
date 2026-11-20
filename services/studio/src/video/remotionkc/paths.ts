@@ -14,7 +14,8 @@ import { moduleOf, STUDIO_DOMAIN, type VideoPaths } from "../paths";
  *
  *   checkout/                          a synthetic remotionkc checkout, REMOTIONKC_ROOT
  *     lib/ src/ tools/                 copies; node_modules and .venv link to the real ones
- *     docs/remotion/                   Remotion's markup guides (its vendored skill), for the agent
+ *     docs/SHOTS.md                    the shot library's guide, without its pictures, for the agent
+ *     docs/remotion/                   Remotion's own guides, only when the real checkout has them
  *     topics/studio/<slug>/
  *       composition.tsx                the agent's, with any .ts or .tsx it adds beside it
  *       narration.json                 the script, from the brief; the agent may reword it
@@ -48,8 +49,12 @@ export interface RemotionkcPaths {
   /** The deliverable's stem, `<slug with underscores>`. */
   stem: string;
   narration: string;
-  /** `checkout/docs/remotion`: Remotion's own markup guides, copied for the agent to Read. */
+  /** `checkout/docs`: what the agent may Read about the tool, the shot guide and any guides of Remotion's. */
   docs: string;
+  /** `checkout/docs/SHOTS.md`: the shot library's guide, copied without its pictures. */
+  shotsGuide: string;
+  /** `checkout/docs/remotion`: Remotion's own guides, copied only when the real checkout holds them. */
+  remotionGuides: string;
   nodeModules: string;
   venv: string;
   publicDir: string;
@@ -75,7 +80,9 @@ export function remotionkcPaths(paths: VideoPaths): RemotionkcPaths {
     slug,
     stem,
     narration: path.join(paths.topicDir, "narration.json"),
-    docs: path.join(paths.checkout, "docs", "remotion"),
+    docs: path.join(paths.checkout, "docs"),
+    shotsGuide: path.join(paths.checkout, "docs", "SHOTS.md"),
+    remotionGuides: path.join(paths.checkout, "docs", "remotion"),
     nodeModules: path.join(paths.checkout, "node_modules"),
     venv: path.join(paths.checkout, ".venv"),
     publicDir: path.join(paths.render, "public"),

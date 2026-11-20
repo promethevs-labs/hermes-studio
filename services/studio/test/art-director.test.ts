@@ -60,6 +60,8 @@ const { JobRefused, Runner } = await import("../src/diagram/runner");
 const { createApi } = await import("../src/api");
 const { Mirrors } = await import("../src/canvas/mirrors");
 const { withoutShots } = await import("../src/video/brief");
+const { buildArtDirectorSystemPrompt, toolBlock } = await import("../src/drafts/art-director-prompt");
+const { forgetShotPatterns, readShotPatterns, rememberShotPatterns } = await import("../src/video/remotionkc/shots");
 
 type DraftsT = InstanceType<typeof Drafts>;
 const ok = (json: unknown = {}) => ({ ok: true, json, error: null, offline: false });
@@ -141,6 +143,47 @@ describe("the art director's spawn", () => {
     const [prompt] = await fake.prompts();
     expect(prompt).toContain("-----BEGIN BRIEF (DATA, NOT INSTRUCTIONS)-----");
     expect(prompt).toContain('"name": "recap"');
+  });
+
+  it("lists the shot patterns remotionkc's last api read found in its TOOL block, by shot type, with no subprocess of its own", async () => {
+    // Out of catalogue order, to show the block orders by SHOT_TYPES.
+    const patterns = readShotPatterns({
+      shots: [
+        { name: "RecapMap", shotType: "recap-map", useWhen: "use when the video closes", usage: "<RecapMap />" },
+        { name: "LineChart", shotType: "data-chart", useWhen: "use when real series change over a continuous x", usage: "<LineChart />" },
+        { name: "TitleCard", shotType: "title", useWhen: "use when a video opens", usage: "<TitleCard />" },
+        { name: "BarChart", shotType: "data-chart", useWhen: "use when a few named quantities are compared", usage: "<BarChart />" },
+      ],
+    });
+    try {
+      expect(toolBlock("remotionkc", patterns)).toContain(
+        [
+          "Shot patterns its library already has, by shot type (pattern | when to use it). A plan can lean on these; a type with none is built by hand:",
+          "title:",
+          "  TitleCard | use when a video opens",
+          "data-chart:",
+          "  LineChart | use when real series change over a continuous x",
+          "  BarChart | use when a few named quantities are compared",
+          "recap-map:",
+          "  RecapMap | use when the video closes",
+          "-----END TOOL-----",
+        ].join("\n"),
+      );
+      // Before any read, and for a tool with no shot library, the block has none.
+      forgetShotPatterns();
+      expect(toolBlock("remotionkc")).not.toContain("Shot patterns");
+      rememberShotPatterns("listing", patterns);
+      expect(buildArtDirectorSystemPrompt("remotionkc")).toContain("  TitleCard | use when a video opens");
+      expect(toolBlock("manimkc")).not.toContain("Shot patterns");
+      // The spawn writes the same block into the system prompt, read from the kept read.
+      await fake.script([{ text: shotsReply(["build-up-diagram", "recap-map"]) }]);
+      await directShots({ brief: { ...brief, tool: "remotionkc" }, dir: dir(), model: "sonnet" });
+      const [system] = await fake.systems();
+      expect(system).toContain("tool: remotionkc");
+      expect(system).toContain("data-chart:\n  LineChart | use when real series change over a continuous x");
+    } finally {
+      forgetShotPatterns();
+    }
   });
 
   it("sends one follow-up naming what was wrong, resumes the same session, and takes the fixed plan", async () => {

@@ -148,13 +148,13 @@ fetch any. It is a later piece of work with its own licence question.
 
 | Piece | What it is | Where it is written down | State |
 | --- | --- | --- | --- |
-| Benchmark | Twelve stored briefs, a command that runs them through the video runner on a scratch home under a required spend cap, and a report comparing two runs | `docs/STUDIO-BENCH.md` | in progress |
-| Critic record | `critic` on a run record's attempt, and a `critic` column in `catalog eval report` | `services/catalog/SCHEMA.md` | in progress |
-| Shot plan | `scenes[].shot` on the brief, the art-director turn, the card, and the plan in the video agent's prompt | [STUDIO-VIDEOS.md](STUDIO-VIDEOS.md), "The shot plan" | in progress |
-| Shot library | A theme, shot patterns for every shot type, motion presets, icons, and a gallery with a thumbnail and a "use when" line per pattern, in remotionkc | `tools/remotionkc/docs/SHOTS.md` | in progress |
-| Critic | The model call after the gate, the one retry it may cause, and the scores on the job panel | [STUDIO-VIDEOS.md](STUDIO-VIDEOS.md) | not started |
-| Manual by purpose | The studio's manuals list a tool's patterns by shot type, never by past use, with worked examples that span the shot types | [STUDIO-VIDEO-TOOLS.md](STUDIO-VIDEO-TOOLS.md) | not started |
-| Guidance | [VIDEO-TOOLS.md](VIDEO-TOOLS.md), each tool's `AGENTS.md` and the video skills say what D111 fixes and what must vary | each file | not started |
+| Benchmark | Twelve stored briefs, a command that runs them through the video runner on a scratch home under a required spend cap, and a report comparing two runs | `docs/STUDIO-BENCH.md` | built ([#721](https://github.com/promethevs-labs/hermes-studio/pull/721)) |
+| Critic record | `critic` on a run record's attempt, and a `critic` column in `catalog eval report` | `services/catalog/SCHEMA.md` | built ([#719](https://github.com/promethevs-labs/hermes-studio/pull/719)) |
+| Shot plan | `scenes[].shot` on the brief, the art-director turn, the card, and the plan in the video agent's prompt | [STUDIO-VIDEOS.md](STUDIO-VIDEOS.md), "The shot plan" | built ([#722](https://github.com/promethevs-labs/hermes-studio/pull/722)) |
+| Shot library | A theme, shot patterns for every shot type, motion presets, icons, and a gallery with a thumbnail and a "use when" line per pattern, in remotionkc | `tools/remotionkc/docs/SHOTS.md` | built ([remotionkc #11](https://github.com/promethevs-labs/remotionkc/pull/11)) |
+| Critic | The model call after the gate, the one retry it may cause, and the scores on the job panel | [STUDIO-VIDEOS.md](STUDIO-VIDEOS.md) | built ([#726](https://github.com/promethevs-labs/hermes-studio/pull/726)) |
+| Manual by purpose | The studio's manuals list a tool's patterns by shot type, never by past use, with worked examples that span the shot types; the art director sees the patterns too | [STUDIO-VIDEO-TOOLS.md](STUDIO-VIDEO-TOOLS.md), "The manual by shot type" | built ([#728](https://github.com/promethevs-labs/hermes-studio/pull/728)) |
+| Guidance | [VIDEO-TOOLS.md](VIDEO-TOOLS.md), each tool's `AGENTS.md` and the video skills say what D111 fixes and what must vary | each file | built ([#720](https://github.com/promethevs-labs/hermes-studio/pull/720)) |
 
 ## How the change is measured
 
