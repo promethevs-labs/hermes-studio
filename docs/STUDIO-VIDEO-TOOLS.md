@@ -110,6 +110,17 @@ to keep the series' tool for a new week of a series, as the table's first row
 says, and that the person can overrule it with one click, so it never argues
 for its pick in prose.
 
+Amended 2026-11-20 by D111 and D112 of [STUDIO-LOOK.md](STUDIO-LOOK.md):
+the series row keeps its route (a new week takes the series' tool) and its
+reason is now D111's, that a series fixes its palette, typeface, heading
+position and voice while its layouts, shot types and motion vary. The
+table's last row, which sent a video of boxes, tables and arrows to
+manimkc, now sends a studio video no other row claims to remotionkc, and so
+does the TOOLS block's line under the rows. At a terminal the default is
+still manimkc: D112 covers studio videos only. The rest of this decision stands:
+the rows still reach the planner from `tools.ts`, held equal to the page by
+the test, and the prompt's prose procedure did not change.
+
 **Why not let the runner choose.** The runner sees the brief after the press;
 the person should see and be able to change the choice before anything is
 spent, and the planner is the one reading the request.
@@ -130,6 +141,12 @@ The alternative was letting the planner propose a tool the studio cannot make,
 with a "make it at a terminal" hint. Refused: a card whose button cannot work
 is worse than a card that names the better tool in its reason ("runner-up
 revideokc, not in the studio yet").
+
+Amended 2026-11-20 by D112 of [STUDIO-LOOK.md](STUDIO-LOOK.md), which made
+remotionkc the routing default for new studio videos: this default stays
+manimkc. It is how a brief, job or video from before D71 keeps its meaning,
+and the planner writes `tool` in every new brief, so it never routes a new
+video.
 
 ### D73. The card shows the tool as a chip, and switching it is a brief edit
 
