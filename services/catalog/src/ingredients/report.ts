@@ -7,7 +7,18 @@
  * these, so the report stays testable on plain objects.
  */
 
+import { CRITIC_DIMENSIONS, type CriticDimension, type JobRunAttempt } from "@hermes/schema/shared";
+
 import type { IngredientMetrics } from "./scan";
+
+/**
+ * A job's critic for the report: the five scores of the last attempt a
+ * vision critic judged, and their mean. Null when no attempt has a critic.
+ */
+export interface ReportCritic {
+  mean: number;
+  scores: Record<CriticDimension, number>;
+}
 
 export interface ReportVideo {
   assetId: string;
@@ -42,6 +53,8 @@ export interface ReportVideo {
     wallSeconds: number | null;
     attempts: number | null;
     state: string;
+    /** The critic of the job's last judged attempt (`reportCritic`). Absent is read as null. */
+    critic?: ReportCritic | null;
   } | null;
 }
 
@@ -56,6 +69,16 @@ export interface ReportJob {
   turns: number | null;
   wallSeconds: number | null;
   reviewTags: string[];
+  /** The critic of the job's last judged attempt (`reportCritic`). Absent is read as null. */
+  critic?: ReportCritic | null;
+}
+
+/** A group's critic scores: over the jobs a critic judged, each job's last judged attempt. */
+export interface CriticStat {
+  /** How many jobs had a critic. */
+  n: number;
+  mean: number | null;
+  scores: Record<CriticDimension, number | null>;
 }
 
 export interface Stat {
@@ -95,6 +118,11 @@ export interface GroupRow {
   discardTags: TagCount[];
   /** Money spent on jobs that are not the one behind a video as it is now: failed, discarded, cancelled, or replaced by a newer job. */
   wastedUsd: number;
+  /**
+   * A vision critic's scores, over every job in the group that has one: the
+   * job behind each video as it is now, and each other finished job.
+   */
+  critic: CriticStat;
 }
 
 export interface CallRow {
@@ -160,6 +188,33 @@ function stat(values: Array<number | null | undefined>): Stat {
 function meanOrNull(values: Array<number | null | undefined>): number | null {
   const m = mean(values.filter((v): v is number => typeof v === "number"));
   return m === null ? null : round(m, 4);
+}
+
+/**
+ * The critic of a job's last attempt that has one, with the mean of its five
+ * scores. An attempt with no critic, or a null one, is passed over, so a
+ * retry the critic did not judge leaves the earlier verdict standing.
+ */
+export function reportCritic(attempts: readonly JobRunAttempt[] | null | undefined): ReportCritic | null {
+  const list = attempts ?? [];
+  for (let i = list.length - 1; i >= 0; i -= 1) {
+    const critic = list[i]?.critic;
+    if (critic === undefined || critic === null) continue;
+    const scores = Object.fromEntries(CRITIC_DIMENSIONS.map((d) => [d, critic.scores[d]])) as Record<CriticDimension, number>;
+    return { mean: round(CRITIC_DIMENSIONS.reduce((s, d) => s + scores[d], 0) / CRITIC_DIMENSIONS.length, 4), scores };
+  }
+  return null;
+}
+
+function criticStat(critics: Array<ReportCritic | null | undefined>): CriticStat {
+  const judged = critics.filter((c): c is ReportCritic => c !== null && c !== undefined);
+  return {
+    n: judged.length,
+    mean: meanOrNull(judged.map((c) => c.mean)),
+    scores: Object.fromEntries(
+      CRITIC_DIMENSIONS.map((d) => [d, meanOrNull(judged.map((c) => c.scores[d]))]),
+    ) as Record<CriticDimension, number | null>,
+  };
 }
 
 function tally(tags: string[]): TagCount[] {
@@ -259,6 +314,7 @@ function groupRow(
       jobs.reduce((s, j) => s + (j.costUsd ?? 0), 0),
       4,
     ),
+    critic: criticStat([...withJob.map((j) => j.critic), ...jobs.map((j) => j.critic)]),
   };
 }
 
@@ -492,7 +548,7 @@ function groupSection(title: string, rows: GroupRow[], keyLabel: string): string
     "  older: ratings of an older version of the video than it is now.",
     "",
     ...table(
-      [keyLabel, "cost mean", "cost median", "turns", "wall median", "variety", "top 5", "fade", "3D"],
+      [keyLabel, "cost mean", "cost median", "turns", "wall median", "variety", "top 5", "fade", "3D", "critic"],
       rows.map((r) => [
         clip(r.key, NAME_WIDTH),
         usd(r.costUsd.mean),
@@ -503,6 +559,7 @@ function groupSection(title: string, rows: GroupRow[], keyLabel: string): string
         pct(r.meanHelperTop5Share),
         pct(r.meanFadeShare),
         pct(r.uses3dShare),
+        r.critic.n === 0 ? "-" : dec(r.critic.mean, 1),
       ]),
     ),
   );
@@ -541,6 +598,14 @@ export function formatEvalReport(report: EvalReport): string {
       `variety ${dec(t.meanVariety, 2)}, top 5 helpers ${pct(t.meanHelperTop5Share)}, fade ${pct(t.meanFadeShare)}, 3D ${pct(t.uses3dShare)}`,
     ),
   );
+  if (t.critic.n > 0) {
+    // One entry, wrapped at 100 columns as the tag lines are.
+    const scores = CRITIC_DIMENSIONS.map(
+      (d, i) => `${d} ${dec(t.critic.scores[d], 1)}${i === CRITIC_DIMENSIONS.length - 1 ? ")" : ""}`,
+    );
+    const judged = `${t.critic.n} ${t.critic.n === 1 ? "job" : "jobs"}`;
+    out.push(...wrap(kv("Critic", `${dec(t.critic.mean, 1)} over ${judged} (`), scores));
+  }
   const totalTags = [
     ...tagLine("Rating tags", t.tagCounts),
     ...tagLine("Discard tags", t.discardTags),

@@ -29,6 +29,7 @@ const {
   runFileFor,
   startAttempt,
   transcriptRef,
+  withAttemptCritic,
   withAttemptGate,
   writeRunFile,
 } = await import("../src/data/run-record");
@@ -75,6 +76,27 @@ describe("an attempt", () => {
     expect(many).toHaveLength(JOB_RUN_LIMITS.maxAttempts);
     expect(many.at(-1)?.n).toBe(JOB_RUN_LIMITS.maxAttempts + 3);
   });
+
+  it("gets its critic on its own number, copied, and leaves the list it was given alone", () => {
+    const one = endAttempt(startAttempt(1, 0), { turns: 1 }, 0);
+    const two = endAttempt(startAttempt(2, 0), { turns: 1 }, 0);
+    const critic = { model: "claude-opus-5-5", costUsd: 0.02, scores: { accuracy: 4, layout: 3, relevance: 5, variety: 2, pacing: 4 }, defects: 3, notes: 1 };
+    const given = [one, two];
+    const judged = withAttemptCritic(given, 2, critic);
+    expect(judged.map((attempt) => attempt.critic)).toEqual([undefined, critic]);
+    // Attempt 1 gains no critic key at all, so it stores as it did before.
+    expect(Object.hasOwn(judged[0]!, "critic")).toBe(false);
+    expect(given.every((attempt) => !Object.hasOwn(attempt, "critic"))).toBe(true);
+    expect(judged[1]!.critic).not.toBe(critic);
+    expect(judged[1]!.critic!.scores).not.toBe(critic.scores);
+    // A critic that ran and gave nothing, and an attempt the list does not hold.
+    expect(withAttemptCritic(judged, 2, null)[1]!.critic).toBeNull();
+    expect(withAttemptCritic(given, 9, critic)).toEqual(given);
+    expect(withAttemptCritic(undefined, 1, critic)).toEqual([]);
+    // A gate set after the critic keeps it.
+    const gate = gateSummary({ ok: true, steps: [], findings: [] });
+    expect(withAttemptGate(judged, 2, gate)[1]).toMatchObject({ gate, critic });
+  });
 });
 
 describe("the wrapper's log", () => {
@@ -106,6 +128,21 @@ describe("the run file", () => {
     const written = await writeRunFile("job-1", run);
     expect(written.file).toBe(path.join(home, "jobs", "job-1", "run.json"));
     expect(JSON.parse(await readFile(written.file!, "utf8"))).toEqual(run);
+  });
+
+  it("carries each attempt's critic through, and the catalog's check takes it", async () => {
+    const critic = { model: null, costUsd: null, scores: { accuracy: 5, layout: 5, relevance: 4, variety: 3, pacing: 2 }, defects: 0, notes: 2 };
+    const attempts = withAttemptCritic([endAttempt(startAttempt(1, 0), { turns: 2 }, 0.1), endAttempt(startAttempt(2, 0.1), { turns: 1 }, 0.2)], 1, critic);
+    const run = buildJobRun({ ...source, attempts });
+    expect(run.attempts.map((attempt) => attempt.critic)).toEqual([critic, undefined]);
+    await mkdir(path.join(home, "jobs", "job-1"), { recursive: true });
+    const written = await writeRunFile("job-1", run);
+    const stored = JSON.parse(await readFile(written.file!, "utf8")) as typeof run;
+    expect(stored).toEqual(run);
+    expect(Object.hasOwn(stored.attempts[1]!, "critic")).toBe(false);
+    // A score out of range fails the check, so the run file is not written.
+    const bad = buildJobRun({ ...source, attempts: withAttemptCritic(attempts, 1, { ...critic, scores: { ...critic.scores, pacing: 0 } }) });
+    expect(await writeRunFile("job-1", bad)).toMatchObject({ file: null, reason: expect.stringContaining("attempts[0].critic.scores.pacing") });
   });
 
   it("is never written when the record fails the check, and the reason is kept on the record", async () => {
