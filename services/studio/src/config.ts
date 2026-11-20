@@ -258,3 +258,26 @@ export const PLANNER_CONCURRENCY = integer("STUDIO_PLANNER_CONCURRENCY", 2, 1, 4
 export function plannerModel(): string {
   return process.env.STUDIO_PLANNER_MODEL?.trim() || "sonnet";
 }
+
+/**
+ * The art director (docs/STUDIO-VIDEOS.md, "The shot plan"): on unless
+ * `STUDIO_ART_DIRECTOR=off`. Read at each call, so a test or an operator
+ * can turn it off without a restart of anything but the request.
+ */
+export function artDirectorEnabled(): boolean {
+  return process.env.STUDIO_ART_DIRECTOR?.trim().toLowerCase() !== "off";
+}
+
+/**
+ * The art director's model: `STUDIO_ART_DIRECTOR_MODEL`, else the model a
+ * planner turn of the same conversation runs on (`fallback`, a claude
+ * conversation's own pick), else the planner's default.
+ */
+export function artDirectorModel(fallback: string | null = null): string {
+  return process.env.STUDIO_ART_DIRECTOR_MODEL?.trim() || fallback || plannerModel();
+}
+
+/** One art director call, start to finish, before it counts as a failure: `STUDIO_ART_DIRECTOR_MS`, 120 s by default. */
+export function artDirectorMs(): number {
+  return integer("STUDIO_ART_DIRECTOR_MS", 120_000, 1_000, 900_000);
+}

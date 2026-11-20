@@ -1,0 +1,111 @@
+{
+  "id": "tcp-versus-udp",
+  "needs": "A side-by-side comparison: two lanes play the same situation with different outcomes.",
+  "brief": {
+    "title": "TCP and UDP, side by side",
+    "topic": "computer-networks",
+    "slug": "tcp-versus-udp",
+    "mode": "new",
+    "idea": "TCP acknowledges and resends every piece so nothing is lost or out of order, while UDP just sends and moves on, which is why calls and games often prefer it.",
+    "audience": "familiar",
+    "targetSeconds": 66,
+    "voice": "af_heart",
+    "scenes": [
+      {
+        "name": "two_lanes_five_packets",
+        "beats": [
+          {
+            "say": "Two programs send the same five packets across a network. The left one uses T C P, the right one U D P.",
+            "show": "The screen splits into two lanes, each with a sender, a receiver, and five numbered packets waiting.",
+            "labels": [
+              "TCP",
+              "UDP"
+            ]
+          },
+          {
+            "say": "Halfway across, the network drops packet three, in both lanes at the same moment.",
+            "show": "In both lanes packets travel toward the receiver and packet 3 is lost midway.",
+            "labels": [
+              "packet 3 lost"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "the_tcp_lane",
+        "beats": [
+          {
+            "say": "The T C P receiver sends back an acknowledgement for each packet it gets, and notices that three never arrived.",
+            "show": "On the left, acknowledgements travel back for 1 and 2, and a gap shows where 3 should be.",
+            "labels": [
+              "ACK 1",
+              "ACK 2",
+              "missing 3"
+            ]
+          },
+          {
+            "say": "The sender resends packet three. Four and five wait, so the program reads them in order.",
+            "show": "Packet 3 travels again on the left while 4 and 5 sit in a holding area until it arrives.",
+            "labels": [
+              "resend 3"
+            ]
+          },
+          {
+            "say": "In the end it delivers one, two, three, four, five, all in order, just a little later than it could have.",
+            "show": "The left receiver shows 1 to 5 in order.",
+            "labels": [
+              "1 2 3 4 5"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "the_udp_lane",
+        "beats": [
+          {
+            "say": "The U D P receiver sends nothing back. It hands over one, two, four and five as they come.",
+            "show": "On the right, packets 1, 2, 4 and 5 pass straight to the program with no messages going back.",
+            "labels": [
+              "1 2 4 5"
+            ]
+          },
+          {
+            "say": "Packet three is simply gone, but nothing ever waited for it, so four and five arrived on time.",
+            "show": "An empty slot marks where 3 would be on the right, while the left lane is still finishing.",
+            "labels": [
+              "no resend"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "files_versus_calls",
+        "beats": [
+          {
+            "say": "T C P suits a web page or a file, where every byte has to arrive, and in order.",
+            "show": "Under the left lane, a file and a web page appear beside the words every byte, in order.",
+            "labels": [
+              "files, web pages"
+            ]
+          },
+          {
+            "say": "U D P suits a video call or a game, where a late packet is worse than a missing one.",
+            "show": "Under the right lane, a video call and a game appear beside the words fresh beats complete.",
+            "labels": [
+              "calls, games"
+            ]
+          },
+          {
+            "say": "Same network, same lost packet. One side waits until it is complete, the other keeps going.",
+            "show": "Both lanes are shown together once more, the left complete and late, the right on time with a gap.",
+            "labels": [
+              "complete, later",
+              "on time, gap"
+            ]
+          }
+        ]
+      }
+    ],
+    "concepts": []
+  }
+}

@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { manualDir } from "../paths";
 import { run } from "../proc";
+import { shotTypesSection } from "./shots";
 import type { Toolchain } from "./toolchain";
 
 /**
@@ -156,7 +157,7 @@ The whole vocabulary, from the manimkc checkout. \`api <name>\` prints one entry
 ${listing.trim()}
 \`\`\`
 
-## Looking at a sheet
+${shotTypesSection()}## Looking at a sheet
 
 For each scene's sheet, check in this order: anything cut off at the frame edge; two texts overlapping; a label sitting on the wrong row or box; an arrow pointing at a neighbour; a caption or object from an earlier beat still on screen; a \`ReplacementTransform\` between texts of different lengths (garbled glyphs: use FadeOut and FadeIn); an empty bottom half. Then the preview's timing report: a scene that runs more than four seconds past its narration is a held frame, and a silence over 2.5 seconds mid-scene is a beat with no voice.
 

@@ -1,0 +1,112 @@
+{
+  "id": "binary-search-halving",
+  "needs": "A sorted array being searched: the remaining range shrinks by half at each check.",
+  "brief": {
+    "title": "Binary search: finding a number by halving",
+    "topic": "algorithms-and-data-structures",
+    "slug": "binary-search-halving",
+    "mode": "new",
+    "idea": "Binary search finds a value in a sorted list by checking the middle and discarding the half that cannot hold it, so fifteen items need at most four checks.",
+    "audience": "familiar",
+    "targetSeconds": 66,
+    "voice": "af_heart",
+    "scenes": [
+      {
+        "name": "a_sorted_row",
+        "beats": [
+          {
+            "say": "Here are fifteen numbers in order, smallest to largest, and we want to know whether forty seven is one of them.",
+            "show": "A row of fifteen boxes appears, each holding one number, sorted from 3 on the left to 64 on the right.",
+            "labels": [
+              "Find 47"
+            ]
+          },
+          {
+            "say": "Checking them one by one could take fifteen looks. Because the list is sorted, we can do far better.",
+            "show": "A pointer starts stepping box by box from the left, then stops and is removed.",
+            "labels": [
+              "15 looks"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "check_the_middle",
+        "beats": [
+          {
+            "say": "Look at the middle box first. It holds thirty four, which is smaller than forty seven.",
+            "show": "The middle box, holding 34, is highlighted and compared with 47.",
+            "labels": [
+              "34 < 47"
+            ]
+          },
+          {
+            "say": "So forty seven cannot be anywhere on the left. That whole half is gone after one single check.",
+            "show": "The middle box and the seven boxes to its left are greyed out, leaving seven boxes.",
+            "labels": [
+              "7 boxes left"
+            ]
+          },
+          {
+            "say": "In what is left, the middle is fifty one, which is too big, so now the right part goes.",
+            "show": "Among the remaining seven, the middle box, 51, is highlighted, then it and the three boxes to its right are greyed out.",
+            "labels": [
+              "51 > 47"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "down_to_one_box",
+        "beats": [
+          {
+            "say": "Three boxes remain. The middle one holds forty two, too small, which leaves a single box.",
+            "show": "Of the three remaining boxes, the middle one, 42, is highlighted, then it and the box to its left are greyed out.",
+            "labels": [
+              "42 < 47"
+            ]
+          },
+          {
+            "say": "That last box holds forty seven. Found, on the fourth check instead of the eleventh.",
+            "show": "The one remaining box, 47, is marked as the match and a counter reads 4 checks.",
+            "labels": [
+              "Found",
+              "4 checks"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "fifteen_seven_three_one",
+        "beats": [
+          {
+            "say": "Each check halved what was left: fifteen boxes, then seven, then three, then one.",
+            "show": "The four steps are shown one above the other as shrinking rows of 15, 7, 3 and 1 boxes.",
+            "labels": [
+              "15",
+              "7",
+              "3",
+              "1"
+            ]
+          },
+          {
+            "say": "Double the list and you add only one more check. A million sorted numbers need about twenty.",
+            "show": "Two lines appear below the rows: 30 items take 5 checks, and one million items take about 20.",
+            "labels": [
+              "30 items: 5 checks",
+              "1,000,000 items: 20 checks"
+            ]
+          },
+          {
+            "say": "The one condition is that the list stays sorted. Without the order, throwing away half would be a guess.",
+            "show": "The row of fifteen is shuffled, and the halving steps beside it are crossed out.",
+            "labels": [
+              "needs sorted order"
+            ]
+          }
+        ]
+      }
+    ],
+    "concepts": []
+  }
+}

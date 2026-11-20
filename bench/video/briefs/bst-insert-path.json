@@ -1,0 +1,121 @@
+{
+  "id": "bst-insert-path",
+  "needs": "A tree growing: nodes attach one by one as each key walks down from the root.",
+  "brief": {
+    "title": "How a binary search tree grows",
+    "topic": "algorithms-and-data-structures",
+    "slug": "bst-insert-path",
+    "mode": "new",
+    "idea": "Each new key in a binary search tree walks down from the root, left when smaller and right when larger, and becomes a leaf where the path runs out.",
+    "audience": "familiar",
+    "targetSeconds": 69,
+    "voice": "af_heart",
+    "scenes": [
+      {
+        "name": "the_first_key",
+        "beats": [
+          {
+            "say": "We start with an empty tree and insert fifty. With nothing else there, fifty becomes the root.",
+            "show": "A single node labelled 50 appears at the top.",
+            "labels": [
+              "50",
+              "root"
+            ]
+          },
+          {
+            "say": "The rule for every key after it: smaller goes to the left, larger goes to the right.",
+            "show": "Two branches appear under 50, the left one marked smaller and the right one marked larger.",
+            "labels": [
+              "smaller: left",
+              "larger: right"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "five_more_keys",
+        "beats": [
+          {
+            "say": "Thirty is smaller than fifty, so it becomes the left child. Seventy is larger, so it goes right.",
+            "show": "30 attaches below and to the left of 50, then 70 attaches below and to the right.",
+            "labels": [
+              "30",
+              "70"
+            ]
+          },
+          {
+            "say": "Twenty is smaller than fifty, then smaller than thirty, so it lands under thirty on the left.",
+            "show": "A marker travels from 50 to 30, then 20 attaches as the left child of 30.",
+            "labels": [
+              "20"
+            ]
+          },
+          {
+            "say": "Forty goes left at fifty, then right at thirty. Sixty goes right at fifty, then left at seventy.",
+            "show": "40 attaches as the right child of 30, then 60 as the left child of 70.",
+            "labels": [
+              "40",
+              "60"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "one_path_down",
+        "beats": [
+          {
+            "say": "Now insert forty five, and watch only the path it takes.",
+            "show": "A new key, 45, appears above the root.",
+            "labels": [
+              "Insert 45"
+            ]
+          },
+          {
+            "say": "At fifty it goes left. At thirty it goes right. At forty it goes right again.",
+            "show": "The marker moves from 50 to 30 to 40, each node it visits lighting up in turn.",
+            "labels": [
+              "left",
+              "right",
+              "right"
+            ]
+          },
+          {
+            "say": "Forty has no right child, so forty five becomes a new leaf right there, after three comparisons.",
+            "show": "45 attaches as the right child of 40, and a counter reads 3 comparisons.",
+            "labels": [
+              "45",
+              "3 comparisons"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "seven_keys_four_levels",
+        "beats": [
+          {
+            "say": "Every insert follows one path from the root, and never visits the rest of the tree.",
+            "show": "The path 50, 30, 40, 45 stays lit while every other node dims.",
+            "labels": []
+          },
+          {
+            "say": "So the work depends on the height of the tree, here four levels, and not on its seven keys.",
+            "show": "A bracket beside the tree marks its 4 levels next to a count of 7 keys.",
+            "labels": [
+              "4 levels",
+              "7 keys"
+            ]
+          },
+          {
+            "say": "Keys that arrive already in order build one long chain instead, and every insert walks the whole of it.",
+            "show": "A second tree built from 10, 20, 30 and 40 leans into a single diagonal chain.",
+            "labels": [
+              "10, 20, 30, 40",
+              "one long chain"
+            ]
+          }
+        ]
+      }
+    ],
+    "concepts": []
+  }
+}

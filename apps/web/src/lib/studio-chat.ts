@@ -22,6 +22,7 @@ import { sentence } from "@/lib/sentence";
 
 export const THINKING = "The planner is thinking";
 export const CHECKING_BRIEF = "Checking the brief";
+export const PLANNING_SHOTS = "Planning the shots";
 export const STILL_ANSWERING = "The planner is still answering.";
 export const EDITING_BRIEF = "Save or cancel your edits to the brief first.";
 const CUT_OFF = "The reply was cut off.";
@@ -477,17 +478,19 @@ export function refusalNoted(
 /**
  * The line under a planner turn in progress. "Thinking" until words arrive;
  * once the reply has landed and the turn is still open, the runner is
- * checking its brief (and may be asking the planner to fix it).
+ * checking its brief (and may be asking the planner to fix it), or, with a
+ * video brief that passed, planning its shots before the card is shown.
  */
 export function turnIndicator(
-  view: Pick<DraftView, "inFlight" | "transcript">,
+  view: Pick<DraftView, "inFlight" | "transcript" | "planningShots">,
   streaming: boolean,
-): "thinking" | "checking" | null {
+): "thinking" | "checking" | "shots" | null {
   if (!view.inFlight || streaming) return null;
   const visible = visibleEntries(view.transcript);
   const lastPerson = visible.filter((entry) => entry.role === "person").at(-1)?.seq ?? 0;
   const replied = visible.some((entry) => entry.role === "planner" && entry.seq > lastPerson);
-  return replied ? "checking" : "thinking";
+  if (!replied) return "thinking";
+  return view.planningShots === true ? "shots" : "checking";
 }
 
 /**

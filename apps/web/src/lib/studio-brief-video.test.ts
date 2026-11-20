@@ -7,9 +7,14 @@ import {
   beatCount,
   briefTool,
   chapterTitle,
+  hasShots,
+  isShot,
   isVideoBrief,
+  NO_SHOT_PLAN,
   predictedSeconds,
   shortLength,
+  shotLabel,
+  shotSummaryLine,
   switchedTool,
   toolRow,
   toolStopLine,
@@ -169,5 +174,42 @@ describe("the card's tool row (docs/STUDIO-VIDEO-TOOLS.md, D73)", () => {
     expect(switched.tool).toBe("revideokc");
     expect(switched).not.toHaveProperty("toolReason");
     expect(switched.title).toBe(BRIEF.title);
+  });
+
+  it("keeps the shot plan through a switch, since shots do not depend on the tool", () => {
+    const planned = { ...BRIEF, scenes: BRIEF.scenes.map((scene) => ({ ...scene, shot: SHOT })) };
+    expect(switchedTool(planned, "revideokc").scenes.every((scene) => scene.shot === SHOT)).toBe(true);
+  });
+});
+
+const SHOT = { type: "data-chart" as const, layout: "Chart in the right two thirds", motion: "Bars grow on each year", emphasis: "The tallest bar, in the accent" };
+
+describe("the shot plan on the card", () => {
+  const planned = (types: ("title" | "data-chart" | "recap-map")[]): VideoBrief => ({
+    ...BRIEF,
+    scenes: types.map((type, i) => ({ name: `scene_${i}`, beats: BRIEF.scenes[0]!.beats, shot: { ...SHOT, type } })),
+  });
+
+  it("counts the distinct shot types across the scenes, and says nothing without a plan", () => {
+    expect(shotSummaryLine(planned(["title", "data-chart", "recap-map"]))).toBe("3 shot types across 3 scenes");
+    expect(shotSummaryLine(planned(["data-chart", "data-chart"]))).toBe("1 shot type across 2 scenes");
+    expect(shotSummaryLine(BRIEF)).toBeNull();
+    expect(hasShots(BRIEF)).toBe(false);
+    expect(NO_SHOT_PLAN).toBe("No shot plan. The video agent will choose the pictures.");
+  });
+
+  it("names a shot's type in sentence case", () => {
+    expect(shotLabel({ type: "array-or-memory" })).toBe("Array or memory view");
+    expect(shotLabel({ type: "object-3d" })).toBe("3D object");
+  });
+
+  it("draws a card only from a strict shot", () => {
+    expect(isVideoBrief(planned(["title", "recap-map"]))).toBe(true);
+    const bad = (shot: unknown) => ({ ...BRIEF, scenes: [{ ...BRIEF.scenes[0]!, shot }] });
+    expect(isVideoBrief(bad({ ...SHOT, type: "slideshow" }))).toBe(false);
+    expect(isVideoBrief(bad({ ...SHOT, layout: 3 }))).toBe(false);
+    expect(isVideoBrief(bad({ type: "title" }))).toBe(false);
+    expect(isVideoBrief(bad("a chart"))).toBe(false);
+    expect(isShot(SHOT)).toBe(true);
   });
 });

@@ -65,6 +65,8 @@ export interface StateEvent {
   pair?: { requestSeq: number; kinds: DraftKind[] } | null;
   jobId: string | null;
   inFlight: boolean;
+  /** The art director is planning a video brief's shots. */
+  planningShots?: boolean;
   turns: number;
   costUsd: number | null;
   costSource: "result" | "stream" | null;

@@ -281,6 +281,11 @@ export interface DraftView {
   costUsd: number | null;
   costSource: "result" | "stream" | null;
   inFlight: boolean;
+  /**
+   * True while the art director plans a video brief's shots, after the reply
+   * landed and before its card is shown. Absent from a runner before it.
+   */
+  planningShots?: boolean;
   error: DraftError | null;
   created: string;
   updated: string;
