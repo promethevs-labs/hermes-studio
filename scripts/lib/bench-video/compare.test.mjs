@@ -1,0 +1,88 @@
+// `bench:video compare` on two fixture runs: the exact text, the width, the
+// briefs only one run has, and a critic score joining the look table.
+import { describe, expect, it } from 'vitest';
+
+import { compareRuns, formatCompare, lookColumns } from './compare.mjs';
+
+const result = (id, metrics, extra = {}) => ({ id, jobId: `j-${id}`, state: 'accepted', gateOk: true, attempts: 1, turns: 30, costUsd: 2.4, wallSeconds: 720, renderSeconds: 90, metrics, error: null, ...extra });
+
+const A = {
+  label: 'base',
+  tool: 'manimkc',
+  model: 'sonnet',
+  manualHashes: ['0123456789abcdef'],
+  results: [
+    result('binary-search-halving', { variety: 0.61, helperTop5Share: 0.8, fadeShare: 0.45, uses3d: false }),
+    result('tcp-three-way-handshake', { variety: 0.5, helperTop5Share: 0.9, fadeShare: 0.6, uses3d: false }, { gateOk: false, attempts: 3, turns: 88, costUsd: 3.6, wallSeconds: 1500 }),
+    result('dominant-term', null, { state: 'failed', gateOk: false, costUsd: 1.1 }),
+  ],
+};
+
+const B = {
+  label: 'art',
+  tool: 'manimkc',
+  model: 'sonnet',
+  manualHashes: ['fedcba9876543210'],
+  results: [
+    result('binary-search-halving', { variety: 0.72, helperTop5Share: 0.55, fadeShare: 0.2, uses3d: true }, { turns: 41, costUsd: 2.95, wallSeconds: 840 }),
+    result('tcp-three-way-handshake', { variety: 0.66, helperTop5Share: 0.7, fadeShare: 0.3, uses3d: false }, { attempts: 2, turns: 60, costUsd: 3.1, wallSeconds: 1200 }),
+    result('memory-hierarchy-layers', { variety: 0.7, helperTop5Share: 0.5, fadeShare: 0.1, uses3d: true }),
+  ],
+};
+
+const EXPECTED = `Video bench: base against art, 2 briefs in both
+  A is base: manimkc, model sonnet, 3 results, manual 0123456789ab
+  B is art: manimkc, model sonnet, 3 results, manual fedcba987654
+
+Look (the mean over the shared briefs on the last line; 3D counts videos)
+                         variety          top-five share   fade share       3D
+brief                       A    B  diff     A    B  diff     A    B  diff   A   B
+binary-search-halving    0.61 0.72 +0.11  0.80 0.55 -0.25  0.45 0.20 -0.25  no yes
+tcp-three-way-handshake  0.50 0.66 +0.16  0.90 0.70 -0.20  0.60 0.30 -0.30  no  no
+mean or total            0.55 0.69 +0.14  0.85 0.63 -0.23  0.53 0.25 -0.28   0   1
+
+Run (totals over the shared briefs on the last line; gate counts passes)
+                         gate       attempts  turns         cost USD         wall min
+brief                       A    B  A B diff    A   B diff     A    B  diff     A    B diff
+binary-search-halving    pass pass  1 1    0   30  41  +11  2.40 2.95 +0.55  12.0 14.0 +2.0
+tcp-three-way-handshake  fail pass  3 2   -1   88  60  -28  3.60 3.10 -0.50  25.0 20.0 -5.0
+mean or total               1    2  4 3   -1  118 101  -17  6.00 6.05 +0.05  37.0 34.0 -3.0
+
+Only in base, left out: dominant-term
+Only in art, left out: memory-hierarchy-layers
+`;
+
+describe('compare', () => {
+  it('prints the two runs side by side, exactly', () => {
+    expect(formatCompare(compareRuns(A, B))).toBe(EXPECTED);
+  });
+
+  it('stays under 100 columns, in sentence case, with no em dash', () => {
+    const text = formatCompare(compareRuns(A, B));
+    for (const line of text.split('\n')) expect(line.length).toBeLessThan(100);
+    expect(text).not.toMatch(/\u2014/);
+    expect(text).not.toMatch(/\b[A-Z]{4,}\b/);
+  });
+
+  it('averages the look and sums the run over shared briefs only, and lists the rest', () => {
+    const comparison = compareRuns(A, B);
+    expect(comparison.rows.map((row) => row.id)).toEqual(['binary-search-halving', 'tcp-three-way-handshake']);
+    expect(comparison.onlyInA).toEqual(['dominant-term']);
+    expect(comparison.onlyInB).toEqual(['memory-hierarchy-layers']);
+    expect(comparison.totals.a.costUsd).toBeCloseTo(6.0);
+    expect(comparison.totals.b.variety).toBeCloseTo(0.69);
+    expect(comparison.totals.a.gatePassed).toBe(1);
+    expect(comparison.totals.b.uses3d).toBe(1);
+    expect(comparison.rows[0].diff.turns).toBe(11);
+  });
+
+  it('adds a column for each critic score a result carries', () => {
+    const scored = structuredClone(B);
+    scored.results[0].critic = { clarity: 0.8 };
+    expect(lookColumns(A, scored).map((column) => column.key)).toEqual(['variety', 'helperTop5Share', 'fadeShare', 'critic.clarity']);
+    const comparison = compareRuns(A, scored);
+    expect(comparison.rows[0].b['critic.clarity']).toBe(0.8);
+    expect(comparison.rows[0].a['critic.clarity']).toBeNull();
+    expect(formatCompare(comparison).split('\n')[5]).toContain('clarity');
+  });
+});

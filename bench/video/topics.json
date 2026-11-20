@@ -1,0 +1,22 @@
+{
+  "topics": [
+    {
+      "slug": "algorithms-and-data-structures",
+      "title": "Algorithms and data structures",
+      "domain": "algorithms",
+      "summary": "How searching, sorting, trees, graphs and hash tables work, and how their cost grows with the input."
+    },
+    {
+      "slug": "computer-networks",
+      "title": "Computer networks",
+      "domain": "networking",
+      "summary": "How machines exchange data: transport protocols, connections, and the path a request takes through a system."
+    },
+    {
+      "slug": "computer-systems",
+      "title": "Computer systems",
+      "domain": "computer-architecture",
+      "summary": "What happens inside one machine as a program runs: the call stack, memory layers and caches."
+    }
+  ]
+}

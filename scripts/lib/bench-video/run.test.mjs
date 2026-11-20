@@ -1,0 +1,333 @@
+// `bench:video run`'s loop against a stand-in HTTP server that plays a studio
+// runner: the guard's header rules, health with a doctor that answers late,
+// enqueue (201, 409, 429), job states, accept and cancel, and the job files a
+// real runner leaves under STUDIO_HOME. The child-runner start is injected, so
+// no runner, no agent and no model is ever started here, and every file goes
+// under the OS temp directory.
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
+import { readJobFiles, sourceMetrics } from './metrics.mjs';
+import { planFor, runBench, toolReadiness } from './run.mjs';
+import { call, portFree } from './runner.mjs';
+
+const brief = (id) => ({
+  id,
+  needs: `needs of ${id}`,
+  brief: { title: `Title ${id}`, topic: 'computer-networks', slug: id, mode: 'new', idea: 'An idea.', audience: 'familiar', targetSeconds: 60, voice: 'af_heart', scenes: [], concepts: [] },
+});
+
+const SCENE = `from manimlib import *
+
+class A1_Start(Scene):
+    def construct(self):
+        self.play(FadeIn(Square()))
+        self.play(Write(Text("x")))
+`;
+
+/**
+ * A stand-in runner. `scripts` maps a brief id to what its job does:
+ * `{ enqueue: 201 | 409 | 429 | 503, polls, end: 'awaiting_review' | 'failed', cost, errorKind }`.
+ */
+function standIn({ studioHome, scripts, capUsd = 5, doctorAfter = 1, toolAvailable = true }) {
+  const seen = { posts: [], accepts: [], cancels: [], refusedByGuard: [], health: 0 };
+  const jobs = new Map();
+  let next = 1;
+  const send = (res, status, body) => {
+    const text = JSON.stringify(body);
+    res.writeHead(status, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(text) });
+    res.end(text);
+  };
+  const writeFiles = (job) => {
+    const dir = join(studioHome, 'jobs', job.id);
+    mkdirSync(join(dir, 'source'), { recursive: true });
+    const started = '2026-11-20T10:00:00.000Z';
+    writeFileSync(
+      join(dir, 'job.json'),
+      JSON.stringify({ id: job.id, state: job.state, attempt: 2, turns: 31, costUsd: job.script.cost ?? 1.25, startedAt: started, finishedAt: '2026-11-20T10:12:30.000Z', gate: { ok: job.state !== 'failed' }, manualHash: 'abc123def456aaaa' }),
+    );
+    writeFileSync(
+      join(dir, 'run.json'),
+      JSON.stringify({ model: { passed: 'sonnet', resolved: 'claude-sonnet-5' }, manualHash: 'abc123def456aaaa', renderSeconds: 95.5, attempts: [{ n: 1, turns: 20, gate: { ok: false } }, { n: 2, turns: 11, gate: { ok: job.state !== 'failed' } }] }),
+    );
+  };
+  const server = createServer((req, res) => {
+    const port = server.address().port;
+    // The guard's rules (services/studio/src/api.ts): the bench's client must pass them.
+    if (req.headers.host !== `127.0.0.1:${port}` || req.headers.origin !== undefined || req.headers['sec-fetch-site'] !== undefined) {
+      seen.refusedByGuard.push(req.url);
+      return send(res, 403, { error: 'guard' });
+    }
+    if (req.method === 'POST' && req.headers['content-type'] !== 'application/json') {
+      seen.refusedByGuard.push(req.url);
+      return send(res, 403, { error: 'content type' });
+    }
+    const chunks = [];
+    req.on('data', (chunk) => chunks.push(chunk));
+    req.on('end', () => {
+      const body = chunks.length === 0 ? null : JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      const parts = req.url.split('/').filter(Boolean);
+      if (req.method === 'GET' && req.url === '/api/health') {
+        seen.health += 1;
+        const done = seen.health > doctorAfter;
+        return send(res, 200, {
+          claude: true,
+          dailyCap: { capUsd, exceeded: false, totalUsd: 0 },
+          video: { tools: [{ name: 'manimkc', available: done && toolAvailable, reason: !done ? 'the manimkc doctor has not finished its first check' : toolAvailable ? null : 'this machine cannot make manimkc videos right now: venv: missing' }] },
+        });
+      }
+      if (req.method === 'POST' && req.url === '/api/jobs') {
+        seen.posts.push(body);
+        const known = [...jobs.values()].find((job) => job.key === body.idempotencyKey);
+        if (known !== undefined) return send(res, 200, { jobId: known.id, state: known.state, created: false });
+        const id = body.slug.replace(/-[a-z0-9]+$/, '');
+        const script = scripts[id] ?? {};
+        const status = script.enqueue ?? 201;
+        if (status === 429) return send(res, 429, { error: 'the studio has spent $5.10 in the last 24 hours', detail: { reason: 'daily-cap', totalUsd: 5.1, capUsd } });
+        if (status !== 201) return send(res, status, { error: `refused with ${status}`, detail: null });
+        const job = { id: `job-${next++}`, key: body.idempotencyKey, state: 'queued', polls: 0, script };
+        jobs.set(job.id, job);
+        return send(res, 201, { jobId: job.id, kind: 'video', state: 'queued', created: true });
+      }
+      if (parts[0] === 'api' && parts[1] === 'jobs' && parts.length >= 3) {
+        const job = jobs.get(decodeURIComponent(parts[2]));
+        if (job === undefined) return send(res, 404, { error: 'no such job' });
+        if (req.method === 'GET' && parts.length === 3) {
+          if (['queued', 'running'].includes(job.state)) {
+            job.polls += 1;
+            if (job.polls >= (job.script.polls ?? 2)) {
+              job.state = job.script.end ?? 'awaiting_review';
+              writeFiles(job);
+            } else job.state = 'running';
+          }
+          return send(res, 200, { jobId: job.id, state: job.state, costUsd: ['running', 'cancelled'].includes(job.state) ? 0.4 : (job.script.cost ?? 1.25), error: job.state === 'failed' ? 'the gate failed: scene two runs long' : null, errorKind: job.state === 'failed' ? (job.script.errorKind ?? 'gate') : null });
+        }
+        if (req.method === 'POST' && parts[3] === 'accept') {
+          seen.accepts.push(job.id);
+          job.state = 'accepted';
+          writeFiles(job);
+          writeFileSync(join(studioHome, 'jobs', job.id, 'source', 'scenes.py'), SCENE);
+          return send(res, 200, { jobId: job.id, state: 'accepted' });
+        }
+        if (req.method === 'POST' && parts[3] === 'cancel') {
+          seen.cancels.push(job.id);
+          job.state = 'cancelled';
+          return send(res, 202, { jobId: job.id, state: 'cancelled' });
+        }
+      }
+      return send(res, 404, { error: 'no route' });
+    });
+  });
+  return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve({ server, seen, base: `http://127.0.0.1:${server.address().port}` })));
+}
+
+let dir;
+let studioHome;
+let runFile;
+let stand;
+
+beforeEach(() => {
+  dir = mkdtempSync(join(tmpdir(), 'bench-run-'));
+  studioHome = join(dir, 'studio');
+  runFile = join(dir, 'runs', 'base.json');
+  mkdirSync(studioHome, { recursive: true });
+});
+
+afterEach(async () => {
+  if (stand !== undefined) await new Promise((resolve) => stand.server.close(resolve));
+  stand = undefined;
+  rmSync(dir, { recursive: true, force: true });
+});
+
+/** The deps runBench takes, pointed at the stand-in. `start` is the injected child-runner start. */
+function deps(overrides = {}) {
+  const lines = [];
+  const started = { count: 0, stopped: 0, env: null };
+  return {
+    lines,
+    started,
+    deps: {
+      envFor: (options) => ({ STUDIO_DAILY_USD: String(options.cap), STUDIO_PORT: String(options.port) }),
+      start: async (env) => {
+        started.count += 1;
+        started.env = env;
+        return { base: stand.base, stop: async () => (started.stopped += 1, true) };
+      },
+      call,
+      portFree: async () => true,
+      readJob: (jobId) => readJobFiles(studioHome, jobId),
+      metrics: (jobId) => sourceMetrics(studioHome, jobId, 'manimkc'),
+      log: (line) => lines.push(line),
+      sleep: async () => {},
+      pollMs: 0,
+      healthMs: 0,
+      ...overrides,
+    },
+  };
+}
+
+const options = (entries, extra = {}) => ({ home: dir, label: 'base', tool: 'manimkc', model: 'sonnet', cap: 5, port: 7260, entries, runFile, ...extra });
+
+describe('runBench', () => {
+  it('posts each brief, follows it, accepts it, records it, and stops cleanly at a 429', async () => {
+    stand = await standIn({ studioHome, scripts: { 'a-one': { polls: 3 }, 'b-two': { end: 'failed', cost: 0.75 }, 'c-three': { enqueue: 429 } } });
+    const { deps: d, lines, started } = deps();
+    const run = await runBench(options(['a-one', 'b-two', 'c-three', 'd-four'].map(brief)), d);
+
+    expect(stand.seen.refusedByGuard).toEqual([]);
+    expect(started).toMatchObject({ count: 1, stopped: 1, env: { STUDIO_DAILY_USD: '5', STUDIO_PORT: '7260' } });
+    // The doctor answered on the second health call; nothing was posted before it.
+    expect(stand.seen.health).toBe(2);
+    expect(stand.seen.posts.map((post) => [post.slug, post.tool, post.model, post.idempotencyKey, post.kind])).toEqual([
+      ['a-one-base', 'manimkc', 'sonnet', 'bench-video:base:a-one:1', 'video'],
+      ['b-two-base', 'manimkc', 'sonnet', 'bench-video:base:b-two:1', 'video'],
+      ['c-three-base', 'manimkc', 'sonnet', 'bench-video:base:c-three:1', 'video'],
+    ]);
+    expect(stand.seen.accepts).toEqual(['job-1']);
+    expect(lines.filter((line) => line.startsWith('bench: 4 briefs'))).toEqual(['bench: 4 briefs on manimkc, model sonnet, cap $5.00 for this home\'s rolling day']);
+
+    const written = JSON.parse(readFileSync(runFile, 'utf8'));
+    expect(written).toEqual(run);
+    expect(written).toMatchObject({ label: 'base', tool: 'manimkc', model: 'sonnet', manualHashes: ['abc123def456aaaa'] });
+    expect(written.stopReason).toMatch(/c-three: the runner refused it at the daily cap/);
+    expect(typeof written.startedAt).toBe('string');
+    expect(typeof written.endedAt).toBe('string');
+    const [one, two, three] = written.results;
+    expect(written.results.map((result) => result.id)).toEqual(['a-one', 'b-two', 'c-three']);
+    expect(one).toMatchObject({
+      id: 'a-one',
+      jobId: 'job-1',
+      state: 'accepted',
+      gateOk: true,
+      attempts: 2,
+      turns: 31,
+      costUsd: 1.25,
+      wallSeconds: 750,
+      renderSeconds: 95.5,
+      metrics: { variety: 1, helperTop5Share: null, fadeShare: 0.5, uses3d: false },
+      error: null,
+    });
+    expect(two).toMatchObject({ id: 'b-two', state: 'failed', gateOk: false, costUsd: 0.75, metrics: null, error: 'the gate failed: scene two runs long', errorKind: 'gate' });
+    expect(three).toMatchObject({ id: 'c-three', jobId: null, state: 'refused', error: expect.stringMatching(/^429 daily-cap: /) });
+  });
+
+  it('stops at a 409 unless --keep-going, and then carries on past it', async () => {
+    stand = await standIn({ studioHome, scripts: { 'a-one': { enqueue: 409 } } });
+    const stopped = await runBench(options(['a-one', 'b-two'].map(brief)), deps().deps);
+    expect(stand.seen.posts.map((post) => post.slug)).toEqual(['a-one-base']);
+    expect(stopped.results.map((result) => [result.id, result.state])).toEqual([['a-one', 'refused']]);
+    expect(stopped.results[0].error).toBe('409: refused with 409');
+    expect(stopped.stopReason).toMatch(/--keep-going/);
+
+    rmSync(runFile);
+    const kept = await runBench(options(['a-one', 'b-two'].map(brief), { keepGoing: true }), deps().deps);
+    expect(kept.results.map((result) => [result.id, result.state])).toEqual([
+      ['a-one', 'refused'],
+      ['b-two', 'accepted'],
+    ]);
+    expect(kept.stopReason).toBeUndefined();
+  });
+
+  it('stops on a failure that says the machine is the problem', async () => {
+    stand = await standIn({ studioHome, scripts: { 'a-one': { end: 'failed', errorKind: 'agent', cost: 0 } } });
+    const run = await runBench(options(['a-one', 'b-two'].map(brief)), deps().deps);
+    expect(stand.seen.posts).toHaveLength(1);
+    expect(run.stopReason).toMatch(/error kind agent/);
+  });
+
+  it('posts nothing when the runner reports another cap, or the tool is not available, or the port is taken', async () => {
+    stand = await standIn({ studioHome, scripts: {}, capUsd: 50 });
+    await expect(runBench(options([brief('a-one')]), deps().deps)).rejects.toThrow(/daily cap of 50, not the \$5/);
+    expect(stand.seen.posts).toEqual([]);
+    // Nothing was posted, so no run file stands in the way of the next try.
+    expect(existsSync(runFile)).toBe(false);
+    await new Promise((resolve) => stand.server.close(resolve));
+
+    stand = await standIn({ studioHome, scripts: {}, toolAvailable: false });
+    await expect(runBench(options([brief('a-one')]), deps().deps)).rejects.toThrow(/venv: missing; nothing was posted/);
+    expect(stand.seen.posts).toEqual([]);
+    expect(existsSync(runFile)).toBe(false);
+
+    const taken = deps({ portFree: async () => false });
+    await expect(runBench(options([brief('a-one')]), taken.deps)).rejects.toThrow(/already listens on 127.0.0.1:7260/);
+    expect(taken.started.count).toBe(0);
+  });
+
+  it('refuses an existing run file without --resume, and a resume skips what is settled', async () => {
+    stand = await standIn({ studioHome, scripts: {} });
+    await runBench(options(['a-one'].map(brief)), deps().deps);
+    await expect(runBench(options(['a-one', 'b-two'].map(brief)), deps().deps)).rejects.toThrow(/--resume/);
+    await expect(runBench(options(['a-one'].map(brief), { resume: true, tool: 'revideokc' }), deps().deps)).rejects.toThrow(/same tool and model/);
+
+    const resumed = await runBench(options(['a-one', 'b-two'].map(brief), { resume: true }), deps().deps);
+    expect(stand.seen.posts.map((post) => post.slug)).toEqual(['a-one-base', 'b-two-base']);
+    expect(resumed.results.map((result) => [result.id, result.state])).toEqual([
+      ['a-one', 'accepted'],
+      ['b-two', 'accepted'],
+    ]);
+
+    const idle = deps();
+    await runBench(options(['a-one', 'b-two'].map(brief), { resume: true }), idle.deps);
+    expect(idle.started.count).toBe(0);
+    expect(idle.lines).toEqual([expect.stringMatching(/^nothing to run/)]);
+  });
+
+  it('cancels the running job when stopped, and a resume posts it again as a new attempt with its cost kept', async () => {
+    stand = await standIn({ studioHome, scripts: { 'a-one': { polls: 50 } } });
+    let polls = 0;
+    const stopping = deps({
+      call: async (base, method, path, body, opts) => {
+        if (method === 'GET' && path.startsWith('/api/jobs/')) polls += 1;
+        return call(base, method, path, body, opts);
+      },
+      stopped: () => polls >= 2,
+    });
+    const run = await runBench(options(['a-one', 'b-two'].map(brief)), stopping.deps);
+    expect(stand.seen.cancels).toEqual(['job-1']);
+    expect(run.results).toEqual([expect.objectContaining({ id: 'a-one', state: 'stopped', stopped: true, jobId: 'job-1', costUsd: 0.4 })]);
+    expect(stopping.started.stopped).toBe(1);
+
+    stand.seen.posts.length = 0;
+    const resumed = await runBench(options(['a-one', 'b-two'].map(brief), { resume: true }), deps().deps);
+    expect(stand.seen.posts.map((post) => post.idempotencyKey)).toEqual(['bench-video:base:a-one:2', 'bench-video:base:b-two:1']);
+    expect(resumed.results[0]).toMatchObject({ id: 'a-one', jobId: 'job-2', state: 'accepted', tries: 2, earlierCostUsd: 0.4, costUsd: 1.25 });
+  });
+
+  it('stops before posting once the recorded costs reach the cap', async () => {
+    stand = await standIn({ studioHome, scripts: { 'a-one': { cost: 3 }, 'b-two': { cost: 3 } } });
+    const run = await runBench(options(['a-one', 'b-two', 'c-three'].map(brief)), deps().deps);
+    expect(stand.seen.posts.map((post) => post.slug)).toEqual(['a-one-base', 'b-two-base']);
+    expect(run.stopReason).toMatch(/recorded cost, \$6.00, has reached the \$5.00 cap/);
+  });
+});
+
+describe('planFor', () => {
+  it('posts a new brief, reuses the key of an unanswered post, skips what is settled and checks the rest', () => {
+    expect(planFor(undefined)).toEqual({ action: 'post', attempt: 1 });
+    expect(planFor({ state: 'posting', tries: 2 })).toEqual({ action: 'post', attempt: 2 });
+    for (const state of ['accepted', 'failed', 'cancelled']) expect(planFor({ state, tries: 1, jobId: 'j' })).toEqual({ action: 'skip' });
+    expect(planFor({ state: 'cancelled', stopped: true, tries: 1, jobId: 'j' })).toEqual({ action: 'check', attempt: 1 });
+    expect(planFor({ state: 'awaiting_review', tries: 1, jobId: 'j' })).toEqual({ action: 'check', attempt: 1 });
+    expect(planFor({ state: 'refused', tries: 1, jobId: null })).toEqual({ action: 'post', attempt: 2 });
+  });
+});
+
+describe('toolReadiness', () => {
+  it('waits while the doctor has not answered, and says why a tool is off', () => {
+    expect(toolReadiness({}, 'manimkc')).toMatchObject({ ready: null });
+    expect(toolReadiness({ video: { tools: [{ name: 'manimkc', available: false, reason: 'the manimkc doctor has not finished its first check' }] } }, 'manimkc').ready).toBeNull();
+    expect(toolReadiness({ video: { tools: [{ name: 'manimkc', available: false, reason: 'no venv' }] } }, 'manimkc')).toEqual({ ready: false, reason: 'no venv' });
+    expect(toolReadiness({ video: { tools: [{ name: 'manimkc', available: true }] } }, 'manimkc')).toEqual({ ready: true, reason: null });
+  });
+});
+
+describe('portFree', () => {
+  it('says a listened port is taken', async () => {
+    stand = await standIn({ studioHome, scripts: {} });
+    expect(await portFree(stand.server.address().port)).toBe(false);
+  });
+});
