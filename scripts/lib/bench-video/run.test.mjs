@@ -168,7 +168,7 @@ function standIn({ studioHome, scripts, capUsd = 5, doctorAfter = 1, toolAvailab
             jobId: job.id,
             state: job.state,
             attempt: 2,
-            costUsd: ['running', 'cancelled'].includes(job.state) ? 0.4 : (job.script.cost ?? 1.25),
+            costUsd: ['running', 'cancelled'].includes(job.state) ? (job.script.runningCost ?? 0.4) : (job.script.cost ?? 1.25),
             error: job.state === 'failed' ? 'the gate failed: scene two runs long' : null,
             errorKind: job.state === 'failed' ? (job.script.errorKind ?? 'gate') : null,
             critic: ['awaiting_review', 'accepted'].includes(job.state) ? job.critic : null,
@@ -465,6 +465,38 @@ describe('run --shots', () => {
     expect(stand.seen.shots).toHaveLength(1);
     expect(stand.seen.posts.map((post) => post.scenes.map((scene) => scene.shot.type))).toEqual([['title', 'array-or-memory', 'recap-map']]);
     expect(resumed.results[0]).toMatchObject({ state: 'accepted', shots: { state: 'planned', costUsd: 0.3 } });
+  });
+
+  it('counts what a stopped job really cost before paying for the next attempt on a resume', async () => {
+    // A job stopped at $0.50, with no shot plan (the art director was off).
+    stand = await standIn({ studioHome, scripts: { 'b-two': { polls: 50, runningCost: 0.5, shots: { shotPlan: 'off' } } } });
+    let polls = 0;
+    const stopping = deps({
+      call: async (base, method, path, body, opts) => {
+        if (method === 'GET' && path.startsWith('/api/jobs/')) polls += 1;
+        return call(base, method, path, body, opts);
+      },
+      stopped: () => polls >= 2,
+    });
+    await runBench(options(['b-two'].map(brief), { shots: true, keepGoing: true }), stopping.deps);
+    // $4 from an earlier day, and the runner's own checks of the stopped job cost $0.75.
+    const recorded = JSON.parse(readFileSync(runFile, 'utf8'));
+    recorded.results.unshift({ id: 'a-old', jobId: 'job-old', state: 'accepted', costUsd: 4, tries: 1 });
+    writeFileSync(runFile, JSON.stringify(recorded));
+    expect(recorded.results[1]).toMatchObject({ id: 'b-two', state: 'stopped', costUsd: 0.5 });
+    mkdirSync(join(studioHome, 'jobs', 'job-1'), { recursive: true });
+    writeFileSync(join(studioHome, 'jobs', 'job-1', 'job.json'), JSON.stringify({ id: 'job-1', critic: [{ attempt: 1, standalone: false, costUsd: 0.75 }] }));
+    stand.seen.shots.length = 0;
+    stand.seen.posts.length = 0;
+
+    // $4 + $0.50 passes the $5 cap at the top; the $0.75 brings it to $5.25.
+    const resumed = await runBench(options(['b-two'].map(brief), { shots: true, keepGoing: true, resume: true }), deps().deps);
+    expect(stand.seen.shots).toEqual([]);
+    expect(stand.seen.posts).toEqual([]);
+    expect(resumed.stopReason).toMatch(/recorded cost, \$5.25, has reached the \$5.00 cap/);
+    const two = resumed.results.find((result) => result.id === 'b-two');
+    expect(two).toMatchObject({ state: 'not-posted', tries: 2, earlierCostUsd: 1.25, costUsd: null, criticCostUsd: null });
+    expect(costOf(two)).toBeCloseTo(1.25);
   });
 
   it('posts the brief without shots when the plan failed, and records why', async () => {

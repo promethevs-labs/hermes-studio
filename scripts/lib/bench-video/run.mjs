@@ -274,6 +274,10 @@ export async function runBench(options, deps) {
           // Its picture checks were paid apart from the job's own cost.
           const checked = criticCostOf(deps.readJob(previous.jobId)?.job);
           if (checked !== null) previous = { ...previous, criticCostUsd: checked };
+          // Saved before any cap check below, so spent() counts what the old
+          // attempt really cost; `fresh` then carries the same sum in
+          // `earlierCostUsd`, so the total is the same before and after it.
+          put(previous);
           attempt += 1;
         }
       }
@@ -286,7 +290,9 @@ export async function runBench(options, deps) {
         const body = jobBody(entry, { label, tool, model, attempt });
         // A plan already recorded stands: a resume never pays for a second one.
         let shots = askShots ? (previous?.shots ?? null) : null;
-        const fresh = { ...emptyResult(entry.id), id: entry.id, slug, tries: attempt, stopped: false, earlierCostUsd };
+        // A standalone check already paid for stays counted too (a check only
+        // runs on a landed video, which a resume skips, so this is a guard).
+        const fresh = { ...emptyResult(entry.id), id: entry.id, slug, tries: attempt, stopped: false, earlierCostUsd, checkCostUsd: previous?.checkCostUsd ?? null };
         // Every paid call is preceded, after the last await before it, by a
         // stop check and a cap check. A record whose post may already have
         // reached the runner is left as it is, so a resume reposts it under
@@ -431,7 +437,10 @@ export async function runBench(options, deps) {
         }
       }
       const fields = recordFields(deps.readJob(jobId), Math.round((now() - posted) / 100) / 10);
-      const checkCostUsd = critic?.source === 'standalone' && typeof critic.costUsd === 'number' ? critic.costUsd : null;
+      // This run's standalone check, added to any the record already carried.
+      const priorCheck = results.get(entry.id)?.checkCostUsd;
+      const thisCheck = critic?.source === 'standalone' && typeof critic.costUsd === 'number' ? critic.costUsd : null;
+      const checkCostUsd = thisCheck === null && typeof priorCheck !== 'number' ? null : (typeof priorCheck === 'number' ? priorCheck : 0) + (thisCheck ?? 0);
       // Look metrics only for a video that landed: a failed job's kept source
       // can be the untouched scene stub, which scans as a busy picture.
       const metrics = state === 'accepted' ? deps.metrics(jobId) : null;
