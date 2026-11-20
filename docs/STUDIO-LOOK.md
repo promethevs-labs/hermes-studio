@@ -154,7 +154,7 @@ fetch any. It is a later piece of work with its own licence question.
 | Shot library | A theme, shot patterns for every shot type, motion presets, icons, and a gallery with a thumbnail and a "use when" line per pattern, in remotionkc | `tools/remotionkc/docs/SHOTS.md` | built ([remotionkc #11](https://github.com/promethevs-labs/remotionkc/pull/11)) |
 | Critic | The model call after the gate, the one retry it may cause, and the scores on the job panel | [STUDIO-VIDEOS.md](STUDIO-VIDEOS.md) | built ([#726](https://github.com/promethevs-labs/hermes-studio/pull/726)) |
 | Manual by purpose | The studio's manuals list a tool's patterns by shot type, never by past use, with worked examples that span the shot types; the art director sees the patterns too | [STUDIO-VIDEO-TOOLS.md](STUDIO-VIDEO-TOOLS.md), "The manual by shot type" | built ([#728](https://github.com/promethevs-labs/hermes-studio/pull/728)) |
-| Guidance | [VIDEO-TOOLS.md](VIDEO-TOOLS.md), each tool's `AGENTS.md` and the video skills say what D111 fixes and what must vary | each file | built ([#720](https://github.com/promethevs-labs/hermes-studio/pull/720)) |
+| Guidance | [VIDEO-TOOLS.md](VIDEO-TOOLS.md), each tool's `AGENTS.md` and the video skills say what D111 fixes and what must vary | each file | built ([#720](https://github.com/promethevs-labs/hermes-studio/pull/720)); manimkc's own part (its `api` listing grouped by purpose, what a series fixes, and `docs/SHOTS.md`) shipped in [manimkc #86](https://github.com/promethevs-labs/manimkc/pull/86) and is pinned here by the bump that also copies `SHOTS.md` into each manimkc job |
 
 ## How the change is measured
 

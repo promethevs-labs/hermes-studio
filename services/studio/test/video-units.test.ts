@@ -79,6 +79,7 @@ describe("the video agent's permission file", () => {
     expect(settings.permissions.blockReadsOutsideWorkingDirectories).toBe(true);
     expect(deny).toEqual(expect.arrayContaining(["WebFetch", "WebSearch", "Bash(python3:*)", "Bash(curl:*)", `Edit(/${paths.topicYml})`, "Read(//opt/manimkc/topics/**)", "Read(//opt/manimkc-home/**)"]));
     expect(deny).toContain(`Edit(/${paths.lib}/**)`);
+    expect(allow).toContain(`Read(/${paths.shotsGuide})`);
     expect(deny).toContain(`Read(/${paths.bin}/**)`);
     expect(settings.hooks).toEqual({ PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "/usr/local/bin/node /x/bin/bash-guard.cjs" }] }] });
     // The diagram agent's file carries its own guard, in the same block.
