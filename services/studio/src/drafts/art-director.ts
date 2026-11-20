@@ -7,7 +7,7 @@ import { SHOT_TEXT_LIMITS, type VideoShot } from "@hermes/schema/shared";
 import { agentAuth, artDirectorMs, PLANNER_IDLE_MS } from "../config";
 import { costFromLog, JobCostMeter, type CostSource, type SpendEntry } from "../cost";
 import { BriefError } from "../diagram/brief";
-import { checkShotPlan, validateShot, type VideoBrief } from "../video/brief";
+import { checkShotPlan, validateShot, validateShotText, type VideoBrief } from "../video/brief";
 import { briefTool } from "../video/tools";
 import { artDirectorFollowUp, artDirectorMessage, buildArtDirectorSystemPrompt } from "./art-director-prompt";
 import { fencedBlocks, plannerArgv, plannerSettings, startPlanner, type PlannerOutcome, type PlannerRun } from "./planner";
@@ -111,6 +111,10 @@ function fitShotText(scenes: unknown[]): { scenes: unknown[]; shortened: string[
     if (typeof shot !== "object" || shot === null || Array.isArray(shot)) return entry;
     const next: Record<string, unknown> = { ...(shot as Record<string, unknown>) };
     for (const name of ["layout", "motion", "emphasis"] as const) {
+      // Only length is forgiven: the whole original must pass every other rule
+      // before it is cut, so a quote, backslash or line break in the part that
+      // would be removed still refuses the plan, naming that fault.
+      if (cutToFit(next[name], SHOT_TEXT_LIMITS[name]) !== null) validateShotText(next[name], `scenes[${i}].shot.${name}`, Infinity);
       const cut = cutToFit(next[name], SHOT_TEXT_LIMITS[name]);
       if (cut === null) continue;
       shortened.push(`scenes[${i}].shot.${name} ${(next[name] as string).trim().length} to ${cut.length} characters`);
@@ -143,8 +147,8 @@ export function readShots(text: string, brief: Pick<VideoBrief, "scenes">): { sh
   if (scenes.length !== brief.scenes.length) {
     return { problem: `The shots block has ${scenes.length} entries and the brief has ${brief.scenes.length} scenes; give exactly one per scene.` };
   }
-  const { scenes: fitted, shortened } = fitShotText(scenes);
   try {
+    const { scenes: fitted, shortened } = fitShotText(scenes);
     const shots = fitted.map((entry: unknown, i) => {
       const name = typeof entry === "object" && entry !== null ? (entry as { name?: unknown }).name : undefined;
       const want = brief.scenes[i]!.name;

@@ -235,6 +235,24 @@ describe("the art director's reply", () => {
     });
   });
 
+  it("forgives only length: a quote, backslash or line break after the cut point still refuses the plan", () => {
+    const head = "a ".repeat(100).trimEnd();
+    const cases: [string, string, RegExp][] = [
+      ["a quote", `${head} "x"`, /straight double quote or a backslash/],
+      ["a backslash", `${head} x\\y`, /straight double quote or a backslash/],
+      ["a line break", `${head} x\ny`, /control character or a line break/],
+    ];
+    for (const [, layout, problem] of cases) {
+      expect(layout.length).toBeGreaterThan(SHOT_TEXT_LIMITS.layout);
+      expect(layout.length).toBeLessThan(SHOT_TEXT_LIMITS.layout * 2);
+      // The cut alone would have left a clean line.
+      expect(cutToFit(layout, SHOT_TEXT_LIMITS.layout)).toMatch(/^(a )*a$/);
+      const read = readShots(reply([{ name: "why_it_matters", shot: { ...shot("title"), layout } }, both[1]]), brief);
+      expect(read).toMatchObject({ problem: expect.stringMatching(/^scenes\[0\]\.shot\.layout: /) });
+      expect("problem" in read && read.problem).toMatch(problem);
+    }
+  });
+
   it("leaves the brief validator strict: an over-long line in a brief is still refused", () => {
     const input = scenes(4, ["title", "comparison", "timeline", "recap-map"]) as { scenes: { shot: Record<string, unknown> }[] };
     input.scenes[0]!.shot.layout = words(203);
