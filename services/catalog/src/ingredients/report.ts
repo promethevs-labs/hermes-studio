@@ -9,6 +9,7 @@
 
 import { CRITIC_DIMENSIONS, type CriticDimension, type JobRunAttempt } from "@hermes/schema/shared";
 
+import { countFailures, type FailureCount } from "./failure";
 import type { IngredientMetrics } from "./scan";
 
 /**
@@ -53,6 +54,9 @@ export interface ReportVideo {
     wallSeconds: number | null;
     attempts: number | null;
     state: string;
+    /** Why a failed job failed (`job.error_kind`), and how many of its attempts reached the gate. Absent is read as null. */
+    errorKind?: string | null;
+    gatedAttempts?: number | null;
     /** The critic of the job's last judged attempt (`reportCritic`). Absent is read as null. */
     critic?: ReportCritic | null;
   } | null;
@@ -69,6 +73,9 @@ export interface ReportJob {
   turns: number | null;
   wallSeconds: number | null;
   reviewTags: string[];
+  /** Why a failed job failed (`job.error_kind`), and how many of its attempts reached the gate. Absent is read as null. */
+  errorKind?: string | null;
+  gatedAttempts?: number | null;
   /** The critic of the job's last judged attempt (`reportCritic`). Absent is read as null. */
   critic?: ReportCritic | null;
 }
@@ -110,10 +117,17 @@ export interface GroupRow {
   uses3dShare: number | null;
   accepted: number;
   discarded: number;
+  /** Every failed job, whatever the cause: `failedQuality` plus `failedInfra`. */
   failed: number;
+  /** Failed jobs whose work was refused or could not be made by the agent's own doing (`failure.ts`). */
+  failedQuality: number;
+  /** Failed jobs that never got a fair run: a login, the runner, a tool. Left out of the accept rate. */
+  failedInfra: number;
+  /** The failed jobs by `error_kind` and cause. */
+  failuresByKind: FailureCount[];
   /** Ratings of an older version of a video than the one it is now. */
   staleRatings: number;
-  /** accepted / (accepted + discarded + failed), null with no such job. */
+  /** accepted / (accepted + discarded + failedQuality), null with no such job. */
   acceptRate: number | null;
   discardTags: TagCount[];
   /** Money spent on jobs that are not the one behind a video as it is now: failed, discarded, cancelled, or replaced by a newer job. */
@@ -281,8 +295,17 @@ function groupRow(
   ];
   const accepted = states.filter((s) => s === ACCEPTED_STATE).length;
   const discarded = states.filter((s) => s === "discarded").length;
-  const failed = states.filter((s) => s === "failed").length;
-  const decided = accepted + discarded + failed;
+  const failures = countFailures(
+    [...withJob, ...jobs]
+      .filter((j) => j.state === "failed")
+      .map((j) => ({ errorKind: j.errorKind, turns: j.turns, costUsd: j.costUsd, gatedAttempts: j.gatedAttempts })),
+  );
+  const failedOf = (cause: FailureCount["cause"]) =>
+    failures.filter((f) => f.cause === cause).reduce((sum, f) => sum + f.count, 0);
+  const failedQuality = failedOf("quality");
+  const failedInfra = failedOf("infrastructure");
+  const failed = failedQuality + failedInfra;
+  const decided = accepted + discarded + failedQuality;
 
   return {
     key,
@@ -305,6 +328,9 @@ function groupRow(
     accepted,
     discarded,
     failed,
+    failedQuality,
+    failedInfra,
+    failuresByKind: failures,
     staleRatings: rated.filter((r) => r.stale).length,
     acceptRate: decided === 0 ? null : round(accepted / decided, 4),
     discardTags: tally(
@@ -530,7 +556,7 @@ function groupSection(title: string, rows: GroupRow[], keyLabel: string): string
   if (rows.length === 0) return [...out, "  No videos.", ""];
   out.push(
     ...table(
-      [keyLabel, "videos", "rated", "up", "down", "up share", "accepted", "discarded", "failed", "accept", "older"],
+      [keyLabel, "videos", "rated", "up", "down", "up %", "accepted", "discard", "quality", "infra", "accept", "older"],
       rows.map((r) => [
         clip(r.key, NAME_WIDTH),
         String(r.videos),
@@ -540,12 +566,14 @@ function groupSection(title: string, rows: GroupRow[], keyLabel: string): string
         pct(r.upShare),
         String(r.accepted),
         String(r.discarded),
-        String(r.failed),
+        String(r.failedQuality),
+        String(r.failedInfra),
         pct(r.acceptRate),
         String(r.staleRatings),
       ]),
     ),
     "  older: ratings of an older version of the video than it is now.",
+    "  quality, infra: failed jobs by cause. Infra failures are left out of the accept rate.",
     "",
     ...table(
       [keyLabel, "cost mean", "cost median", "turns", "wall median", "variety", "top 5", "fade", "3D", "critic"],
@@ -586,10 +614,12 @@ export function formatEvalReport(report: EvalReport): string {
       "Rated",
       `${t.rated} (up ${t.up}, down ${t.down}, up share ${pct(t.upShare)}; ${t.staleRatings} of an older version)`,
     ),
-    kv(
-      "Jobs",
-      `accepted ${t.accepted}, discarded ${t.discarded}, failed ${t.failed}, accept rate ${pct(t.acceptRate)}`,
-    ),
+    ...wrap(kv("Jobs", ""), [
+      `accepted ${t.accepted}`,
+      `discarded ${t.discarded}`,
+      `quality failures ${t.failedQuality}`,
+      `accept rate ${pct(t.acceptRate)}`,
+    ]),
     kv("Cost per video", `mean ${usd(t.costUsd.mean)}, median ${usd(t.costUsd.median)}`),
     kv("Wall time", `median ${secs(t.wallSeconds.median)}`),
     kv("Spent on other jobs", usd(t.wastedUsd)),
@@ -598,6 +628,17 @@ export function formatEvalReport(report: EvalReport): string {
       `variety ${dec(t.meanVariety, 2)}, top 5 helpers ${pct(t.meanHelperTop5Share)}, fade ${pct(t.meanFadeShare)}, 3D ${pct(t.uses3dShare)}`,
     ),
   );
+  if (t.failedInfra > 0) {
+    // A bad day shows here and does not move the rate. A kind nobody has
+    // classified is named, so it gets a place in `failure.ts`.
+    const infra = t.failuresByKind.filter((f) => f.cause === "infrastructure");
+    out.push(
+      ...wrap(
+        kv("Infrastructure failures", `${t.failedInfra}, left out of the accept rate: `),
+        infra.map((f) => `${f.kind} ${f.count}${f.classified ? "" : " (not classified yet)"}`),
+      ),
+    );
+  }
   if (t.critic.n > 0) {
     // One entry, wrapped at 100 columns as the tag lines are.
     const scores = CRITIC_DIMENSIONS.map(

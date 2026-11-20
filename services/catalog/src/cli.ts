@@ -195,7 +195,11 @@ Commands:
                            accept rate, cost, wall time and how varied the
                            videos look (helper top five share, fade share,
                            variety), then the corpus's most called names.
-                           Read-only. --owner ID (default: local).
+                           The accept rate is accepted over accepted,
+                           discarded and quality failures: a job that never
+                           got a fair run (an expired login, a runner error)
+                           is counted as an infrastructure failure and left
+                           out. Read-only. --owner ID (default: local).
   draft <verb>             The studio's planner conversations: upsert --file
                            FILE (the runner's draft.json), show --id ID, ls
                            [--state S] [--limit N], delete --id ID (only when
