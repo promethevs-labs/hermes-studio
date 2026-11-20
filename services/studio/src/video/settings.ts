@@ -73,6 +73,7 @@ export function buildVideoSettings(input: VideoSettingsInput): VideoAgentSetting
     rule("Edit", paths.sceneFile),
     rule("Read", paths.topicDir, "/**"),
     rule("Read", paths.lib, "/**"),
+    rule("Read", paths.shotsGuide),
     rule("Read", paths.out, "/**"),
     ...(input.source === undefined ? [] : [rule("Read", input.source)]),
   ];

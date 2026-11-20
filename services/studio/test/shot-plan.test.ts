@@ -250,7 +250,7 @@ describe("the video agent", () => {
   it("finds the shot types in every tool's manual", () => {
     const section = shotTypesSection();
     for (const type of SHOT_TYPES) expect(section).toContain(`- \`${type}\` (${SHOT_TYPE_LABELS[type]}): ${SHOT_TYPE_USE[type]}.`);
-    expect(manualText("/job/manimkc", "")).toContain(section);
+    expect(manualText("/job/manimkc", "", { shotsGuide: "/job/checkout/docs/SHOTS.md" })).toContain(section);
     expect(remotionkcManualText("/job/remotionkc", "", paths)).toContain(section);
     expect(revideokcManualText("/job/revideokc", "", paths)).toContain(section);
   });
