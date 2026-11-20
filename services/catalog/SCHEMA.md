@@ -337,11 +337,51 @@ What the numbers mean:
 
 | Name | Meaning |
 | --- | --- |
-| Accept rate | Accepted jobs over accepted, discarded and failed ones. A cancelled job is left out. |
+| Accept rate | Accepted jobs over accepted, discarded and quality-failed ones. A cancelled job and an infrastructure failure are left out (see "Failure causes" below). |
+| Quality, infra | A group's failed jobs split by cause. The JSON keeps `failed` (the total) and adds `failedQuality`, `failedInfra` and `failuresByKind` (`kind`, `cause`, `count`, `classified`). |
 | Helper top five share | Of the calls a video makes to its tool's library helpers, the share that go to its five most-called ones. 100% means five helpers do all the work. |
 | Fade share | Fade in and fade out calls over every animation call. High means the video mostly fades things in and out. |
 | Variety | How evenly the calls spread over the distinct helpers and animations the video uses, from 0 (one name does it all) to 1 (every name equally often). Empty with fewer than two names. |
 | Critic | A vision critic's scores from 1 to 5, read from each job's run: the last attempt that has a critic, so a retry the critic did not judge leaves the earlier verdict standing. The column is the mean of the five dimensions, averaged over the jobs in the group that have a critic, both a video's job and the other finished jobs; `-` when none has one. The Totals line, shown only when some job has a critic, adds each dimension's mean. A rating that names another job does not move a critic: it stays with its own job's model and prompt version. |
+
+**Failure causes.** A failed job fails about the work or about the run, and
+only the first says anything about the agent. The accept rate on the owner's
+data once read 8% (3 accepted, 33 failed) when 32 of the failures came from
+one day of an expired login (19 `agent` with "Failed to authenticate: OAuth
+session expired", 13 `agent` with "the agent's session ended in an error
+before it did anything") and one was the gate refusing the work. The report now
+classifies each failed job by its `error_kind` with `classifyFailure` in
+`src/ingredients/failure.ts`, where each kind carries a one-line reason:
+
+| `error_kind` | Cause | Why |
+| --- | --- | --- |
+| `gate` | quality | The agent ran up to three attempts and the gate refused the result, or it left nothing to judge. |
+| `wrote-outside` | quality | The agent left files dirty outside its workspace, and the work is refused for it. |
+| `agent` | by the job's numbers | See below. |
+| `timeout` | infrastructure | The runner stopped a hung session or a job past its ceiling, so nothing judged the work. |
+| `spawn` | infrastructure | The agent process never started. |
+| `toolchain` | infrastructure | The video tool's own commands cannot run on this machine. |
+| `internal` | infrastructure | The runner itself threw. |
+| `interrupted` | infrastructure | The runner died mid-job. |
+| `cancelled` | infrastructure | Stopped on request before it could be judged. |
+| `not-claimed` | infrastructure | Another runner held the job, so no agent started. |
+| none, or a kind not listed | infrastructure | Unknown until someone classifies it. The report names it (`... (not classified yet)`) on the Infrastructure failures line. |
+
+`agent` is the one kind that holds both. Both runners assign it when the
+agent's first request fails and the workspace is unchanged (a refused login, a
+model the account cannot use, an exhausted quota), which is a job that never
+ran. But the check reads the last attempt only, so a job whose first attempt
+did real work and failed the gate, and whose second attempt then met a refused
+login, also ends as `agent`. The report tells them apart from the row, not the
+error text: an `agent` failure is infrastructure when the job has no turns
+(null or 0), no cost (null or 0) and no recorded attempt that reached the gate
+(`job.run.attempts[].gate`). Any one of those makes it quality, because the
+agent ran.
+
+Each group row shows `quality` and `infra` counts. The Totals section adds one
+line, Infrastructure failures, with the count by kind when there are any, so a
+bad day is visible and does not move the rate. "Spent on other jobs" still
+counts every job's cost.
 
 The three look numbers are averaged over videos that have a scan. Variety and
 the top five share are cheap signs of videos that look alike; none of them says

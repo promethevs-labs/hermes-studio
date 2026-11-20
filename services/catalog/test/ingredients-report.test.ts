@@ -106,7 +106,7 @@ const sample: ReportVideo[] = [
 describe("evalReport", () => {
   const r = evalReport(sample, [
     extra({ state: "discarded", reviewTags: ["too busy", "pacing"], costUsd: 2 }),
-    extra({ state: "failed", costUsd: 1 }),
+    extra({ state: "failed", costUsd: 1, errorKind: "gate" }),
     extra({ state: "cancelled", costUsd: 4 }),
     extra({ tool: "remotionkc", model: "sonnet", manualHash: null, state: "discarded", reviewTags: ["too busy"] }),
   ]);
@@ -278,6 +278,166 @@ describe("evalReport: where a rating is counted", () => {
   });
 });
 
+describe("failure causes in the accept rate", () => {
+  /** A failed job that never ran: the shape of an expired login. */
+  const expiredLogin = () => extra({ state: "failed", errorKind: "agent", turns: null, costUsd: null });
+  const gateFailure = () => extra({ state: "failed", errorKind: "gate", turns: 12, costUsd: 3 });
+
+  it("leaves infrastructure failures out of the rate and keeps the total", () => {
+    const r = evalReport(
+      [],
+      [
+        extra({ state: "accepted" }),
+        extra({ state: "discarded" }),
+        ...Array.from({ length: 5 }, expiredLogin),
+        extra({ state: "failed", errorKind: "timeout" }),
+        gateFailure(),
+      ],
+    );
+    const t = r.totals;
+    expect([t.accepted, t.discarded, t.failed, t.failedQuality, t.failedInfra]).toEqual([1, 1, 7, 1, 6]);
+    expect(t.acceptRate).toBeCloseTo(1 / 3, 3);
+    expect(t.failuresByKind).toEqual([
+      { kind: "agent", cause: "infrastructure", count: 5, classified: true },
+      { kind: "gate", cause: "quality", count: 1, classified: true },
+      { kind: "timeout", cause: "infrastructure", count: 1, classified: true },
+    ]);
+  });
+
+  it("figures a group with only infrastructure failures from its accepted and discarded jobs", () => {
+    const r = evalReport(
+      [],
+      [
+        extra({ tool: "tldrawkc", state: "accepted" }),
+        extra({ tool: "tldrawkc", state: "discarded" }),
+        extra({ tool: "tldrawkc", state: "failed", errorKind: "internal" }),
+        extra({ tool: "remotionkc", state: "failed", errorKind: "toolchain" }),
+      ],
+    );
+    expect(r.byTool.find((g) => g.key === "tldrawkc")!.acceptRate).toBe(0.5);
+    const only = r.byTool.find((g) => g.key === "remotionkc")!;
+    expect([only.failed, only.failedQuality, only.failedInfra]).toEqual([1, 0, 1]);
+    // Nothing accepted, discarded or failed on quality: no rate, not 0%.
+    expect(only.acceptRate).toBeNull();
+  });
+
+  it("gives 75% for the owner's real shape: 3 accepted, 1 gate failure, 32 agent failures with no turns", () => {
+    const r = evalReport(
+      [],
+      [
+        ...Array.from({ length: 3 }, () => extra({ tool: "tldrawkc", state: "accepted" })),
+        extra({ tool: "tldrawkc", state: "failed", errorKind: "gate", turns: 14, costUsd: 2.1 }),
+        ...Array.from({ length: 19 }, () => extra({ tool: "tldrawkc", state: "failed", errorKind: "agent", turns: null, costUsd: null })),
+        ...Array.from({ length: 13 }, () => extra({ tool: "tldrawkc", state: "failed", errorKind: "agent", turns: 0, costUsd: 0 })),
+      ],
+    );
+    const t = r.totals;
+    expect([t.accepted, t.failed, t.failedQuality, t.failedInfra]).toEqual([3, 33, 1, 32]);
+    expect(t.acceptRate).toBe(0.75);
+    expect(r.byTool[0]!.acceptRate).toBe(0.75);
+    expect(r.byModel[0]!.acceptRate).toBe(0.75);
+    expect(r.byManual[0]!.acceptRate).toBe(0.75);
+  });
+
+  it("counts a failed job behind a video the same way", () => {
+    const r = evalReport([
+      video({ assetId: "a", job: job({ state: "failed", errorKind: "internal", turns: null, costUsd: null }) }),
+      video({ assetId: "b", job: job({ state: "failed", errorKind: "gate" }) }),
+    ]);
+    expect([r.totals.failedQuality, r.totals.failedInfra, r.totals.acceptRate]).toEqual([1, 1, 0]);
+  });
+
+  it("still spends on every job: the other-jobs figure counts infrastructure failures", () => {
+    const r = evalReport([], [expiredLogin(), extra({ state: "failed", errorKind: "toolchain", costUsd: 0.5 })]);
+    expect(r.totals.wastedUsd).toBe(0.5);
+    const paid = evalReport([], [extra({ state: "failed", errorKind: "agent", turns: null, costUsd: 0.25 })]);
+    // It cost money, so it did work: quality, and it counts in the rate.
+    expect([paid.totals.failedQuality, paid.totals.wastedUsd]).toEqual([1, 0.25]);
+  });
+
+  it("lists an unknown kind by name in the report, and counts it as infrastructure", () => {
+    const r = evalReport([], [extra({ state: "accepted" }), extra({ state: "failed", errorKind: "meteor" }), extra({ state: "failed", errorKind: null })]);
+    expect(r.totals.failedInfra).toBe(2);
+    expect(r.totals.acceptRate).toBe(1);
+    expect(r.totals.failuresByKind.map((f) => [f.kind, f.classified])).toEqual([
+      ["(none)", false],
+      ["meteor", false],
+    ]);
+    const text = formatEvalReport(r);
+    expect(text).toContain("meteor 1 (not classified yet)");
+    expect(text).toContain("(none) 1 (not classified yet)");
+  });
+
+  it("keeps the old JSON keys and adds the new ones", () => {
+    const g = JSON.parse(JSON.stringify(evalReport([], [extra({ state: "failed", errorKind: "gate" })]))).totals;
+    for (const key of ["accepted", "discarded", "failed", "acceptRate", "wastedUsd", "staleRatings", "discardTags"]) {
+      expect(g).toHaveProperty(key);
+    }
+    expect(g.failed).toBe(1);
+    expect(g.failedQuality).toBe(1);
+    expect(g.failedInfra).toBe(0);
+    expect(g.failuresByKind).toEqual([{ kind: "gate", cause: "quality", count: 1, classified: true }]);
+  });
+
+  it("shows the causes in the text, with the infrastructure line only when there is one", () => {
+    const without = formatEvalReport(evalReport([], [gateFailure()]));
+    expect(without).not.toContain("Infrastructure failures");
+    const withInfra = formatEvalReport(
+      evalReport([], [extra({ state: "accepted" }), gateFailure(), ...Array.from({ length: 32 }, expiredLogin)]),
+    );
+    expect(withInfra).toContain("quality failures 1, accept rate 50%");
+    expect(withInfra).toMatch(/Infrastructure failures {5}32, left out of the accept rate: agent 32/);
+  });
+
+  it("matches the layout of the owner's real shape", () => {
+    const text = formatEvalReport(
+      evalReport(
+        [],
+        [
+          ...Array.from({ length: 3 }, () => extra({ tool: "tldrawkc", state: "accepted" })),
+          extra({ tool: "tldrawkc", state: "failed", errorKind: "gate", turns: 14, costUsd: 2.1 }),
+          ...Array.from({ length: 32 }, () => ({ ...expiredLogin(), tool: "tldrawkc" })),
+        ],
+      ),
+    );
+    expect(text.split("\n\nBy model")[0]).toMatchInlineSnapshot(`
+      "Totals
+
+        Videos                      0
+        Rated                       0 (up 0, down 0, up share -; 0 of an older version)
+        Jobs                        accepted 3, discarded 0, quality failures 1, accept rate 75%
+        Cost per video              mean -, median -
+        Wall time                   median -
+        Spent on other jobs         $8.10
+        Look                        variety -, top 5 helpers -, fade -, 3D -
+        Infrastructure failures     32, left out of the accept rate: agent 32
+
+      By tool
+
+      Tool      videos  rated  up  down  up %  accepted  discard  quality  infra  accept  older
+      --------  ------  -----  --  ----  ----  --------  -------  -------  -----  ------  -----
+      tldrawkc       0      0   0     0     -         3        0        1     32     75%      0
+        older: ratings of an older version of the video than it is now.
+        quality, infra: failed jobs by cause. Infra failures are left out of the accept rate.
+
+      Tool      cost mean  cost median  turns  wall median  variety  top 5  fade  3D  critic
+      --------  ---------  -----------  -----  -----------  -------  -----  ----  --  ------
+      tldrawkc          -            -      -            -        -      -     -   -       -"
+    `);
+  });
+
+  it("fits 100 columns with the longest group name", () => {
+    const long = "a-model-name-that-is-long-enough-to-be-clipped";
+    const text = formatEvalReport(
+      evalReport(
+        [video({ assetId: "a", job: job({ model: long, costUsd: 1234.5 }), rating: { value: 1, tags: [] } })],
+        [extra({ model: long, state: "failed", errorKind: "agent", turns: null, costUsd: null })],
+      ),
+    );
+    for (const line of text.split("\n")) expect(line.length).toBeLessThanOrEqual(100);
+  });
+});
+
 describe("a job's critic", () => {
   const scores = (accuracy: number, layout: number, relevance: number, variety: number, pacing: number) => ({
     accuracy,
@@ -371,7 +531,7 @@ describe("a job's critic", () => {
 describe("formatEvalReport", () => {
   const report = evalReport(sample, [
     extra({ reviewTags: ["too busy"] }),
-    extra({ state: "failed" }),
+    extra({ state: "failed", errorKind: "gate" }),
   ]);
   const text = formatEvalReport(report);
 
@@ -406,7 +566,7 @@ describe("formatEvalReport", () => {
 
         Videos                      4
         Rated                       2 (up 1, down 1, up share 50%; 0 of an older version)
-        Jobs                        accepted 3, discarded 1, failed 1, accept rate 60%
+        Jobs                        accepted 3, discarded 1, quality failures 1, accept rate 60%
         Cost per video              mean $2.00, median $2.00
         Wall time                   median 15.0m
         Spent on other jobs         $4.00
@@ -417,11 +577,12 @@ describe("formatEvalReport", () => {
 
       By tool
 
-      Tool        videos  rated  up  down  up share  accepted  discarded  failed  accept  older
-      ----------  ------  -----  --  ----  --------  --------  ---------  ------  ------  -----
-      manimkc          2      2   1     1       50%         2          1       1     50%      0
-      remotionkc       2      0   0     0         -         1          0       0    100%      0
+      Tool        videos  rated  up  down  up %  accepted  discard  quality  infra  accept  older
+      ----------  ------  -----  --  ----  ----  --------  -------  -------  -----  ------  -----
+      manimkc          2      2   1     1   50%         2        1        1      0     50%      0
+      remotionkc       2      0   0     0     -         1        0        0      0    100%      0
         older: ratings of an older version of the video than it is now.
+        quality, infra: failed jobs by cause. Infra failures are left out of the accept rate.
 
       Tool        cost mean  cost median  turns  wall median  variety  top 5  fade   3D  critic
       ----------  ---------  -----------  -----  -----------  -------  -----  ----  ---  ------
@@ -433,12 +594,13 @@ describe("formatEvalReport", () => {
 
       By model
 
-      Model     videos  rated  up  down  up share  accepted  discarded  failed  accept  older
-      --------  ------  -----  --  ----  --------  --------  ---------  ------  ------  -----
-      (no job)       1      0   0     0         -         0          0       0       -      0
-      opus           2      2   1     1       50%         2          1       1     50%      0
-      sonnet         1      0   0     0         -         1          0       0    100%      0
+      Model     videos  rated  up  down  up %  accepted  discard  quality  infra  accept  older
+      --------  ------  -----  --  ----  ----  --------  -------  -------  -----  ------  -----
+      (no job)       1      0   0     0     -         0        0        0      0       -      0
+      opus           2      2   1     1   50%         2        1        1      0     50%      0
+      sonnet         1      0   0     0     -         1        0        0      0    100%      0
         older: ratings of an older version of the video than it is now.
+        quality, infra: failed jobs by cause. Infra failures are left out of the accept rate.
 
       Model     cost mean  cost median  turns  wall median  variety  top 5  fade   3D  critic
       --------  ---------  -----------  -----  -----------  -------  -----  ----  ---  ------
@@ -451,12 +613,13 @@ describe("formatEvalReport", () => {
 
       By prompt version
 
-      Manual    videos  rated  up  down  up share  accepted  discarded  failed  accept  older
-      --------  ------  -----  --  ----  --------  --------  ---------  ------  ------  -----
-      (no job)       1      0   0     0         -         0          0       0       -      0
-      (none)         1      0   0     0         -         1          0       0    100%      0
-      abcdef01       2      2   1     1       50%         2          1       1     50%      0
+      Manual    videos  rated  up  down  up %  accepted  discard  quality  infra  accept  older
+      --------  ------  -----  --  ----  ----  --------  -------  -------  -----  ------  -----
+      (no job)       1      0   0     0     -         0        0        0      0       -      0
+      (none)         1      0   0     0     -         1        0        0      0    100%      0
+      abcdef01       2      2   1     1   50%         2        1        1      0     50%      0
         older: ratings of an older version of the video than it is now.
+        quality, infra: failed jobs by cause. Infra failures are left out of the accept rate.
 
       Manual    cost mean  cost median  turns  wall median  variety  top 5  fade   3D  critic
       --------  ---------  -----------  -----  -----------  -------  -----  ----  ---  ------

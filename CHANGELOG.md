@@ -7,6 +7,25 @@ This project is continuously deployed and not versioned; entries are grouped by 
 
 ## [Unreleased]
 
+### Fixed
+
+- **`catalog eval report` no longer counts an expired login as the agent's
+  failure.** The accept rate was accepted over accepted, discarded and failed,
+  so one day of "Failed to authenticate: OAuth session expired" took the
+  diagram tool to 8% (3 accepted, 33 failed) when one failure was the gate
+  refusing the work. Each failed job is now classified by its `error_kind`
+  (`classifyFailure` in `services/catalog/src/ingredients/failure.ts`): `gate`
+  and `wrote-outside` are quality failures; `timeout`, `spawn`, `toolchain`,
+  `internal`, `interrupted`, `cancelled`, `not-claimed`, a missing kind and an
+  unknown one are infrastructure; `agent` is infrastructure when the job had
+  no turns, no cost and no attempt at the gate, and quality otherwise. The
+  rate is accepted over accepted, discarded and quality failures (75% for the
+  shape above). Group rows show `quality` and `infra` counts, the Totals gain
+  an Infrastructure failures line by kind, and the JSON keeps `failed` and adds
+  `failedQuality`, `failedInfra` and `failuresByKind`. The table's `up share`
+  and `discarded` headers are now `up %` and `discard` to stay inside 100
+  columns.
+
 ### Removed
 
 - **The macOS Swift desktop shell is gone.** `apps/desktop` (the SwiftPM
