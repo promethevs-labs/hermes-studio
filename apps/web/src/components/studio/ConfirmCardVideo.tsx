@@ -265,12 +265,18 @@ function Storyboard({ brief, charsPerSecond }: { brief: VideoBrief; charsPerSeco
               summary={
                 <>
                   <span className="w-5 shrink-0 text-[12px] tabular-nums text-text3">{at + 1}</span>
-                  <span className="min-w-0 flex-1 text-[14px] font-medium text-text">{chapterTitle(scene.name)}</span>
-                  {scene.shot !== undefined && (
-                    <Chip size="sm" className="shrink-0">
-                      {shotLabel(scene.shot)}
-                    </Chip>
-                  )}
+                  {/* The title and the shot chip share one wrapping box: side by
+                      side on a wide card, the chip on its own line under the
+                      title on a phone. The title keeps an 8rem floor (`basis-32`)
+                      so it never breaks one word a line beside the chip. */}
+                  <span data-scene-head className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className="min-w-0 grow basis-32 text-[14px] font-medium text-text">{chapterTitle(scene.name)}</span>
+                    {scene.shot !== undefined && (
+                      <Chip size="sm" className="max-w-full" title={shotLabel(scene.shot)}>
+                        <span className="truncate">{shotLabel(scene.shot)}</span>
+                      </Chip>
+                    )}
+                  </span>
                   <span className="shrink-0 text-[12px] tabular-nums text-text2">
                     {beatCount(scene.beats.length)} · {shortLength(sceneSeconds(scene, narrated, charsPerSecond))}
                   </span>
@@ -278,7 +284,7 @@ function Storyboard({ brief, charsPerSecond }: { brief: VideoBrief; charsPerSeco
                     name="next"
                     size={16}
                     className={cx(
-                      "text-text3 transition-transform duration-300 ease-soft motion-reduce:transition-none",
+                      "shrink-0 text-text3 transition-transform duration-300 ease-soft motion-reduce:transition-none",
                       expanded && "rotate-90",
                     )}
                   />

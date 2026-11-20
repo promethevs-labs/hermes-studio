@@ -556,6 +556,31 @@ describe("the video card's shot plan", () => {
     expect(card.textContent).not.toContain("No shot plan");
   });
 
+  it("wraps the title and the chip together, so on a phone the chip drops under the title (#722)", async () => {
+    const long: VideoBrief = {
+      ...planned,
+      scenes: [{ name: "where_the_bytes_live", beats: VIDEO.scenes[0]!.beats, shot: { ...SHOTS[0], type: "array-or-memory" } }, planned.scenes[1]!],
+    };
+    const view = pair();
+    view.transcript[1] = { ...view.transcript[1]!, briefs: [view.transcript[1]!.briefs![0]!, { kind: "video", brief: long, requestSeq: 1 }] };
+    view.slots!.video = slot({ brief: long, briefSeq: 2, requestSeq: 1, state: "briefed" }) as never;
+    const host = await mount(view);
+    const row = host.querySelector('[data-card="video"] [aria-label="Storyboard"] > li button') as HTMLElement;
+    expect(row.className).toContain("min-h-11");
+    const head = row.querySelector("[data-scene-head]") as HTMLElement;
+    expect(head.className.split(" ")).toEqual(expect.arrayContaining(["flex", "min-w-0", "flex-1", "flex-wrap"]));
+    const [title, chip] = [...head.children] as HTMLElement[];
+    expect(title!.textContent).toBe("Where the bytes live");
+    // A floor, so the title never breaks a word a line beside the chip.
+    expect(title!.className).toContain("basis-32");
+    expect(chip!.textContent).toBe("Array or memory view");
+    expect(chip!.className).toContain("max-w-full");
+    // The length and the chevron stay on the right, outside the wrapping box.
+    const rest = [...row.children].slice(2) as HTMLElement[];
+    expect(rest[0]!.textContent).toMatch(/beats? · /);
+    expect(rest.every((node) => node.getAttribute("class")?.includes("shrink-0"))).toBe(true);
+  });
+
   it("says the video agent will choose the pictures when a live brief has no plan", async () => {
     const host = await mount(pair());
     const card = host.querySelector('[data-card="video"]') as HTMLElement;
