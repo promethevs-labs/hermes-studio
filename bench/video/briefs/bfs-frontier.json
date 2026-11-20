@@ -1,0 +1,123 @@
+{
+  "id": "bfs-frontier",
+  "needs": "A graph traversal: a frontier spreading outward from a start node, ring by ring.",
+  "brief": {
+    "title": "Breadth first search, one ring at a time",
+    "topic": "algorithms-and-data-structures",
+    "slug": "bfs-frontier",
+    "mode": "new",
+    "idea": "Breadth first search explores a graph in rings around the start, keeping a queue of the frontier, so it reaches every node by the fewest possible edges.",
+    "audience": "familiar",
+    "targetSeconds": 68,
+    "voice": "af_heart",
+    "scenes": [
+      {
+        "name": "seven_towns",
+        "beats": [
+          {
+            "say": "Here are seven towns joined by roads. We start at A and want the fewest roads to every other town.",
+            "show": "Seven circles labelled A to G appear, joined by seven lines: A to B and C, B to D and E, C to F, and E and F both to G.",
+            "labels": [
+              "Start: A"
+            ]
+          },
+          {
+            "say": "Breadth first search visits the towns in rings: everything one road away, then two roads, then three.",
+            "show": "Three rings centred on A are drawn faintly, then removed.",
+            "labels": [
+              "1 road",
+              "2 roads",
+              "3 roads"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "the_queue",
+        "beats": [
+          {
+            "say": "It keeps a queue, the frontier, of towns found but not yet explored. At first it holds only A.",
+            "show": "A queue appears below the map holding A.",
+            "labels": [
+              "queue: A"
+            ]
+          },
+          {
+            "say": "Take A from the front, and add its neighbours, B and C, to the back. They are one road away.",
+            "show": "A leaves the queue and is marked done; B and C light up on the map and join the queue.",
+            "labels": [
+              "queue: B C",
+              "distance 1"
+            ]
+          },
+          {
+            "say": "Take B and add D and E. Take C and add F. All three are two roads from A.",
+            "show": "B and C are marked done in turn; D, E and F light up and join the queue.",
+            "labels": [
+              "queue: D E F",
+              "distance 2"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "the_last_ring",
+        "beats": [
+          {
+            "say": "D has no new neighbours. E leads to G, which joins the queue at distance three.",
+            "show": "D is marked done with nothing added; E is taken, and G lights up and joins the queue.",
+            "labels": [
+              "queue: F G",
+              "distance 3"
+            ]
+          },
+          {
+            "say": "When F is explored, G has already been found, so it is not added a second time.",
+            "show": "F is taken; its road to G is highlighted, and G stays in the queue once.",
+            "labels": [
+              "already found"
+            ]
+          },
+          {
+            "say": "Last, G is taken from the queue. It has no towns left to find, and the queue is empty.",
+            "show": "G is marked done and the queue below the map is empty.",
+            "labels": [
+              "queue: empty"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "distances_on_the_map",
+        "beats": [
+          {
+            "say": "Every town now carries its distance from A: zero, one, two or three.",
+            "show": "Each circle shows its number: A 0, B and C 1, D, E and F 2, G 3.",
+            "labels": [
+              "0",
+              "1",
+              "2",
+              "3"
+            ]
+          },
+          {
+            "say": "Because the frontier grows one ring at a time, each number is the fewest roads from A.",
+            "show": "The roads that first reached each town stay bright, forming a tree out of A, while the other roads dim.",
+            "labels": [
+              "fewest roads"
+            ]
+          },
+          {
+            "say": "Depth first search, diving down one road, could reach F by way of G, four roads instead of two.",
+            "show": "A second pass dives A, B, E, G, F, and F is labelled 4 beside its true distance of 2.",
+            "labels": [
+              "depth first: F = 4",
+              "breadth first: F = 2"
+            ]
+          }
+        ]
+      }
+    ],
+    "concepts": []
+  }
+}

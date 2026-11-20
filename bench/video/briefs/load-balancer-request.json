@@ -1,0 +1,125 @@
+{
+  "id": "load-balancer-request",
+  "needs": "A system diagram with a request moving through it: client, load balancer, two servers, database.",
+  "brief": {
+    "title": "One request through a load balancer",
+    "topic": "computer-networks",
+    "slug": "load-balancer-request",
+    "mode": "new",
+    "idea": "A load balancer spreads requests across identical servers and stops sending to one that fails its health check, while every server uses the same database.",
+    "audience": "familiar",
+    "targetSeconds": 68,
+    "voice": "af_heart",
+    "scenes": [
+      {
+        "name": "five_machines",
+        "beats": [
+          {
+            "say": "A phone opens a shopping app. Its request passes through three other machines before an answer comes back.",
+            "show": "Five boxes appear: a phone, a load balancer, two servers named A and B, and a database.",
+            "labels": [
+              "Load balancer",
+              "Server A",
+              "Server B",
+              "Database"
+            ]
+          },
+          {
+            "say": "The phone knows only one address, the load balancer. It never talks to a server directly.",
+            "show": "A line connects the phone to the load balancer only.",
+            "labels": [
+              "shop.example.com"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "the_first_request",
+        "beats": [
+          {
+            "say": "The first request reaches the load balancer, which passes it to server A.",
+            "show": "A dot travels from the phone to the load balancer, then on to server A.",
+            "labels": [
+              "request 1 → A"
+            ]
+          },
+          {
+            "say": "Server A asks the database for the cart, gets three items back, and builds the page.",
+            "show": "The dot goes from server A to the database and returns to A carrying a note reading 3 items.",
+            "labels": [
+              "cart: 3 items"
+            ]
+          },
+          {
+            "say": "The answer retraces the path, back through the load balancer to the phone, in about eighty milliseconds.",
+            "show": "The dot travels from server A back through the load balancer to the phone, and a timer reads 80 ms.",
+            "labels": [
+              "80 ms"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "servers_take_turns",
+        "beats": [
+          {
+            "say": "The next request goes to server B, the one after that to A again, taking turns.",
+            "show": "Requests 2 and 3 travel from the phone; one is routed to B, the next to A.",
+            "labels": [
+              "request 2 → B",
+              "request 3 → A"
+            ]
+          },
+          {
+            "say": "Both servers use the same database, so whichever one answers, the cart is the same.",
+            "show": "The lines from both servers to the single database are highlighted together.",
+            "labels": [
+              "one database"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "server_b_goes_down",
+        "beats": [
+          {
+            "say": "Now server B stops answering its health checks, and the load balancer marks it down.",
+            "show": "Server B is crossed out, and a check sent from the load balancer to B gets no reply.",
+            "labels": [
+              "B: down"
+            ]
+          },
+          {
+            "say": "Every request now goes to A, and the phone never notices that anything changed.",
+            "show": "Requests 4, 5 and 6 all travel to server A while B stays crossed out.",
+            "labels": [
+              "4, 5, 6 → A"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "one_address_two_servers",
+        "beats": [
+          {
+            "say": "One address in front, servers that take turns behind it, and one database they share.",
+            "show": "The whole path from phone to database is shown at once, with both servers and the shared database highlighted.",
+            "labels": [
+              "one address",
+              "two servers",
+              "one database"
+            ]
+          },
+          {
+            "say": "That is how a site keeps answering while one of its machines is broken or being replaced.",
+            "show": "Server B returns, its cross removed, and requests are shared between A and B again.",
+            "labels": [
+              "B: back"
+            ]
+          }
+        ]
+      }
+    ],
+    "concepts": []
+  }
+}

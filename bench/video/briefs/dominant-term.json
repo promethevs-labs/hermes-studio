@@ -1,0 +1,117 @@
+{
+  "id": "dominant-term",
+  "needs": "An equation with a term that stops mattering: one part of a sum shrinks to nothing as n grows.",
+  "brief": {
+    "title": "The term that stops mattering",
+    "topic": "algorithms-and-data-structures",
+    "slug": "dominant-term",
+    "mode": "new",
+    "idea": "In a cost like n squared plus one hundred n, the smaller term dominates for tiny inputs but becomes a rounding error as n grows, which is why we write just n squared.",
+    "audience": "familiar",
+    "targetSeconds": 66,
+    "voice": "af_heart",
+    "scenes": [
+      {
+        "name": "a_cost_in_two_parts",
+        "beats": [
+          {
+            "say": "Suppose a program takes n squared plus one hundred n steps to handle an input of size n.",
+            "show": "The expression n² + 100n appears, with its two terms in separate boxes.",
+            "labels": [
+              "n² + 100n"
+            ]
+          },
+          {
+            "say": "Which part matters more? It depends on n, so try a few sizes and compare the two parts.",
+            "show": "A table appears with columns for n, n², 100n and the share of the total that 100n makes.",
+            "labels": [
+              "n²",
+              "100n",
+              "share"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "small_inputs",
+        "beats": [
+          {
+            "say": "At n equals ten, n squared is one hundred, but one hundred n is a thousand: ninety one percent of the total.",
+            "show": "The first row fills in: 10, 100, 1,000 and 91%; the 100n box grows larger than the n² box.",
+            "labels": [
+              "n = 10",
+              "91%"
+            ]
+          },
+          {
+            "say": "At n equals one hundred, both parts are ten thousand, so they split the cost evenly between them.",
+            "show": "The second row fills in: 100, 10,000, 10,000 and 50%; the two boxes are the same size.",
+            "labels": [
+              "n = 100",
+              "50%"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "large_inputs",
+        "beats": [
+          {
+            "say": "At a thousand, n squared is a million and one hundred n is a hundred thousand: nine percent.",
+            "show": "The third row fills in: 1,000, 1,000,000, 100,000 and 9%; the 100n box shrinks.",
+            "labels": [
+              "n = 1,000",
+              "9%"
+            ]
+          },
+          {
+            "say": "At a hundred thousand it is a tenth of one percent. The second term has all but vanished.",
+            "show": "The fourth row fills in with 0.1%, and the 100n box shrinks to a sliver beside n².",
+            "labels": [
+              "n = 100,000",
+              "0.1%"
+            ]
+          },
+          {
+            "say": "Each time n grows ten times, n squared grows a hundred times, but one hundred n grows only ten.",
+            "show": "Arrows between the rows mark n² growing by 100 times and 100n by 10 times.",
+            "labels": [
+              "× 100",
+              "× 10"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "just_n_squared",
+        "beats": [
+          {
+            "say": "So for large inputs we keep only the term that grows fastest, and write the cost as n squared.",
+            "show": "The + 100n part of the expression is crossed out, leaving n² alone.",
+            "labels": [
+              "O(n²)"
+            ]
+          },
+          {
+            "say": "The smaller term was never wrong. It just stops mattering once n is big enough.",
+            "show": "The four shares are shown again in a column, shrinking: 91%, 50%, 9%, 0.1%.",
+            "labels": [
+              "91%",
+              "50%",
+              "9%",
+              "0.1%"
+            ]
+          },
+          {
+            "say": "The same reasoning drops a constant too: twice n squared grows at the same rate as n squared.",
+            "show": "A second expression, 2n², appears and is written as O(n²) as well.",
+            "labels": [
+              "2n² → O(n²)"
+            ]
+          }
+        ]
+      }
+    ],
+    "concepts": []
+  }
+}

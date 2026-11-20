@@ -1,0 +1,118 @@
+{
+  "id": "growth-rates-chart",
+  "needs": "Real numbers on a chart: three curves plotted from computed values as the input grows.",
+  "brief": {
+    "title": "n, n log n and n squared, plotted",
+    "topic": "algorithms-and-data-structures",
+    "slug": "growth-rates-chart",
+    "mode": "new",
+    "idea": "As the input grows, n squared pulls away from n log n and n, so a quadratic algorithm that is fine for a hundred items is hopeless for a million.",
+    "audience": "familiar",
+    "targetSeconds": 66,
+    "voice": "af_heart",
+    "scenes": [
+      {
+        "name": "three_counts_at_ten",
+        "beats": [
+          {
+            "say": "Three ways to sort a list take n steps, n log n steps, and n squared steps. Start with ten items.",
+            "show": "A table appears with three rows, n, n log n and n squared, and one column for n = 10.",
+            "labels": [
+              "n = 10"
+            ]
+          },
+          {
+            "say": "That is ten, about thirty three, and one hundred steps. At this size the difference hardly matters at all.",
+            "show": "The column fills in: 10, 33 and 100.",
+            "labels": [
+              "10",
+              "33",
+              "100"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "the_curves_part",
+        "beats": [
+          {
+            "say": "At a hundred items it is one hundred, about six hundred and sixty four, and ten thousand.",
+            "show": "A second column for n = 100 fills in: 100, 664 and 10,000.",
+            "labels": [
+              "100",
+              "664",
+              "10,000"
+            ]
+          },
+          {
+            "say": "Plot all three, and the n squared curve already climbs far above the other two.",
+            "show": "A chart appears with n along the bottom up to 100 and steps up the side; three curves are drawn and n squared rises steeply.",
+            "labels": [
+              "n²",
+              "n log n",
+              "n"
+            ]
+          },
+          {
+            "say": "At a thousand items, n log n is about ten thousand, while n squared reaches a million.",
+            "show": "The bottom axis extends to 1,000 and the side axis rescales; n squared towers over the other two, which lie almost flat.",
+            "labels": [
+              "≈ 10,000",
+              "1,000,000"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "one_million_items",
+        "beats": [
+          {
+            "say": "Now take a million items, say every song in a large music library, on a machine doing a billion steps a second.",
+            "show": "A heading reads n = 1,000,000 with a note of 1 billion steps per second.",
+            "labels": [
+              "n = 1,000,000",
+              "10⁹ steps per second"
+            ]
+          },
+          {
+            "say": "n log n is about twenty million steps: two hundredths of a second.",
+            "show": "The n log n row shows 20 million and 0.02 s.",
+            "labels": [
+              "20 million",
+              "0.02 s"
+            ]
+          },
+          {
+            "say": "n squared is a trillion steps: about seventeen minutes of waiting, for the very same list.",
+            "show": "The n squared row shows 1 trillion and 17 minutes, beside the 0.02 seconds.",
+            "labels": [
+              "1 trillion",
+              "17 minutes"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "two_hundredths_or_minutes",
+        "beats": [
+          {
+            "say": "Small inputs hide the gap. Large inputs make the shape of the curve the only thing that counts.",
+            "show": "The chart returns with the three curves labelled, and the gap between n squared and n log n is highlighted.",
+            "labels": [
+              "n² vs n log n"
+            ]
+          },
+          {
+            "say": "So when the input can grow large, choosing n log n over n squared is the difference between instant and unusable.",
+            "show": "Two notes sit beside the curves: 0.02 seconds next to n log n, and 17 minutes next to n squared.",
+            "labels": [
+              "0.02 s",
+              "17 minutes"
+            ]
+          }
+        ]
+      }
+    ],
+    "concepts": []
+  }
+}
