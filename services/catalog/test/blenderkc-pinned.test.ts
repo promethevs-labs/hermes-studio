@@ -1,4 +1,4 @@
-import { cp, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -21,9 +21,12 @@ import { makeFixture, topicsYaml, type Fixture } from "./fixture-tree";
  * bpy, no gnosia-audio, which `topics` never imports.
  *
  * Two runs. The pinned checkout itself, with an empty data root: every topic
- * it holds today names a topic the owner has, nothing is rendered, and the
- * import must write nothing and refuse nothing (the state of the owner's Mac
- * until the HBM video is built). Then a scratch checkout with one rendered
+ * it holds names a topic the owner has, nothing is rendered, and the import
+ * must write nothing and refuse nothing. The topics it holds are whatever
+ * the pointer names, so the test lists the `topic.yml` files on disk and
+ * compares the report with them rather than naming a topic a pointer move
+ * could remove (it named an HBM topic until the public repository, which
+ * holds only its demo, was pinned). Then a scratch checkout with one rendered
  * topic, whose title holds quotes, which its YAML reader keeps whole.
  *
  * Skipped in a clone whose submodule is not initialised, as the other
@@ -35,13 +38,25 @@ const PINNED_CLI = path.join(PINNED, "tools", "cli", "blenderkc");
 const TITLE = 'Why "HBM" is stacked';
 const OUT = "out/demo/x/quoted";
 
+/** The topic folders under `topics/`, as the CLI reports them: each directory holding a topic.yml, relative to it. */
+async function topicFolders(dir: string, prefix = ""): Promise<string[]> {
+  const found: string[] = [];
+  for (const entry of await readdir(path.join(dir, prefix), { withFileTypes: true })) {
+    if (entry.isFile() && entry.name === "topic.yml") found.push(prefix);
+    if (entry.isDirectory()) found.push(...(await topicFolders(dir, path.posix.join(prefix, entry.name))));
+  }
+  return found.filter((folder) => folder !== "").sort();
+}
+
 let fixture: Fixture;
 let scratch: string;
 const saved = { root: process.env[BLENDERKC_ROOT_ENV], home: process.env.BLENDERKC_HOME };
 
 beforeEach(async () => {
   fixture = await makeFixture();
-  // Every catalog topic a topic.yml in the pinned checkout declares.
+  // Every catalog topic a topic.yml in the pinned checkout declares:
+  // gpu-architecture is the demo's (topics/demo/kit-tour), and a second
+  // test below uses cs3230-recurrences.
   await fixture.write("content/topics.yaml", topicsYaml([{ slug: "gpu-architecture" }, { slug: "cs3230-recurrences" }]));
   // Real path: the CLI reports its data root resolved, and macOS's temp
   // directory is a link (/var to /private/var).
@@ -71,7 +86,9 @@ describe.skipIf(!existsSync(PINNED_CLI))("the pinned blenderkc CLI", () => {
     expect(metadata).toEqual({ outRoot: home });
     expect(rows.asset).toEqual([]);
     const topics = report?.topics.map((topic) => String(topic.path)) ?? [];
-    expect(topics).toContain("computer-architecture/gpu-architecture/hbm-how-it-is-built");
+    const onDisk = await topicFolders(path.join(PINNED, "topics"));
+    expect(onDisk.length).toBeGreaterThan(0);
+    expect([...topics].sort()).toEqual(onDisk);
     expect(notes).toContain(`${topics.length} topic folders, 0 videos, 0 sidecars`);
   });
 
