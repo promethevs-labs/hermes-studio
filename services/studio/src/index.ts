@@ -17,6 +17,7 @@ import { REPO_ROOT, studioHome } from "./paths";
 import { Runner } from "./diagram/runner";
 import { JobStore, RecordStore } from "./data/store";
 import { backendFor, backendTools } from "./video/backend";
+import { criticSpend } from "./video/critic";
 import { VideoDoctor } from "./video/doctor";
 import { DEFAULT_VIDEO_TOOL, type VideoToolName } from "./video/tools";
 import { VideoRunner } from "./video/runner";
@@ -184,7 +185,8 @@ async function main(): Promise<void> {
     // Read at each cap check, by which time `drafts` below exists.
     otherSpend: (): SpendEntry[] => [...store.list(), ...drafts.spendEntries()],
   });
-  runner.otherJobSpend = () => videoStore.list();
+  // Each video job, and each picture check of one as its own entry (`critic.ts`).
+  runner.otherJobSpend = () => [...videoStore.list(), ...criticSpend(videoStore.list())];
   const videoReconciled = await videoRunner.reconcile();
   if (videoReconciled.interrupted.length > 0) {
     process.stdout.write(`marked ${videoReconciled.interrupted.length} video job(s) interrupted: ${videoReconciled.interrupted.join(", ")}\n`);
