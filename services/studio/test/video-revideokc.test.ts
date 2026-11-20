@@ -722,7 +722,13 @@ describe("the gate, for a revideokc job", () => {
     return { paths, own, brief, voiced, hash };
   }
 
-  const at = (offsetMs: number): string => new Date(Date.now() + offsetMs).toISOString();
+  // One instant per test, taken before anything slow runs. Every time in a test is an offset from it,
+  // so a gate that takes seconds under load cannot move a read past the build it follows.
+  let anchor = Date.now();
+  beforeEach(() => {
+    anchor = Date.now();
+  });
+  const at = (offsetMs: number): string => new Date(anchor + offsetMs).toISOString();
   const still = (when: string, hash: string, rendered: string[] = classes): WrapperCall => ({ verb: "still", scenes: classes, startedAt: when, endedAt: when, exitCode: 0, sceneSha256: hash, rendered });
   const built = (when: string, hash: string): WrapperCall => ({ verb: "build", startedAt: when, endedAt: when, exitCode: 0, sceneSha256: hash, rendered: [], deliverable: { written: true } });
 
@@ -734,7 +740,7 @@ describe("the gate, for a revideokc job", () => {
       brief: { ...brief, tool: "revideokc" },
       paths,
       classes,
-      startedAtMs: Date.now() - 60_000,
+      startedAtMs: anchor - 60_000,
       sourceHashBefore: null,
       calls: [still(at(-5_000), hash), built(at(-2_000), hash)],
       reads: [
@@ -755,7 +761,7 @@ describe("the gate, for a revideokc job", () => {
     const brief = narratedBrief();
     const lines = brief.scenes.map((scene) => scene.beats.map((beat) => beat.say));
     const { paths, own, voiced, hash } = await layOutJob(lines);
-    const base = { brief: { ...brief, tool: "revideokc" as const }, paths, classes, startedAtMs: Date.now() - 60_000, sourceHashBefore: null, tools: tools(Math.round(secondsForLines(voiced))), backend: backendFor("revideokc") };
+    const base = { brief: { ...brief, tool: "revideokc" as const }, paths, classes, startedAtMs: anchor - 60_000, sourceHashBefore: null, tools: tools(Math.round(secondsForLines(voiced))), backend: backendFor("revideokc") };
     const unread = await runVideoGate({ ...base, calls: [still(at(-5_000), hash), built(at(-2_000), hash)], reads: [{ path: own.stillsSheet, at: at(-4_000) }] });
     expect(unread.ok).toBe(false);
     expect(unread.findings.join(" ")).toContain("look at the build's sheet");
@@ -769,7 +775,7 @@ describe("the gate, for a revideokc job", () => {
     const brief = narratedBrief();
     const lines = brief.scenes.map((scene) => scene.beats.map((beat) => beat.say));
     const { paths, own, voiced, hash } = await layOutJob(lines);
-    const base = { brief: { ...brief, tool: "revideokc" as const }, paths, classes, startedAtMs: Date.now() - 60_000, sourceHashBefore: null, tools: tools(Math.round(secondsForLines(voiced))), backend: backendFor("revideokc") };
+    const base = { brief: { ...brief, tool: "revideokc" as const }, paths, classes, startedAtMs: anchor - 60_000, sourceHashBefore: null, tools: tools(Math.round(secondsForLines(voiced))), backend: backendFor("revideokc") };
     const buildRead = { path: own.buildSheet, at: at(-500) };
     // Looked at, then the scene was edited, then built: the stills were of another source.
     const edited = await runVideoGate({ ...base, calls: [still(at(-6_000), "an-earlier-source"), built(at(-2_000), hash)], reads: [{ path: own.stillsSheet, at: at(-5_000) }, buildRead] });
@@ -815,7 +821,7 @@ describe("the gate, for a revideokc job", () => {
     const brief = narratedBrief();
     const lines = brief.scenes.map((scene) => scene.beats.map((beat) => beat.say));
     const gate = async (job: Awaited<ReturnType<typeof layOutJob>>) =>
-      runVideoGate({ brief: { ...brief, tool: "revideokc" }, paths: job.paths, classes, startedAtMs: Date.now() - 60_000, sourceHashBefore: null, calls: [], reads: [], tools: tools(60), backend: backendFor("revideokc") });
+      runVideoGate({ brief: { ...brief, tool: "revideokc" }, paths: job.paths, classes, startedAtMs: anchor - 60_000, sourceHashBefore: null, calls: [], reads: [], tools: tools(60), backend: backendFor("revideokc") });
 
     // Two files each under the per-file cap, together over the catalog's total.
     const big = await layOutJob(lines);
@@ -840,7 +846,7 @@ describe("the gate, for a revideokc job", () => {
     const lines = brief.scenes.map((scene) => scene.beats.map((beat) => beat.say));
     const reworded = [[`${lines[0]![0]!} Plainly.`], lines[1]!];
     const gate = async (job: Awaited<ReturnType<typeof layOutJob>>) =>
-      runVideoGate({ brief: { ...brief, tool: "revideokc" }, paths: job.paths, classes, startedAtMs: Date.now() - 60_000, sourceHashBefore: null, calls: [], reads: [], tools: tools(60), backend: backendFor("revideokc") });
+      runVideoGate({ brief: { ...brief, tool: "revideokc" }, paths: job.paths, classes, startedAtMs: anchor - 60_000, sourceHashBefore: null, calls: [], reads: [], tools: tools(60), backend: backendFor("revideokc") });
 
     const changed = await gate(await layOutJob(reworded));
     expect(changed.script?.changes.filter((change) => change.kind !== "unchanged")).toEqual([
