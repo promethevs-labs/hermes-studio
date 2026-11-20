@@ -104,6 +104,11 @@ function manualHashes(results) {
   return [...new Set(results.map((result) => result.manualHash).filter((hash) => typeof hash === 'string' && hash !== ''))];
 }
 
+/** The manual versions the run's jobs carried, each once: the same manual with the job's own paths set aside. */
+function manualVersions(results) {
+  return [...new Set(results.map((result) => result.manualVersion).filter((version) => typeof version === 'string' && version !== ''))];
+}
+
 /** Read a run file, or null when there is none. */
 export function readRun(file) {
   if (!existsSync(file)) return null;
@@ -190,12 +195,14 @@ export async function runBench(options, deps) {
     startedAt: existing?.startedAt ?? new Date(now()).toISOString(),
     endedAt: null,
     manualHashes: [],
+    manualVersions: [],
     results: [],
   };
   const order = [...new Set([...entries.map((entry) => entry.id), ...results.keys()])].sort((a, b) => a.localeCompare(b, 'en'));
   const save = () => {
     run.results = order.filter((id) => results.has(id)).map((id) => results.get(id));
     run.manualHashes = manualHashes(run.results);
+    run.manualVersions = manualVersions(run.results);
     writeJsonAtomic(runFile, run);
   };
   const put = (result) => {

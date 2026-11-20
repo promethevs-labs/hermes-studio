@@ -196,13 +196,18 @@ every noted group still alive, and polls each one. The log says when all
 are stopped, or which groups survived.
 
 The run file is written after every step: `{ label, tool, model, capUsd,
-capPlan, shotsAsked, criticAsked, startedAt, endedAt, manualHashes, results,
+capPlan, shotsAsked, criticAsked, startedAt, endedAt, manualHashes, manualVersions, results,
 stopReason?, scoring? }`. `capUsd` is the `--cap` typed for the latest command,
 and `capPlan` says what it meant: `{ perCommandUsd, labelSpentUsd,
 homeSpentUsd, runnerCapUsd }`, which are `--cap`, what the label had already
 spent, what the home had spent in its last 24 hours when the command started,
 and the cap the runner was started with. It is null in a file written before
-the command got that far, and in a run file from before it existed. Each result `{ id, jobId, state, gateOk, attempts,
+the command got that far, and in a run file from before it existed.
+`manualHashes` lists each distinct manual hash the jobs carried, which is one
+per video job, since a video manual holds the job's own paths;
+`manualVersions` lists each distinct manual version (the hash with those paths
+set aside), one per manual, and `compare` shows its count beside the hashes.
+A run file from before it existed has none. Each result `{ id, jobId, state, gateOk, attempts,
 turns, costUsd, wallSeconds, renderSeconds, metrics: { variety,
 helperTop5Share, fadeShare, uses3d } | null, shots, critic, criticCostUsd,
 checkCostUsd, error }`, plus `slug`, `tries`, `errorKind` and

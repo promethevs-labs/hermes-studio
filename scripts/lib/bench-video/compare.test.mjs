@@ -13,6 +13,7 @@ const A = {
   tool: 'manimkc',
   model: 'sonnet',
   manualHashes: ['0123456789abcdef'],
+  manualVersions: ['aaaa0000aaaa0000'],
   results: [
     result('binary-search-halving', { variety: 0.61, helperTop5Share: 0.8, fadeShare: 0.45, uses3d: false }),
     result('tcp-three-way-handshake', { variety: 0.5, helperTop5Share: 0.9, fadeShare: 0.6, uses3d: false }, { gateOk: false, attempts: 3, turns: 88, costUsd: 3.6, wallSeconds: 1500 }),
@@ -25,6 +26,7 @@ const B = {
   tool: 'manimkc',
   model: 'sonnet',
   manualHashes: ['fedcba9876543210'],
+  manualVersions: ['bbbb1111bbbb1111', 'cccc2222cccc2222'],
   results: [
     result('binary-search-halving', { variety: 0.72, helperTop5Share: 0.55, fadeShare: 0.2, uses3d: true }, { turns: 41, costUsd: 2.95, wallSeconds: 840 }),
     result('tcp-three-way-handshake', { variety: 0.66, helperTop5Share: 0.7, fadeShare: 0.3, uses3d: false }, { attempts: 2, turns: 60, costUsd: 3.1, wallSeconds: 1200 }),
@@ -33,8 +35,8 @@ const B = {
 };
 
 const EXPECTED = `Video bench: base against art, 2 briefs in both
-  A is base: manimkc, model sonnet, 3 results, manual 0123456789ab
-  B is art: manimkc, model sonnet, 3 results, manual fedcba987654
+  A is base: manimkc, model sonnet, 3 results, manual 0123456789ab, 1 manual version
+  B is art: manimkc, model sonnet, 3 results, manual fedcba987654, 2 manual versions
 
 Look (means over the briefs measured on both sides; 3D counts videos)
                          variety          top-five share   fade share       3D
@@ -158,8 +160,8 @@ SCORED_B.results[1].critic = critic(dims(3, 2, 4, 3, 3), 2);
 SCORED_B.results[1].shots = shots(['title', 'timeline', 'comparison', 'timeline', 'recap-map'], 0.4);
 
 const ONE_SIDE = `Video bench: base against art, 2 briefs in both
-  A is base: manimkc, model sonnet, 3 results, manual 0123456789ab
-  B is art: manimkc, model sonnet, 3 results, manual fedcba987654
+  A is base: manimkc, model sonnet, 3 results, manual 0123456789ab, 1 manual version
+  B is art: manimkc, model sonnet, 3 results, manual fedcba987654, 2 manual versions
 
 Look (means over the briefs measured on both sides; 3D counts videos)
                          variety          top-five share   fade share       3D
