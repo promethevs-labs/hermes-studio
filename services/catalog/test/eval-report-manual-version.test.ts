@@ -152,7 +152,8 @@ describe("checkJobRun and manualVersion", () => {
   });
 
   it("still refuses a record missing a required field, and an unknown one", () => {
-    const { auth: _auth, ...withoutAuth } = run;
+    const withoutAuth: Partial<JobRun> = { ...run };
+    delete withoutAuth.auth;
     expect(checkJobRun(withoutAuth).ok).toBe(false);
     expect(checkJobRun({ ...run, manualVersions: V1 }).ok).toBe(false);
   });
