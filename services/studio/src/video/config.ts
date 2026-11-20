@@ -69,16 +69,17 @@ export const VIDEO_MAX_ATTEMPTS = integer("STUDIO_VIDEO_MAX_ATTEMPTS", 3, 1, 5);
 
 /**
  * The picture check (D116 of docs/STUDIO-LOOK.md, "The critic" in
- * docs/STUDIO-VIDEOS.md): `off` never runs it; `report` scores each attempt
- * that passes the gate and sends nothing back; `retry`, the default, also
- * sends a defect it can point to back to the agent, once per job. Anything
- * else reads as the default. Read per call, so a test can set it.
+ * docs/STUDIO-VIDEOS.md): `off` never runs it; `report`, the default since
+ * 2026-11-20 (D121), scores each attempt that passes the gate, records the
+ * read on the job and sends nothing back; `retry` also sends a defect it can
+ * point to back to the agent, once per job. Anything else reads as the
+ * default. Read per call, so a test can set it.
  */
 export type VideoCriticMode = "off" | "report" | "retry";
 
 export function videoCriticMode(): VideoCriticMode {
   const raw = process.env.STUDIO_VIDEO_CRITIC?.trim().toLowerCase();
-  return raw === "off" || raw === "report" ? raw : "retry";
+  return raw === "off" || raw === "retry" ? raw : "report";
 }
 
 /**

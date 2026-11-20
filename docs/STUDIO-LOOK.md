@@ -136,6 +136,14 @@ Why not block on a score: nobody has compared these scores with the owner's
 own ratings yet. Once enough videos carry both a thumbs rating and critic
 scores, the report can show whether they agree, and this decision can change.
 
+**Amended 2026-11-20, the owner's call after the benchmark (D121).** Two
+parts of this decision changed. The critic now reports by default and no
+longer retries unless asked (`STUDIO_VIDEO_CRITIC=retry`), and a video passes
+the critic by its scores, not by having no defect. The paragraph above
+stands as the rule the 2026-11-20 benchmark was made under. D121 has the
+current rule and the reasons. What stays as written: the rubric, the once-only
+retry in `retry` mode, and that the scores never block a job.
+
 ### D117. Icons are Lucide, installed with the tool
 
 Lucide's licence is ISC, which allows this use. A job's render has no
@@ -173,6 +181,52 @@ Why: the reason D112 gives for the studio holds at a terminal. The same
 plain diagram video went to manimkc there, and the audit's sameness came
 from that route.
 
+### D121. The critic reports by default, and a video passes it by its scores (provisional)
+
+The owner decided both on 2026-11-20, after the benchmark in "Results". This
+amends D116.
+
+**The default.** `STUDIO_VIDEO_CRITIC` is `report`. The critic reads every
+video that passes the gate, and its five scores and its defects are recorded
+on the job (the attempt's `critic` in the run record, `critic` in `job.json`,
+the job panel). Nothing goes back to the video agent and no retry happens, so
+a job makes one attempt for the critic's sake. `retry` stays a supported
+value and works as D116 describes (defects it can point to go back once per
+job, inside the three attempts), and `off` still turns the critic off.
+
+**The pass mark.** A video passes the critic when no score of the five is
+below 3 and the mean of the five is at least 3.5. Zero defects is no longer
+the bar. The rule is `passesCritic` in `packages/schema/src/shared.ts`, with
+`CRITIC_PASS_MIN_SCORE` (3) and `CRITIC_PASS_MIN_MEAN` (3.5) beside the
+critic's types. The bench's `compare` and `critic` records call that one
+function. A missing, malformed or out of range score fails. With whole
+scores the mean is a multiple of 0.2, so in practice the mean bar is 3.6.
+
+**The mark is provisional.** The threshold was picked after seeing the
+benchmark data, so nothing yet shows it separates a good video from a poor
+one. It stands until the owner's own thumbs ratings can calibrate it, as
+D116 said of scores in general. On the benchmark it passes 6 of 12 videos
+before and 8 of 12 after, against 0 and 0 under the old rule. Those two
+counts illustrate the mark and do not prove it.
+
+**The retry and the pass mark are separate things.** In `retry` mode a retry
+is triggered by defects: the critic named at least one it can point to in a
+scene, the job has attempts left, and the retry has not been spent. The pass
+mark reads scores and triggers nothing. A video can pass with defects and
+fail with none, and a job in any mode reaches review either way.
+
+**Old records.** `passed` on a bench run's `critic` is still written, now by
+the new rule. A run file written before this change holds `passed` by the old
+rule (no defect on the last attempt). `compare` does not trust the stored
+value: it recomputes the pass from the stored scores, so old and new run
+files are judged the same way. Nothing is renamed or dropped in `job.run`,
+the run file or any `--json` output.
+
+Why: the retry was $20.22 of the $33.82 the twelve jobs cost and moved the
+critic's mean from 3.55 to 3.70, and zero of 24 videos had zero defects, so
+the old mark separated nothing. Reporting keeps the read, which costs about
+$0.05 a video, and drops the part that cost the most.
+
 ## The pieces
 
 | Piece | What it is | Where it is written down | State |
@@ -181,7 +235,7 @@ from that route.
 | Critic record | `critic` on a run record's attempt, and a `critic` column in `catalog eval report` | `services/catalog/SCHEMA.md` | built ([#719](https://github.com/promethevs-labs/hermes-studio/pull/719)) |
 | Shot plan | `scenes[].shot` on the brief, the art-director turn, the card, and the plan in the video agent's prompt | [STUDIO-VIDEOS.md](STUDIO-VIDEOS.md), "The shot plan" | built ([#722](https://github.com/promethevs-labs/hermes-studio/pull/722)) |
 | Shot library | A theme, shot patterns for every shot type, motion presets, icons, and a gallery with a thumbnail and a "use when" line per pattern, in remotionkc | `tools/remotionkc/docs/SHOTS.md` | built ([remotionkc #11](https://github.com/promethevs-labs/remotionkc/pull/11)) |
-| Critic | The model call after the gate, the one retry it may cause, and the scores on the job panel | [STUDIO-VIDEOS.md](STUDIO-VIDEOS.md) | built ([#726](https://github.com/promethevs-labs/hermes-studio/pull/726)) |
+| Critic | The model call after the gate, the scores on the job panel, and the one retry it may cause (only with `STUDIO_VIDEO_CRITIC=retry`; the default is `report`, D121) | [STUDIO-VIDEOS.md](STUDIO-VIDEOS.md) | built ([#726](https://github.com/promethevs-labs/hermes-studio/pull/726)) |
 | Manual by purpose | The studio's manuals list a tool's patterns by shot type, never by past use, with worked examples that span the shot types; the art director sees the patterns too | [STUDIO-VIDEO-TOOLS.md](STUDIO-VIDEO-TOOLS.md), "The manual by shot type" | built ([#728](https://github.com/promethevs-labs/hermes-studio/pull/728)) |
 | Guidance | [VIDEO-TOOLS.md](VIDEO-TOOLS.md), each tool's `AGENTS.md` and the video skills say what D111 fixes and what must vary | each file | built ([#720](https://github.com/promethevs-labs/hermes-studio/pull/720)); manimkc's own part (its `api` listing grouped by purpose, what a series fixes, and `docs/SHOTS.md`) shipped in [manimkc #86](https://github.com/promethevs-labs/manimkc/pull/86) and is pinned here by the bump that also copies `SHOTS.md` into each manimkc job |
 
@@ -244,6 +298,12 @@ gate and were accepted.
 The milestone's test has three parts. The first two hold: a video made from
 the same brief scores higher variety and a lower top five share. The third
 does not: no video passes the critic, before or after.
+
+Under the provisional score mark of D121, set later the same day, the same
+runs give 6 of 12 videos passing before and 8 of 12 after. The mark was
+picked after seeing these numbers, so this illustrates it and does not
+prove it. The table row above and the third part of the test are as
+D116 defined them when the runs were made.
 
 What the numbers say about each piece:
 
