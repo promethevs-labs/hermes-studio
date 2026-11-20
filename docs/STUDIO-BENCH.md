@@ -64,6 +64,16 @@ Add `--silent` before `bench:video` when you pipe `--json` output.
 | `score --home DIR --label L --cap USD [--port N] [--only a,b] [--again]` | Asks the critic about each accepted video of a run that already exists and has no critic recorded, and writes the scores into its run file. It spends money too |
 | `compare --home DIR A B [--json]` | Compares two run labels in the same home |
 
+`--cap` is the most this one command may spend, in US dollars, and it has no
+default. For `run` it covers one run label in total, so a `--resume` counts what
+the label already spent against it. For `score` it covers that one score pass,
+which starts from nothing. It is not a limit on the whole home: a home holds
+several runs, and a cap that read as "this home may spend this much in a day"
+left the 2026-11-20 run with $37.67 of a $50 cap, because the home's rolling
+day already held $12.33. Each command prints one line at the start, such as
+`Home has spent $12.33 in the last 24 hours; this run may spend up to $50.00
+more (runner cap $62.33).`
+
 The predicted seconds in `validate` and `dry-run` use the studio's fallback
 rate of 15.2 characters a second. The runner uses gnosia-audio's own rate,
 and refuses a brief whose lines miss its target by more than a fifth, which
@@ -104,18 +114,55 @@ as a child in its own process group, with:
 | `STUDIO_HOME` | `DIR/studio` |
 | `STUDIO_PORT` | `--port`, 7260 by default; 7250, the studio's own, is refused |
 | `STUDIO_OWNER` | `local` |
-| `STUDIO_DAILY_USD` | `--cap` |
+| `STUDIO_DAILY_USD` | What the home had already spent in its last 24 hours when the command started, plus what `--cap` leaves this command (below) |
 | `AUTH_SECRET` | A fresh random value, so the runner never reads the web app's environment, which would also hand it the web app's catalog file |
 
 Everything else passes through from the shell that started it, the tool
 roots included. `CATALOG_COPY_OK` is removed: the bench catalog is a primary.
 
 Before anything is posted, `run` checks that nothing already listens on the
-port, waits for `/api/health`, and stops with nothing posted unless the
-runner reports the same cap it was given, finds the claude CLI, and the
-chosen tool's doctor passes (it waits up to 15 minutes for the doctor's
-first check). Then it prints one line naming the number of briefs, the tool,
-the model and the cap, and starts.
+port, then works out the runner's cap (the next section), waits for
+`/api/health`, and stops with nothing posted unless the runner reports the
+same cap it was given, finds the claude CLI, and the chosen tool's doctor
+passes (it waits up to 15 minutes for the doctor's first check). Then it
+prints one line naming the number of briefs, the tool and the model, and
+starts.
+
+### The cap of one command
+
+The runner's `STUDIO_DAILY_USD` is a rolling 24 hours over everything the
+home's runner spent: video jobs, each picture check, shot plans, planner turns
+and diagram jobs, checked when a job is queued. It is the only thing that
+stops a paid agent session, so it stays as the hard backstop, and it never
+gets weaker than what the person typed. The person typed `--cap` to say what
+this command may spend, so the bench sets the runner's cap to the home's
+spend plus that number:
+
+1. The bench starts a runner over the home that only answers one question
+   and posts nothing, reads `dailyCap.totalUsd` from its `/api/health`, and
+   stops it. The figure is the runner's own, from the same `spendWindow` the
+   cap refuses on, so spend older than 24 hours is not in it. The bench reads
+   no cost files itself. If the runner gives no figure, the command stops with
+   nothing posted. The runner has no mode that takes no jobs, so a home with a
+   job still `queued` from an earlier command that died is refused before any
+   runner starts, since the measuring runner would run that job and cancel it
+   when it stops.
+2. For `run`, the allowance is `--cap` less what this label already spent, read
+   from its run file (zero for a new label). A resume is never handed a fresh
+   cap: with $4 recorded under `--cap 5`, it may spend $1 more, whether or not
+   that $4 is still inside the home's rolling day. A label that has already
+   reached `--cap` stops before anything is started; pass a larger `--cap`.
+   For `score` the allowance is `--cap`.
+3. The runner the command works with starts at the home's spend plus the
+   allowance, and the command prints both numbers. With $12.33 spent and
+   `--cap 50`, the runner cap is $62.33.
+
+The bench also keeps its own check: a `run` stops before posting once this
+label's recorded costs reach `--cap`, and a `score` once what it spent reaches
+it. Spend that ages out of the rolling day while a command runs gives the
+runner more room, never less, so that check is what holds a label to its cap
+over a long run. The runner still refuses a job once the rolling day reaches
+its cap, and a running job is never stopped by it.
 
 For each brief, in id order, it posts the brief with the run's `tool`, the
 `--model` when one is given (else the runner's default), the slug
@@ -127,8 +174,8 @@ digits joined by single hyphens, at most 20 characters.
 
 It stops cleanly, with what finished written down, when:
 
-- the runner answers 429 at the daily cap;
-- the run's own recorded costs reach the cap, checked before each post;
+- the runner answers 429 at its daily cap;
+- the run's own recorded costs reach `--cap`, checked before each post;
 - any other enqueue refusal, a failed accept, or a job that failed with an
   error kind that says the machine is the problem (`agent`, `spawn`,
   `toolchain`, `internal`, `not-claimed`) comes back, unless `--keep-going`;
@@ -149,8 +196,13 @@ every noted group still alive, and polls each one. The log says when all
 are stopped, or which groups survived.
 
 The run file is written after every step: `{ label, tool, model, capUsd,
-shotsAsked, criticAsked, startedAt, endedAt, manualHashes, results,
-stopReason?, scoring? }`, each result `{ id, jobId, state, gateOk, attempts,
+capPlan, shotsAsked, criticAsked, startedAt, endedAt, manualHashes, results,
+stopReason?, scoring? }`. `capUsd` is the `--cap` typed for the latest command,
+and `capPlan` says what it meant: `{ perCommandUsd, labelSpentUsd,
+homeSpentUsd, runnerCapUsd }`, which are `--cap`, what the label had already
+spent, what the home had spent in its last 24 hours when the command started,
+and the cap the runner was started with. It is null in a file written before
+the command got that far, and in a run file from before it existed. Each result `{ id, jobId, state, gateOk, attempts,
 turns, costUsd, wallSeconds, renderSeconds, metrics: { variety,
 helperTop5Share, fadeShare, uses3d } | null, shots, critic, criticCostUsd,
 checkCostUsd, error }`, plus `slug`, `tries`, `errorKind` and
@@ -215,9 +267,15 @@ run as `critic: { source, attempt, current, scores, mean, defects, notes,
 sentBack, passed, error }`. `source` is `job` for the runner's own check and
 `standalone` for one the bench asked for. `current` says whether the scores
 are of the build in review. `mean` is the mean of the five scores. `passed`
-is D116 of docs/STUDIO-LOOK.md: the critic's read of the last attempt names
-no defect; the scores never block. It is null when the build in review was
-not scored, and `error` then says why.
+is D121 of docs/STUDIO-LOOK.md, `passesCritic` in
+`packages/schema/src/shared.ts`: no score below 3 and a mean of at least 3.5.
+The mark is provisional, picked after seeing the 2026-11-20 benchmark, and
+defects play no part in it. It is null when the build in review was not
+scored, and `error` then says why. A run file written before D121 holds
+`passed` by the old rule (no defect on the last attempt); `compare`
+recomputes the pass from the stored scores, so both kinds read alike. The
+runner's own critic is `report` by default, so a run no longer includes the
+critic's retry unless `STUDIO_VIDEO_CRITIC=retry` is set for it.
 
 With `run --critic`, a landed video whose job has no critic of its build in
 review (the runner's critic is off, or its check gave no answer) gets a
@@ -240,8 +298,11 @@ carries on. A result a standalone check already answered for, a 409
 included, is left alone unless `--again`. A 409 is recorded and the scoring
 goes on; a 429, a 503 or no answer stops it. `--cap` is required. Its own
 stop is what this scoring spent reaching the cap, kept in the run file's
-`scoring: { startedAt, endedAt, capUsd, spentUsd, stopReason? }`; the
-runner's rolling day counts the run's earlier spending as well. Never run
+`scoring: { startedAt, endedAt, capUsd, spentUsd, homeSpentUsd,
+runnerCapUsd, stopReason? }`; the
+runner's rolling day counts the home's earlier spending as well, which is why the
+runner is started at that spending plus `--cap`. The record also keeps
+`homeSpentUsd` and `runnerCapUsd`, the same two numbers as a run's `capPlan`. Never run
 `score` on a home while a `run` on it is going.
 
 ## A before and after
@@ -290,8 +351,9 @@ result (`shots.costUsd`, `criticCostUsd`, `checkCostUsd`) and counted toward
 the cap. Other tools and models are unmeasured.
 
 A paid run needs the owner's go-ahead and `--cap`, which has no default. The
-cap is the runner's `STUDIO_DAILY_USD`: a rolling 24 hours over everything
-this home's runner spent, checked when a job is queued. It never stops a job
+cap is the most that one command may spend (see "The cap of one command"), so
+`--cap 50` on a home that already spent $12.33 that day may spend $50 more. The
+runner's own cap is checked when a job is queued and never stops a job
 already running, so a run can end up to one job's cost over the cap.
 
 ## Comparing runs
@@ -307,8 +369,8 @@ A brief only one run has is listed below the tables and left out of all of them.
 `--json` prints the same comparison as data.
 
 When either run carries critic scores or shot plans, two more tables follow.
-The first has the critic's mean, the pass or fail (D116, counted on the last
-line), the distinct shot types per video and the art director's cost. The
+The first has the critic's mean, the pass or fail (D121's score mark, counted
+on the last line), the distinct shot types per video and the art director's cost. The
 second has each of the five critic dimensions. Every mean and its difference
 cover only the briefs measured on both sides, with the pairs shown, so a
 baseline with no shots and a run with them shows each side's figures per
@@ -328,8 +390,11 @@ rules, a doctor that answers late, 201, 409, 429, a failed job, a stop
 mid-job, a resume and the cap; shots planned, reused on a resume with no
 second call, failed, off and refused at 429, the plan's cost in the cap; the
 critic read from the job, and the standalone route called only when needed);
-`score` over an existing run file with a 409 and a 429; and `setup`'s
-refusals.
+`score` over an existing run file with a 409 and a 429; the cap of one
+command (a fresh home, earlier spend inside the rolling day, spend older
+than 24 hours left out by the studio's own `spendWindow`, a resume counting
+the label's spend, a label already at its cap, and a score pass); and
+`setup`'s refusals.
 No test runs the loop against the real `createApi`: that needs the catalog,
 the gate and a backend replaced, as `services/studio/test/video-run-record.test.ts`
 does, and the stand-in covers the same routes.

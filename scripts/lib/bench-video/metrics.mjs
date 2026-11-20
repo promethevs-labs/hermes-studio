@@ -25,6 +25,17 @@ export function readJobFiles(studioHome, jobId) {
   return { job: readJson(join(dir, 'job.json')), run: readJson(join(dir, 'run.json')) };
 }
 
+/** The ids of jobs under `studioHome` whose record says `queued`: work a runner started over it would pick up. */
+export function queuedJobIds(studioHome) {
+  let ids;
+  try {
+    ids = readdirSync(join(studioHome, 'jobs'));
+  } catch {
+    return [];
+  }
+  return ids.filter((id) => readJson(join(studioHome, 'jobs', id, 'job.json'))?.state === 'queued').sort();
+}
+
 /**
  * The four look numbers the bench compares, from the job's kept source, or
  * null when the job kept no scene file (a failed job, or one never reviewed).

@@ -1481,6 +1481,9 @@ export class VideoRunner {
       entry.critic = null;
       entry.criticRunning = false;
     }
+    // Only `retry` sends anything back, and it keys on defects the critic can
+    // point to. The pass mark (`passesCritic`, D121) reads scores and has no
+    // part in this: a video can pass with defects and fail with none.
     let sendBack = entry.criticMode === "retry" && input.mayRetry && !entry.cancelled && run.scores !== null && run.defects.length > 0;
     // Nothing goes back unless this passing build is kept first: a retry
     // that does not pass falls back to it, so the scores never block (D116).

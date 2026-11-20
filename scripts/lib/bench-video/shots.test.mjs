@@ -33,11 +33,13 @@ describe('shots', () => {
 describe('critic records', () => {
   const scores = { accuracy: 5, layout: 4, relevance: 4, variety: 3, pacing: 4 };
 
-  it('passes a read of the build in review with no defect, and gives no verdict on an earlier build', () => {
+  it('passes a read of the build in review by its scores, and gives no verdict on an earlier build', () => {
     expect(scoresMean(scores)).toBeCloseTo(4);
     expect(criticFromView({ attempt: 2, current: true, scores, defects: [], notes: [], sentBack: [] })).toMatchObject({ current: true, passed: true, mean: 4 });
     const defect = { scene: 'S', problem: 'p', fix: 'f' };
-    expect(criticFromView({ attempt: 2, current: true, scores, defects: [defect] })).toMatchObject({ passed: false, defects: [defect] });
+    // D121: a defect does not fail a video, a score below 3 does.
+    expect(criticFromView({ attempt: 2, current: true, scores, defects: [defect] })).toMatchObject({ passed: true, defects: [defect] });
+    expect(criticFromView({ attempt: 2, current: true, scores: { ...scores, pacing: 2 }, defects: [] })).toMatchObject({ passed: false });
     expect(criticFromView({ attempt: 1, current: false, unscoredReason: 'timed out', scores, defects: [] })).toMatchObject({ current: false, passed: null, error: 'timed out' });
     expect(criticFromView(null)).toMatchObject({ scores: null, passed: null });
   });

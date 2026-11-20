@@ -42,7 +42,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 | [docs/STUDIO-TUTOR-HANDOFF.md](docs/STUDIO-TUTOR-HANDOFF.md) | Accepted, phases 1 (the runner) and 2 (the web app) built and measured, the paid hand-offs and the iOS Safari touch check included; Android Chrome and VoiceOver are the owner's to run: the concept tutor on `/learn/<concept>` gets the @ composer, and a Diagram or Video tag hands the concept to a new studio conversation (the note and the last tutor turns as data blocks, the message sent on arrival). When tags show, when Lexical loads, the runner change, D64 to D70 |
 | [docs/VIDEO-TOOLS.md](docs/VIDEO-TOOLS.md) | Which of the four video tools (manimkc, remotionkc, revideokc, blenderkc) makes a given video: what each is good for, a capability matrix with where each claim was proven, the risks, and the routing procedure the `video-router` skill runs |
 | [docs/STUDIO-VIDEO-TOOLS.md](docs/STUDIO-VIDEO-TOOLS.md) | Built in phases, phase 3 (remotionkc) the last: the studio picks a video tool. The planner proposes manimkc, remotionkc or revideokc in the brief with a reason (a TOOLS block pinned to VIDEO-TOOLS.md), the card shows it as a switchable chip, the runner gets a backend per tool, and headless Chrome runs inside the job's Seatbelt profile (measured). D71 to D80 |
-| [docs/STUDIO-LOOK.md](docs/STUDIO-LOOK.md) | Accepted and built 2026-11-20, the benchmark run before and after (variety 0.61 to 0.78, top five share 95% to 71%, no video passing the critic on either side, cost 3.5 times; "Results"): making agent-made videos look different from each other, and proving it. What the audit measured, a series' fixed part (palette, typeface, heading position, voice) against what must vary, remotionkc as the default engine in the studio and at a terminal, the art-director turn that writes each scene's shot, the twelve shot types, the critic's five scores and its one retry, Lucide icons, the capped paid runs, and the table of pieces with their state. Decisions D111 to D120 |
+| [docs/STUDIO-LOOK.md](docs/STUDIO-LOOK.md) | Accepted and built 2026-11-20, the benchmark run before and after (variety 0.61 to 0.78, top five share 95% to 71%, no video passing the critic on either side, cost 3.5 times; "Results"): making agent-made videos look different from each other, and proving it. What the audit measured, a series' fixed part (palette, typeface, heading position, voice) against what must vary, remotionkc as the default engine in the studio and at a terminal, the art-director turn that writes each scene's shot, the twelve shot types, the critic's five scores (it reports by default; its one retry is opt-in, D121), Lucide icons, the capped paid runs, and the table of pieces with their state. Decisions D111 to D121 |
 | [docs/STUDIO-BENCH.md](docs/STUDIO-BENCH.md) | The video bench: twelve fixed briefs in `bench/video/`, `npm run bench:video` to run them through a runner it starts over a scratch home (`setup`, `run` with a required `--cap`, `compare` of two runs, `validate`, `dry-run`), what a run costs and why a paid run needs the owner's go-ahead |
 | [docs/CONTENT-MIGRATION.md](docs/CONTENT-MIGRATION.md) | Moving authored content out of files in git into the database (Postgres at the time) and object storage, built through the phase 3 cut-over: the phases, the revision table, the blob store and the decisions behind them |
 | [docs/SQLITE-MIGRATION.md](docs/SQLITE-MIGRATION.md) | The catalog moved from a Postgres server to one SQLite file, `$HERMES_HOME/catalog.db` (default `~/.hermes/catalog.db`): where the file is, `CATALOG_DB` and `DATABASE_URL`, porting an old Postgres database with `services/catalog/scripts/pg-to-sqlite.mjs`, and what changed under the same API |
@@ -1072,14 +1072,38 @@ not have to be worked out again.
   (`services/catalog/test/scratch-database.ts`), and the end-to-end one
   imports `seed/`, a small real slice cut with `catalog export --subset`
   (seed/README.md), since the phase 3 cut-over removed `content/` and
-  `learn/`. A database of your own to look at is `CATALOG_DB=<file> npm run
-  catalog -- migrate`, then `MANIMKC_ROOT=/nonexistent
+  `learn/`. A database of your own to look at is `CATALOG_DB=<file>
+  HERMES_HOME=<scratch dir> npm run catalog -- migrate`, then `MANIMKC_ROOT=/nonexistent
   REMOTIONKC_ROOT=/nonexistent REVIDEOKC_ROOT=/nonexistent
   BLENDERKC_ROOT=/nonexistent npm run catalog -- import seed`, then
   `catalog flip` for topics, tags, concepts, sessions, courses and diagrams in
   that order (`scripts/lib/flip-order.mjs`; README.md, "Install"), all with
-  the same `CATALOG_DB`. `npm run e2e` builds exactly that database on its
-  own.
+  the same `CATALOG_DB` and `HERMES_HOME`, both under a temp directory (the
+  next gotcha says why `HERMES_HOME` is there). `npm run e2e` builds exactly
+  that database on its own.
+- **A scratch catalog needs its own `HERMES_HOME`, or its import writes into
+  your real blob store.** `CATALOG_DB` moves only the database file. The blob
+  root is `$HERMES_HOME/blobs` (default `~/.hermes/blobs`; `defaultBlobRoot` in
+  `packages/blob/src/fs.ts`, `dataHome()` in `packages/blob/src/home.ts`), so
+  `CATALOG_DB=/tmp/x.db npm run catalog -- import seed` stores the seed's
+  images and SVGs under the real store, `<owner_id>/<sha256>.<ext>`. The
+  write also goes through `assertWritable` in
+  `services/catalog/src/content/blob-owner.ts`: a root with no `.owner`
+  marker is claimed for the database that writes first, here the scratch one,
+  and from then on the real catalog is refused its own blobs ("belongs to
+  database ... Give this database its own store with HERMES_HOME") until the
+  marker is put right. A root already claimed by the real database refuses the
+  scratch import instead, naming nothing uploaded. That happened on
+  2026-11-20. Set `HERMES_HOME` to a temp directory on every command of a
+  scratch recipe, next to `CATALOG_DB`. Keep both: `HERMES_HOME` alone moves
+  the database to `$HERMES_HOME/catalog.db` only when neither `CATALOG_DB` nor
+  a `DATABASE_URL` that names a file is set in the shell or in
+  `services/catalog/.env` (`databaseUrl()` reads those first), so on its own
+  it can still open the real database. `npm run e2e` in its default
+  seed mode already does this (`SEED_HOME` in `scripts/e2e.mjs`), and
+  `scripts/worktree-setup.sh` only migrates its scratch file, which writes no
+  blob; a hand-written recipe, a doc or a script that imports with only
+  `CATALOG_DB` set does not.
 - **A suite that wants every migration takes `migratedScratchDatabase()`,
   not `createScratchDatabase()` plus `applyMigrations`.** vitest's global
   setup (`services/catalog/test/migrated-template.ts`) migrates one template

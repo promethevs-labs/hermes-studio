@@ -13,6 +13,11 @@ role: the file lives next to the blob store under the data root.
 | `DATABASE_URL` | still read, but only path-like values mean anything now |
 | `HERMES_HOME` | the data root the database and `blobs/` share |
 
+`CATALOG_DB` moves only the database file; `blobs/` stays under
+`HERMES_HOME`. A scratch database therefore sets `HERMES_HOME` to a temp
+directory as well, or its import writes blobs into the real store and claims
+it for the scratch database when the store has no `.owner` marker.
+
 `DATABASE_URL`/`CATALOG_DB` accept a plain path (`/abs`, `./rel`, `~/…`), a
 `sqlite:` or `file:` URL, and the literal `:memory:` (tests). A
 `postgres://`/`postgresql://` URL is refused with a pointer here rather than

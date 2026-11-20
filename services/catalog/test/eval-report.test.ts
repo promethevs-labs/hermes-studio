@@ -174,6 +174,13 @@ describe.skipIf(!reachable.ok)("catalog eval report", () => {
     });
     await runClaim({ jobId: failedQueue.job.id });
     await runFinish({ jobId: failedQueue.job.id, state: "failed", costUsd: 0.5, errorKind: "agent", error: "no" });
+    // A failure that never ran (a login that expired): no turns, no cost.
+    const loginQueue = await runEnqueue({
+      brief: { kind: "diagram", topic: "alpha", target: "learn/assets/job-l.tldr", idempotencyKey: "key-job-l" },
+      repoRoot: root,
+    });
+    await runClaim({ jobId: loginQueue.job.id });
+    await runFinish({ jobId: loginQueue.job.id, state: "failed", errorKind: "agent", error: "Failed to authenticate: OAuth session expired" });
     // A job still running is not in the report.
     const running = await runEnqueue({
       brief: { kind: "diagram", topic: "alpha", target: "learn/assets/job-r.tldr", idempotencyKey: "key-job-r" },
@@ -190,7 +197,14 @@ describe.skipIf(!reachable.ok)("catalog eval report", () => {
     expect([t.up, t.down, t.upShare]).toEqual([1, 1, 0.5]);
     expect(t.tagCounts.map((x) => x.tag).sort()).toEqual(["clear", "same-look"]);
     // Accepted: A and B. Discarded and failed are the two without a video.
-    expect([t.accepted, t.discarded, t.failed, t.acceptRate]).toEqual([2, 1, 1, 0.5]);
+    // The diagram job that cost $0.50 before it failed did work (quality); the one that
+    // cost nothing and took no turn never ran (infrastructure), and the rate leaves it out.
+    expect([t.accepted, t.discarded, t.failed, t.acceptRate]).toEqual([2, 1, 2, 0.5]);
+    expect([t.failedQuality, t.failedInfra]).toEqual([1, 1]);
+    expect(t.failuresByKind).toEqual([
+      { kind: "agent", cause: "infrastructure", count: 1, classified: true },
+      { kind: "agent", cause: "quality", count: 1, classified: true },
+    ]);
     expect(t.discardTags).toEqual([
       { tag: "same-look", count: 1 },
       { tag: "too-slow", count: 1 },

@@ -49,9 +49,13 @@ this database on its own, in a throwaway file. There is no `createdb`: the
 catalog is one SQLite file, which `connect` creates, with its directory, the
 first time a command opens it, here `migrate`
 ([docs/SQLITE-MIGRATION.md](../docs/SQLITE-MIGRATION.md)). For a second
-database beside your own, put `CATALOG_DB=~/.hermes/seed.db` (any path) in
-front of each command (`databaseUrl()` in
-[services/catalog/src/env.ts](../services/catalog/src/env.ts)).
+database beside your own, put `CATALOG_DB=<a path under a temp directory>` and
+`HERMES_HOME=<that directory>` in front of each command (`databaseUrl()` in
+[services/catalog/src/env.ts](../services/catalog/src/env.ts)). `CATALOG_DB`
+moves only the database file: the blob store is `$HERMES_HOME/blobs`, so
+without `HERMES_HOME` the import writes the seed's blobs into your own store
+and, when that store has no `.owner` marker yet, claims it for the second
+database.
 
 `MANIMKC_ROOT` points at a directory with no manimkc CLI so the import leaves
 manimkc out, and `REMOTIONKC_ROOT`, `REVIDEOKC_ROOT` and `BLENDERKC_ROOT` do
