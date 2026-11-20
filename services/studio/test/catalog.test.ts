@@ -130,4 +130,13 @@ describe("a call that worked", () => {
     expect(result.offline).toBe(false);
     expect(result.error).toBeNull();
   });
+
+  it("runs in a process group of its own, out of reach of the Ctrl-C that drains the runner", async () => {
+    // A terminal's Ctrl-C signals its whole foreground group. A catalog call
+    // in that group died with the runner's own SIGINT, so the drain could be
+    // waiting on a `job finish` that was already killed.
+    procMock.run.mockResolvedValue({ code: 0, signal: null, stdout: "{}", stderr: "", json: {}, timedOut: false });
+    await status();
+    expect(procMock.run).toHaveBeenCalledWith(process.execPath, expect.arrayContaining(["status", "--json"]), expect.objectContaining({ group: true }));
+  });
 });

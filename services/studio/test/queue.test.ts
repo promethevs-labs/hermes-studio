@@ -588,6 +588,49 @@ describe("the job ceiling", () => {
   });
 });
 
+describe("the shutdown's drain", () => {
+  beforeEach(() => {
+    agentMock.startAgent.mockReset();
+    started.length = 0;
+    stageAgent(true);
+  });
+
+  /*
+   * What shutdown waits on (`index.ts`): the drain stops the agent, and
+   * `settledAll` resolves only once the job's `job finish` and session end
+   * have been sent. On 2026-11-20 the exit came between the record and the
+   * `job finish`, and the row held its path's lease after the restart.
+   */
+  it("resolves only after the stopped job's verdict has reached the catalog", async () => {
+    const { record } = await runner.enqueue(await brief());
+    await agentsStarted(1);
+    let release: () => void = () => undefined;
+    catalogMock.jobFinish.mockImplementation(() => new Promise((resolve) => (release = () => resolve(ok))));
+    await runner.drain();
+    let settled = false;
+    const waiting = runner.settledAll().then(() => {
+      settled = true;
+    });
+    await until(() => catalogMock.jobFinish.mock.calls.length === 1, "the cancelled job never sent its job finish");
+    expect(store.get(record.id)?.state).toBe("cancelled");
+    expect(settled).toBe(false);
+    release();
+    await waiting;
+    expect(catalogMock.sessionEnd).toHaveBeenCalledWith(`studio-${record.id}`, "cancelled", expect.any(String));
+  });
+});
+
+describe("a job finish the catalog does not take", () => {
+  it("is owed to the reconcile, which health then retries", async () => {
+    const { record } = await runner.enqueue(await brief());
+    catalogMock.jobFinish.mockResolvedValue({ ok: false, json: null, error: "catalog job finish: database is locked", offline: false });
+    await runner.settled(record.id);
+    expect(store.get(record.id)?.state).toBe("awaiting_review");
+    expect(runner.rows.status().pending).toMatchObject({ error: expect.stringContaining("database is locked") });
+    expect(store.get(record.id)?.catalogErrors.at(-1)).toContain("database is locked");
+  });
+});
+
 describe("an agent that never started", () => {
   it("fails the job rather than asking the gate about a file it did not write", async () => {
     agentMock.startAgent.mockImplementation(() =>

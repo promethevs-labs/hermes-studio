@@ -4,6 +4,8 @@ import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import type { JobState } from "@hermes/schema";
+
 import { agentEnv, spawnClaude, type AgentInit, type AgentOutcome, type AgentRun } from "../agent/agent";
 import {
   appendAttempt,
@@ -19,7 +21,8 @@ import {
   withAttemptGate,
   type AttemptStart,
 } from "../data/run-record";
-import { jobClaim, jobEnqueue, jobFinish, jobShow, sessionEnd, sessionStart, videoCheckout, videoShow } from "../data/catalog";
+import { jobClaim, jobEnqueue, jobFinish, jobShow, sessionEnd, sessionStart, videoCheckout, videoShow, type JobFinishInput } from "../data/catalog";
+import { CatalogRows, leaseHolder, type RowsStatus } from "../data/catalog-rows";
 import { agentAuth, dailyCapUsd, DAILY_WINDOW_MS, type AgentAuth } from "../config";
 import { costFromLog, JobCostMeter, spendWindow, type CostReading, type SpendEntry } from "../cost";
 import { jobDir } from "../paths";
@@ -214,10 +217,29 @@ export class VideoRunner {
   /** Jobs whose `catalog job enqueue` has not answered, which `kick` passes over: the diagram runner's `unanswered` says why. */
   private readonly unanswered = new Set<string>();
   private draining = false;
+  /** The catalog's job rows against this runner's records, as the diagram runner's `rows`. */
+  readonly rows: CatalogRows<VideoJobRecord>;
 
   constructor(store: VideoStore, deps: VideoRunnerDeps) {
     this.store = store;
     this.deps = deps;
+    this.rows = new CatalogRows<VideoJobRecord>({
+      kind: "video",
+      runnerName: VIDEO_RUNNER_NAME,
+      store,
+      busy: (id) => this.running.has(id) || this.unanswered.has(id),
+      finishInput: (record, state) => this.finishInput(record, state),
+    });
+  }
+
+  /** Every live video row whose record has finished, moved to the record's state (`CatalogRows`). Called at start after `reconcile`. */
+  reconcileCatalog(): Promise<RowsStatus> {
+    return this.rows.reconcile();
+  }
+
+  /** Resolves once every job running now, and every standalone picture check, has written its verdict. */
+  async settledAll(): Promise<void> {
+    await Promise.all([...new Set([...this.running.keys(), ...this.standaloneSettled.keys()])].map((id) => this.settled(id)));
   }
 
   /** Standalone picture checks running now (`criticRun`), which drain stops. */
@@ -293,7 +315,7 @@ export class VideoRunner {
           error: "the runner died while this job was running",
           ...(await this.runFile(record.id)),
         });
-        if (!finished.ok) await this.store.noteCatalogError(record.id, finished.error ?? "");
+        if (!finished.ok) await this.finishMissed(record.id, finished.error);
         if (record.sessionId !== null) await sessionEnd(record.sessionId, "interrupted");
       } else if (record.state === "awaiting_review") {
         const shown = await jobShow(record.id);
@@ -525,7 +547,12 @@ export class VideoRunner {
       )}\n`,
       "utf8",
     );
-    const enqueued = await jobEnqueue(briefFile, parent?.discard === true ? { discardParent: parent.jobId } : {});
+    const enqueue = (): ReturnType<typeof jobEnqueue> => jobEnqueue(briefFile, parent?.discard === true ? { discardParent: parent.jobId } : {});
+    let enqueued = await enqueue();
+    // A lease held by a job this runner already finished, whose row never
+    // heard: moved, then tried once more (the diagram runner says why).
+    const holder = enqueued.ok || enqueued.offline ? null : leaseHolder(enqueued.error);
+    if (holder !== null && (await this.rows.release(holder))) enqueued = await enqueue();
     if (!enqueued.ok && (!enqueued.offline || parent?.discard === true)) {
       // A refusal is durable: the workspace goes. A discard-and-enqueue with
       // the catalog down is refused as well, since the parent's discard and
@@ -613,7 +640,7 @@ export class VideoRunner {
               error: (error as Error).message,
               ...(await this.runFile(next.id)),
             });
-            if (!finished.ok) await this.store.noteCatalogError(next.id, finished.error ?? "");
+            if (!finished.ok) await this.finishMissed(next.id, finished.error);
           }
           const sessionId = this.store.get(next.id)?.sessionId ?? null;
           if (sessionId !== null) await sessionEnd(sessionId, "failed", (error as Error).message).catch(() => undefined);
@@ -1168,9 +1195,23 @@ export class VideoRunner {
       state,
       note: videoNote(this.store.get(id) ?? record),
     });
+    const finished = await jobFinish(await this.finishInput(record, state));
+    if (!finished.ok) await this.finishMissed(id, finished.error);
+    if (record.sessionId !== null) {
+      await sessionEnd(record.sessionId, state === "awaiting_review" ? "closed" : state === "cancelled" ? "cancelled" : "failed", record.error ?? undefined);
+    }
+  }
+
+  /**
+   * The `job finish` for a record, in `state`: what `finish` sends, and what
+   * the catalog reconcile sends for a record whose finish never landed.
+   * Writes `gate.json`, which the catalog reads the gate from.
+   */
+  private async finishInput(record: VideoJobRecord, state: JobState): Promise<JobFinishInput> {
+    const id = record.id;
     const gateFile = path.join(jobDir(id), "gate.json");
     if (record.gate !== null) await writeFile(gateFile, `${JSON.stringify(record.gate, null, 1)}\n`, "utf8");
-    const finished = await jobFinish({
+    return {
       jobId: id,
       state,
       ...(record.phase === null ? {} : { phase: record.phase }),
@@ -1183,11 +1224,13 @@ export class VideoRunner {
       ...(record.errorKind === null ? {} : { errorKind: record.errorKind }),
       ...(record.error === null ? {} : { error: record.error }),
       ...(await this.runFile(id)),
-    });
-    if (!finished.ok) await this.store.noteCatalogError(id, finished.error ?? "");
-    if (record.sessionId !== null) {
-      await sessionEnd(record.sessionId, state === "awaiting_review" ? "closed" : state === "cancelled" ? "cancelled" : "failed", record.error ?? undefined);
-    }
+    };
+  }
+
+  /** A `job finish` that did not land: noted on the record and owed to the catalog reconcile (the diagram runner's `finishMissed`). */
+  private async finishMissed(id: string, error: string | null): Promise<void> {
+    await this.store.noteCatalogError(id, error ?? "");
+    this.rows.owe(`job finish for ${id} did not land: ${error ?? "the catalog refused"}`);
   }
 
   /** One attempt into the record's history, as it ended: its gate is filled in once the gate has judged it. */
@@ -1230,7 +1273,7 @@ export class VideoRunner {
         error: "cancelled before it started",
         ...(await this.runFile(id)),
       });
-      if (!finished.ok) await this.store.noteCatalogError(id, finished.error ?? "");
+      if (!finished.ok) await this.finishMissed(id, finished.error);
       return updated;
     }
     if (record.state !== "running") throw new JobRefused(409, `job ${id} is ${record.state}, so there is nothing to cancel`);

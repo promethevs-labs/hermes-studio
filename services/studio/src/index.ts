@@ -6,6 +6,7 @@ import { closeKeys, fromWebEnv, hasKeySecret, setCatalogFile, setKeySecret, take
 import { agentSettingsView, createApi } from "./api";
 import { reclaimCgroupFileCache, setCgroupIdlePredicate } from "./cgroup";
 import type { SpendEntry } from "./cost";
+import type { RowsStatus } from "./data/catalog-rows";
 import { Drafts } from "./drafts/drafts";
 import { agentAuthReport, CONCURRENCY, HOST, PORT } from "./config";
 import { ManualSource } from "./manual/source";
@@ -45,6 +46,28 @@ const DRAFTS_DRAIN_MS = 10_000;
  * orphan risk it bounds is the same one a plain stop always carried.
  */
 const DOCTOR_DRAIN_MS = 30_000;
+
+/**
+ * How long shutdown waits for the running jobs to write their verdicts. A
+ * stopped agent has `STUDIO_KILL_GRACE_MS` (5 seconds) to exit, then the
+ * record, `job finish` and `session end` follow, each a catalog subprocess of
+ * a second or two. Under the 20 seconds `npm run dev:down` gives the runner.
+ */
+const JOBS_DRAIN_MS = 15_000;
+
+/** One line per thing the startup reconcile of the catalog's job rows did, or could not do. */
+function reportRows(kind: string, status: RowsStatus): void {
+  for (const moved of status.repaired) {
+    process.stdout.write(`moved the ${kind} job row ${moved.id} from ${moved.from} to ${moved.to}, as its record says${moved.note === undefined ? "" : ` (${moved.note})`}\n`);
+  }
+  for (const left of status.left) process.stdout.write(`left the ${kind} job row ${left.id} (${left.state}): ${left.reason}\n`);
+  for (const orphan of status.orphans) {
+    process.stdout.write(`the ${kind} job row ${orphan.id} is ${orphan.state} on ${orphan.targetPath} and no record here names it: left alone, see /api/health\n`);
+  }
+  if (status.pending !== null) {
+    process.stdout.write(`could not reconcile the ${kind} job rows yet (${status.pending.error}); /api/health retries once the catalog answers\n`);
+  }
+}
 
 /**
  * `work`, or a note on stderr once `ms` has passed without it. The timer is
@@ -159,6 +182,7 @@ async function main(): Promise<void> {
         `They are listed, not resumed: a Resume button is a person's decision.\n`,
     );
   }
+  reportRows("diagram", await runner.reconcileCatalog());
 
   // The video runner (D43 of docs/STUDIO-VIDEOS.md): its own store over the
   // same jobs/ directory (each loads only its own kind), its own queue, and
@@ -191,6 +215,7 @@ async function main(): Promise<void> {
   if (videoReconciled.interrupted.length > 0) {
     process.stdout.write(`marked ${videoReconciled.interrupted.length} video job(s) interrupted: ${videoReconciled.interrupted.join(", ")}\n`);
   }
+  reportRows("video", await videoRunner.reconcileCatalog());
 
   // Drafts after both runners' jobs: a draft follows each kind's newest job,
   // so the job records are in memory first. An interrupted turn is written
@@ -289,8 +314,25 @@ async function main(): Promise<void> {
       // Bounded: it waits for any catalog read a create started, which has a
       // two-minute timeout of its own, and the exit timer below is only set
       // once every drain has returned.
-      .then(() => within(drafts.drain(), DRAFTS_DRAIN_MS, "the drafts' last writes"))
-      .then(() => runner.drain())
+      .then(() =>
+        Promise.all([
+          within(drafts.drain(), DRAFTS_DRAIN_MS, "the drafts' last writes"),
+          // Both runners stop their jobs, then wait for each job's verdict:
+          // the record, then `job finish` and the session's end. Before, the
+          // exit below could land between the record and its `job finish`,
+          // which left a cancelled record over a `running` row that held its
+          // path's lease (2026-11-20). Bounded, and the startup reconcile
+          // finishes any row this wait gave up on.
+          within(
+            Promise.all([
+              runner.drain().then(() => runner.settledAll()),
+              videoRunner.drain().then(() => videoRunner.settledAll()),
+            ]).then(() => undefined),
+            JOBS_DRAIN_MS,
+            "the running jobs' last writes",
+          ),
+        ]),
+      )
       // The doctors' drains, not just their timers: `stop()` alone leaves a
       // check already in flight spawning renders past the process's exit.
       .then(() =>
@@ -300,7 +342,6 @@ async function main(): Promise<void> {
           "the video doctors' checks",
         ),
       )
-      .then(() => videoRunner.drain())
       .then(() => closeKeys())
       .finally(() => {
         server.close(() => process.exit(0));

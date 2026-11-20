@@ -23,7 +23,8 @@ import {
   type AgentAuth,
 } from "../config";
 import { costFromLog, JobCostMeter, spendWindow, type CostReading, type SpendEntry } from "../cost";
-import { diagramShow, jobClaim, jobEnqueue, jobFinish, sessionEnd, sessionStart } from "../data/catalog";
+import { diagramShow, jobClaim, jobEnqueue, jobFinish, sessionEnd, sessionStart, type JobFinishInput } from "../data/catalog";
+import { CatalogRows, leaseHolder, type RowsStatus } from "../data/catalog-rows";
 import {
   appendAttempt,
   endAttempt,
@@ -197,9 +198,37 @@ export class Runner {
    * sets it gets.
    */
   manual: ManualSource | null = null;
+  /**
+   * The catalog's job rows against this runner's records: what startup, a
+   * health check that sees the catalog answer, and a lease refusal naming a
+   * job this runner already finished all reconcile (`data/catalog-rows.ts`).
+   */
+  readonly rows: CatalogRows<JobRecord>;
 
   constructor(store: JobStore) {
     this.store = store;
+    this.rows = new CatalogRows<JobRecord>({
+      kind: "diagram",
+      runnerName: RUNNER_NAME,
+      store,
+      busy: (id) => this.running.has(id) || this.unanswered.has(id),
+      finishInput: (record, state) => this.finishInput(record, state),
+    });
+  }
+
+  /**
+   * Every live catalog row of a diagram job whose record has finished, moved
+   * to the record's state; see `CatalogRows`. One `job ls` read. Called at
+   * start after `reconcile`, so the rows that pass marked interrupted are in
+   * step already, and a catalog that is down defers it, never throws.
+   */
+  reconcileCatalog(): Promise<RowsStatus> {
+    return this.rows.reconcile();
+  }
+
+  /** Resolves once every job running now has written its verdict, for the shutdown's bounded wait. */
+  async settledAll(): Promise<void> {
+    await Promise.all([...this.running.keys()].map((id) => this.settled(id)));
   }
 
   /**
@@ -294,7 +323,7 @@ export class Runner {
         // The attempts that ended before the runner died; the one it died in left no end.
         ...(await runFileFor(this.store, record.id)),
       });
-      if (!finished.ok) await this.store.noteCatalogError(record.id, finished.error ?? "");
+      if (!finished.ok) await this.finishMissed(record.id, finished.error);
       if (record.sessionId !== null) await sessionEnd(record.sessionId, "interrupted");
     }
     return { interrupted, swept };
@@ -551,7 +580,12 @@ export class Runner {
       )}\n`,
       "utf8",
     );
-    const enqueued = await jobEnqueue(briefFile);
+    let enqueued = await jobEnqueue(briefFile);
+    // A lease held by a job this runner already finished, whose row never
+    // heard: the row is moved and the enqueue tried once more, so a person
+    // never sees that 409 (`CatalogRows.release`).
+    const holder = enqueued.ok || enqueued.offline ? null : leaseHolder(enqueued.error);
+    if (holder !== null && (await this.rows.release(holder))) enqueued = await jobEnqueue(briefFile);
     if (!enqueued.ok && !enqueued.offline) {
       // The catalog answered and said no, and its reasons are the durable ones:
       // a topic that is not in the vocabulary, a lease another process holds.
@@ -708,13 +742,20 @@ export class Runner {
         jobSettled = resolve;
       }));
       void this.execute(entry).catch(async (error: unknown) => {
-        await this.store.update(next.id, {
+        const failed = await this.store.update(next.id, {
           state: "failed",
           phase: null,
           finishedAt: new Date().toISOString(),
           errorKind: "internal",
           error: `the runner threw: ${(error as Error).message}`,
         });
+        // The row too, as the video runner's handler does: a record that
+        // failed here used to leave its row `running`, holding the path's
+        // lease until a person finished it by hand.
+        const finished = await this.finishInput(failed, "failed")
+          .then((input) => jobFinish(input))
+          .catch((thrown: unknown) => ({ ok: false, error: (thrown as Error).message }));
+        if (!finished.ok) await this.finishMissed(next.id, finished.error);
       }).finally(() => {
         clearTimeout(entry.jobTimer);
         this.running.delete(next.id);
@@ -1455,11 +1496,30 @@ export class Runner {
       ...(record.gate === null ? {} : { gate: record.gate }),
     });
 
+    const finished = await jobFinish(await this.finishInput(record, state));
+    if (!finished.ok) await this.finishMissed(id, finished.error);
+    if (record.sessionId !== null) {
+      await sessionEnd(
+        record.sessionId,
+        state === "awaiting_review" ? "closed" : state === "cancelled" ? "cancelled" : "failed",
+        record.error ?? undefined,
+      );
+    }
+  }
+
+  /**
+   * The `job finish` for a record, in `state`: what `finish` sends, and what
+   * the catalog reconcile sends for a record whose finish never landed, so
+   * both carry the same gate, cost and run record. Writes `gate.json`, which
+   * the catalog reads the gate from.
+   */
+  private async finishInput(record: JobRecord, state: JobState): Promise<JobFinishInput> {
+    const id = record.id;
     const gateFile = path.join(jobDir(id), "gate.json");
     if (record.gate !== null) {
       await writeFile(gateFile, `${JSON.stringify(record.gate, null, 1)}\n`, "utf8");
     }
-    const finished = await jobFinish({
+    return {
       jobId: id,
       state,
       ...(record.phase === null ? {} : { phase: record.phase }),
@@ -1478,15 +1538,17 @@ export class Runner {
       // the canvas verbs the agent ran, so `calls` is empty and nothing here
       // renders on a clock (`data/run-record.ts`).
       ...(await runFileFor(this.store, id)),
-    });
-    if (!finished.ok) await this.store.noteCatalogError(id, finished.error ?? "");
-    if (record.sessionId !== null) {
-      await sessionEnd(
-        record.sessionId,
-        state === "awaiting_review" ? "closed" : state === "cancelled" ? "cancelled" : "failed",
-        record.error ?? undefined,
-      );
-    }
+    };
+  }
+
+  /**
+   * A `job finish` that did not land: noted on the record, and owed to the
+   * catalog reconcile, which the next health check that sees the catalog
+   * answer runs. Until then the row holds its path's lease.
+   */
+  private async finishMissed(id: string, error: string | null): Promise<void> {
+    await this.store.noteCatalogError(id, error ?? "");
+    this.rows.owe(`job finish for ${id} did not land: ${error ?? "the catalog refused"}`);
   }
 
   /** One attempt into the record's history, as it ended: its gate is filled in once the gate has judged it. */
@@ -1536,7 +1598,7 @@ export class Runner {
         error: "cancelled before it started",
         ...(await runFileFor(this.store, id)),
       });
-      if (!finished.ok) await this.store.noteCatalogError(id, finished.error ?? "");
+      if (!finished.ok) await this.finishMissed(id, finished.error);
       return updated;
     }
 
