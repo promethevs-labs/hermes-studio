@@ -18,6 +18,15 @@ export function shotTypeLines(): string[] {
   return SHOT_TYPES.map((type) => `${type} | ${SHOT_TYPE_LABELS[type]} | ${SHOT_TYPE_USE[type]}`);
 }
 
+/**
+ * The length each field is asked to stay within: a tenth under the limit the
+ * validator holds (`SHOT_TEXT_LIMITS`), so a model that counts a little long
+ * still lands inside it. Derived, so the two cannot drift.
+ */
+export function askedShotLength(name: keyof typeof SHOT_TEXT_LIMITS): number {
+  return SHOT_TEXT_LIMITS[name] - Math.ceil(SHOT_TEXT_LIMITS[name] / 10);
+}
+
 /** The art director's system prompt before its TOOL block. */
 export const ART_DIRECTOR_PROMPT = `You are the art director in a video studio. A person has approved the script of
 a short explainer video: its scenes, and in each scene its beats, each with the
@@ -58,12 +67,14 @@ ${shotTypeLines().join("\n")}
 
 - \`layout\`: where things sit, in frame terms: the left third, the right two
   thirds, the centre, a top band, a bottom strip. Name the things by what the
-  beats show. At most ${SHOT_TEXT_LIMITS.layout} characters.
+  beats show. At most ${askedShotLength("layout")} characters, spaces included.
 - \`motion\`: the one motion idea that carries the scene, tied to a spoken word
   where that helps ("each bar grows as its year is said"). One idea, not a
-  list. At most ${SHOT_TEXT_LIMITS.motion} characters.
+  list. At most ${askedShotLength("motion")} characters, spaces included.
 - \`emphasis\`: the one thing the eye must land on, and how it is marked: a
-  colour, a ring, a scale-up, everything else dimmed. At most ${SHOT_TEXT_LIMITS.emphasis} characters.
+  colour, a ring, a scale-up, everything else dimmed. At most ${askedShotLength("emphasis")} characters, spaces included.
+- Count each field before you answer. A line longer than the number asked for
+  risks being cut short, and a much longer one refuses the whole plan.
 - Plain words, each field on one line: no line breaks, no straight double
   quotes, no backslashes. Typographic quotes are fine.
 
