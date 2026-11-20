@@ -18,7 +18,13 @@
 export const VIDEO_TOOL_NAMES = ["manimkc", "remotionkc", "revideokc"] as const;
 export type VideoToolName = (typeof VIDEO_TOOL_NAMES)[number];
 
-/** A brief with no `tool` is a manimkc brief: every one written before D72. */
+/**
+ * A brief with no `tool` is a manimkc brief: every one written before D72.
+ * This is a compatibility default for old briefs, jobs and videos, and stays
+ * manimkc. It is not the routing default: the planner writes `tool` in every
+ * new brief, and a video no routing row claims goes to remotionkc (D112 of
+ * docs/STUDIO-LOOK.md, the last row below).
+ */
 export const DEFAULT_VIDEO_TOOL: VideoToolName = "manimkc";
 
 export interface VideoToolInfo {
@@ -36,7 +42,7 @@ export interface VideoToolInfo {
 export const VIDEO_TOOLS: readonly VideoToolInfo[] = [
   {
     name: "manimkc",
-    strength: "ManimGL: function plots, equation morphs, 3D maths, and the boxes-and-arrows house style of every series so far",
+    strength: "ManimGL: function plots, equation morphs, vector fields, 3D maths, and the series already made with it",
     inStudio: true,
   },
   {
@@ -86,7 +92,7 @@ export const VIDEO_TOOL_ROUTES: readonly VideoToolRoute[] = [
   {
     need: "A new week of a series that already exists (CS3230, CS4223, CS4225 lecture videos)",
     tool: "the series' tool, usually manimkc",
-    why: "Viewers watch a series in order; a change of look between weeks reads as a mistake",
+    why: "The series' palette, typeface, heading position and voice stay the same from week to week (D111 of STUDIO-LOOK.md); its layouts, shot types and motion must not repeat week after week",
   },
   {
     need: "Continuous maths: function plots, areas, Riemann sums, geometric proofs, linear maps, vector fields",
@@ -144,9 +150,9 @@ export const VIDEO_TOOL_ROUTES: readonly VideoToolRoute[] = [
     why: "Springs, `compositeOperation`, `cache` masks, radial gradients, flexbox layout, signals binding one node to another",
   },
   {
-    need: "Boxes, tables and arrows with nothing above",
-    tool: "manimkc",
-    why: "It is the house style of every series so far, and the studio can already make it",
+    need: "Nothing above: boxes, tables, arrows, a diagram that builds up, text",
+    tool: "remotionkc",
+    why: "It lays out with CSS and has charts, code, a terminal, KaTeX and three.js to vary the shots with, and the studio can make it (D112 of STUDIO-LOOK.md)",
   },
 ];
 

@@ -9,7 +9,7 @@ import { describeVideoBriefEdit, EDITABLE_VIDEO_FIELDS } from "../src/drafts/dra
 import { PLANNER_VIDEO_FIELDS } from "../src/drafts/planner";
 import { changingSummary, combinedPrompt, toolsBlock } from "../src/drafts/planner-prompt";
 import { TOOL_REASON_MAX, validateVideoBrief } from "../src/video/brief";
-import { briefTool, notInStudio, toolsHealth, VIDEO_TOOL_CAPABILITIES, VIDEO_TOOL_NAMES, VIDEO_TOOL_ROUTES, VIDEO_TOOLS } from "../src/video/tools";
+import { briefTool, DEFAULT_VIDEO_TOOL, notInStudio, toolsHealth, VIDEO_TOOL_CAPABILITIES, VIDEO_TOOL_NAMES, VIDEO_TOOL_ROUTES, VIDEO_TOOLS } from "../src/video/tools";
 
 import { testVocabulary } from "./vocabulary";
 
@@ -59,6 +59,14 @@ describe("the routing rows", () => {
 
   it("name only the three tools, bar the series row", () => {
     for (const route of VIDEO_TOOL_ROUTES.slice(1)) expect(VIDEO_TOOL_NAMES).toContain(route.tool);
+  });
+
+  it("send a video no other row claims to remotionkc, while a brief with no tool stays manimkc's (D112, D72)", () => {
+    // D112 of docs/STUDIO-LOOK.md moved the routing default; D72's default is
+    // how an old brief with no `tool` keeps its meaning, so it does not move.
+    expect(VIDEO_TOOL_ROUTES.at(-1)?.tool).toBe("remotionkc");
+    expect(VIDEO_TOOL_ROUTES[0]?.need).toContain("series");
+    expect(DEFAULT_VIDEO_TOOL).toBe("manimkc");
   });
 });
 
@@ -121,7 +129,7 @@ describe("the TOOLS block", () => {
       expect(next).toBeGreaterThan(at);
       at = next;
     }
-    expect(block).toContain("use manimkc.");
+    expect(block).toContain("When no row above the last fits, use remotionkc.");
     for (const row of VIDEO_TOOL_CAPABILITIES) {
       const next = block.indexOf(`${row.capability} | ${row.manimkc} | ${row.remotionkc} | ${row.revideokc}`, at);
       expect(next).toBeGreaterThan(at);
