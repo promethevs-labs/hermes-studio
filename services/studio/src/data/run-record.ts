@@ -164,6 +164,7 @@ export interface RunSource {
   agentEffort?: { passed: string | null } | null;
   resolvedModel?: string | null;
   manualHash?: string | null;
+  manualVersion?: string | null;
   agentAuth?: string | null;
   attempts?: readonly JobRunAttempt[];
 }
@@ -178,6 +179,8 @@ export function buildJobRun(
     model: { passed: record.agentModel?.passed ?? null, resolved: record.resolvedModel ?? null },
     effort: record.agentEffort?.passed ?? null,
     manualHash: record.manualHash ?? null,
+    // Only a record that has one: an older job's run record stays as it was.
+    ...(record.manualVersion === undefined ? {} : { manualVersion: record.manualVersion }),
     auth: record.agentAuth ?? null,
     attempts: [...(record.attempts ?? [])],
     calls: extra.calls ?? {},

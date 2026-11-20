@@ -9,6 +9,20 @@ This project is continuously deployed and not versioned; entries are grouped by 
 
 ### Fixed
 
+- **The eval report's "by prompt version" groups can compare manuals.** A video
+  job's manual text holds the job's own wrapper path, so its `manualHash` (the
+  name of the file the agent read) differed for every job: the 2026-11-20
+  benchmark recorded 12 hashes for 12 jobs made minutes apart on the same code,
+  one group each. Jobs now also record `manualVersion`, the hash of the manual's
+  text with every per-job path normalised out (`manualVersionOf`,
+  `services/studio/src/video/manual.ts`, for all three video backends), on the
+  job, in the run record and in the job view. `manualHash` and its file are
+  unchanged. `JobRun` and `checkJobRun` accept the new optional key, so older
+  run records stay valid. The report groups by `manualVersion` and falls back
+  to `manualHash` for a job without one; `--json` keeps every field and adds
+  `keyedOn` to each `byManual` row, and the text marks a hash-keyed group with
+  `*` only when both kinds appear. The tldraw manual has no per-job text, so a
+  diagram job's hash is already its version.
 - **`catalog eval report` no longer counts an expired login as the agent's
   failure.** The accept rate was accepted over accepted, discarded and failed,
   so one day of "Failed to authenticate: OAuth session expired" took the

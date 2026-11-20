@@ -79,6 +79,7 @@ function reportJob(row: JobRow): NonNullable<ReportVideo["job"]> {
     model: run?.model.resolved ?? run?.model.passed ?? null,
     effort: run?.effort ?? null,
     manualHash: run?.manualHash ?? null,
+    manualVersion: run?.manualVersion ?? null,
     costUsd: row.costUsd,
     turns: row.turns,
     wallSeconds: wallSeconds(row),
@@ -118,6 +119,7 @@ function reportRating(
         : {
             model: judged?.run?.model.resolved ?? judged?.run?.model.passed ?? null,
             manualHash: judged?.run?.manualHash ?? null,
+            manualVersion: judged?.run?.manualVersion ?? null,
           },
     stale,
   };
@@ -199,6 +201,7 @@ export async function readReportInputs(
       state: row.state,
       model: row.run?.model.resolved ?? row.run?.model.passed ?? null,
       manualHash: row.run?.manualHash ?? null,
+      manualVersion: row.run?.manualVersion ?? null,
       costUsd: row.costUsd,
       turns: row.turns,
       wallSeconds: wallSeconds(row),

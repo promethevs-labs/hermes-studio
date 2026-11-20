@@ -3,6 +3,7 @@ import path from "node:path";
 import { run } from "../../proc";
 import { DATA_FENCE, DATA_FENCE_END } from "../../diagram/prompt";
 import { numberedSteps, videoPromptFacing } from "../prompt";
+import { manualVersionOf } from "../manual";
 import { shotTypesSection } from "../shots";
 import type { VideoPromptRequest } from "../backend";
 import type { VideoPaths } from "../paths";
@@ -138,6 +139,11 @@ export async function revideokcApiListing(tools: RevideokcToolchain): Promise<{ 
 /** The manual's text for a job's wrapper and paths, and a listing. */
 export function revideokcManualText(wrapper: string, listing: string, paths: VideoPaths): string {
   return sections(wrapper, listing, paths);
+}
+
+/** The version of the manual for a listing (`manualVersionOf`): its text with the job's own paths normalised out. */
+export function revideokcManualVersion(listing: string): string {
+  return manualVersionOf((wrapper, paths) => sections(wrapper, listing, paths));
 }
 
 const AUDIENCE: Record<"new" | "familiar" | "expert", string> = {

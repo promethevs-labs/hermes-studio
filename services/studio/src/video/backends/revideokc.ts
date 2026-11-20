@@ -11,7 +11,7 @@ import { narratedLines, revideokcClipKeys } from "../revideokc/clips";
 import { runRevideokcDoctor } from "../revideokc/doctor";
 import { REVIDEOKC_GATE } from "../revideokc/gate";
 import { revideokcGateTools } from "../revideokc/gate-tools";
-import { revideokcApiListing, revideokcManualText, revideokcPrompt } from "../revideokc/manual";
+import { revideokcApiListing, revideokcManualText, revideokcPrompt, revideokcManualVersion } from "../revideokc/manual";
 import { jobPorts } from "../revideokc/ports";
 import { buildRevideokcProfile, readPorts, writePorts } from "../revideokc/sandbox";
 import { buildRevideokcSettings } from "../revideokc/settings";
@@ -88,6 +88,8 @@ export const revideokcBackend: VideoBackend = {
   },
 
   manual: (wrapper, listing, paths) => revideokcManualText(wrapper, listing, paths),
+
+  manualVersion: (listing) => revideokcManualVersion(listing),
 
   settings(job, input) {
     const tools = asRevideokc(job);

@@ -928,6 +928,25 @@ fence. The manual is appended with `--append-system-prompt-file`, hashed and
 recorded on the job as `manualHash`, exactly as D38. It is the manimkc-video
 skill, rewritten for a session with one command. Its sections:
 
+The manual's text holds the job's own paths (the wrapper, the scene file, the
+narration, the sheets), so each job's `manualHash` differs: it names the file
+the agent read, `$STUDIO_HOME/manual/video/<hash>.md`, and nothing groups
+by it. The job also records `manualVersion`, the hash of the same text
+rendered against fixed placeholder paths (`manualVersionOf` in
+`services/studio/src/video/manual.ts`, called by each backend's
+`manualVersion` beside its `manual`), so two jobs under one manual share a
+version and a change to the manual's real content changes it. Per backend:
+manimkc's text holds the wrapper and the shot guide's path; remotionkc's and
+revideokc's also hold the scene file, the narration, the docs folder, the
+shot guide, Remotion's guides folder and the build's sheet path, all under
+the job's directory with the slug in them; all of those are normalised. One
+fact about a job's checkout stays in the version because it is content:
+whether Remotion's own guides were copied in (the manual lists them when they
+were). The library listing is the real checkout's and is the same for every
+job. A revise or resume keeps its parent's `manualVersion` as it keeps the
+parent's `manualHash`. `catalog eval report` groups by `manualVersion`, and
+falls back to `manualHash` for a job recorded without one.
+
 | Section | Content | Source |
 | --- | --- | --- |
 | Your commands | `video api [names]`, `video lint`, `video narrate [Scene ...]`, `video preview [Scene ...]`, `video build`, spelled as the absolute wrapper path, and that nothing else runs | Static |
@@ -1476,7 +1495,7 @@ to `catalog job finish --run-file`. It carries `harness` (`claude-code` and
 the CLI's version, read from `claude_code_version` on the session's
 `system/init` event, null when the stream named none; no process is spawned
 to ask), `model` (the model passed and the one the init event named),
-`effort`, `manualHash`, `auth`, `attempts`, `calls` (how many times the job
+`effort`, `manualHash`, `manualVersion`, `auth`, `attempts`, `calls` (how many times the job
 called each wrapper verb, counted from `calls.ndjson`), `renderSeconds` (the
 `render` steps' own durations summed over the preview, still and build
 calls, a call with no steps counted by its wall time, null when the job made
@@ -1643,7 +1662,7 @@ nothing is resolved at enqueue.
 `agentEffort`, each `{ requested, passed, source }` with `source` one of
 `panel`, `claude-settings` or `cli` (and, for a diagram job, `brief` when the
 brief names a model and `default` for today's `sonnet` with no row), and `resolvedModel` from the session's
-init event, beside `agentAuth` and `manualHash` and for the same reason not on
+init event, beside `agentAuth`, `manualHash` and `manualVersion` and for the same reason not on
 the catalog row: they are decided after enqueue wrote it.
 
 **Cost.** A session that ends cleanly records the CLI's own

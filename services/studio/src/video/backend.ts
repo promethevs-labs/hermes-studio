@@ -103,6 +103,13 @@ export interface VideoBackend extends VideoGateChecks {
   keepClips(job: BackendJob): Promise<void>;
   /** The agent's manual for a job's command, a library listing and the job's paths. */
   manual(wrapper: string, listing: string, paths: VideoPaths): string;
+  /**
+   * The version of the manual `manual` writes for these inputs: the hash of
+   * its text with the job's own paths normalised out (`manualVersionOf`).
+   * `paths` are the job's real ones, read only for a fact about the job's
+   * checkout that changes the text.
+   */
+  manualVersion(listing: string, paths: VideoPaths): string;
   /** The agent's permission file, around the runner's Bash guard. */
   settings(job: BackendJob, input: { jobId: string; guard: string; source?: string }): VideoAgentSettings;
   /** The agent's user message for this attempt. */

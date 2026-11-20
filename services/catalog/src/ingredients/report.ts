@@ -41,7 +41,7 @@ export interface ReportVideo {
      * null for a video made at a terminal, whose rating goes with the video's
      * own row.
      */
-    job?: { model: string | null; manualHash: string | null } | null;
+    job?: { model: string | null; manualHash: string | null; manualVersion?: string | null } | null;
     /** True when the rating judged an older version than the video now is. */
     stale?: boolean;
   } | null;
@@ -49,6 +49,8 @@ export interface ReportVideo {
     model: string | null;
     effort: string | null;
     manualHash: string | null;
+    /** Absent is read as null: a job recorded before manual versions. */
+    manualVersion?: string | null;
     costUsd: number | null;
     turns: number | null;
     wallSeconds: number | null;
@@ -69,6 +71,8 @@ export interface ReportJob {
   state: string;
   model: string | null;
   manualHash: string | null;
+  /** Absent is read as null: a job recorded before manual versions. */
+  manualVersion?: string | null;
   costUsd: number | null;
   turns: number | null;
   wallSeconds: number | null;
@@ -155,11 +159,20 @@ export interface CorpusSummary {
   underusedHelpers: string[];
 }
 
+/** What a `byManual` group's key is: the manual's version, or its hash for a job recorded before versions. */
+export type ManualKeyedOn = "version" | "hash";
+
+/** A `byManual` row. `keyedOn` is null for the groups that name no manual (`(none)`, `(no job)`). */
+export interface ManualGroupRow extends GroupRow {
+  keyedOn: ManualKeyedOn | null;
+}
+
 export interface EvalReport {
   totals: GroupRow;
   byTool: GroupRow[];
   byModel: GroupRow[];
-  byManual: GroupRow[];
+  /** By the manual's version, or by its hash for a job with no version. Each row says which (`keyedOn`). */
+  byManual: ManualGroupRow[];
   corpus: CorpusSummary;
 }
 
@@ -246,13 +259,18 @@ function tally(tags: string[]): TagCount[] {
 // ---------------------------------------------------------------------------
 
 /** One rating, with the keys it is counted under in each grouping. */
+interface ManualKey {
+  key: string;
+  keyedOn: ManualKeyedOn | null;
+}
+
 interface RatingEntry {
   value: -1 | 1;
   tags: string[];
   stale: boolean;
   tool: string;
   model: string;
-  manual: string;
+  manual: ManualKey;
 }
 
 /** The ratings of `videos`, each with where it is counted. A rating of 0 is not one. */
@@ -270,7 +288,7 @@ function ratingEntries(videos: ReportVideo[]): RatingEntry[] {
       stale: r.stale === true,
       tool: v.tool,
       model: judged ? (judged.model ?? UNKNOWN) : v.job ? (v.job.model ?? UNKNOWN) : NO_JOB,
-      manual: judged ? (judged.manualHash ?? NO_MANUAL) : v.job ? (v.job.manualHash ?? NO_MANUAL) : NO_JOB,
+      manual: judged ? manualKey(judged) : v.job ? manualKey(v.job) : manualKey(null),
     });
   }
   return entries;
@@ -377,6 +395,19 @@ const NO_JOB = "(no job)";
 const UNKNOWN = "unknown";
 const NO_MANUAL = "(none)";
 
+/**
+ * What a job's manual is grouped by: its version when it has one, else its
+ * hash, so a record from before versions keeps the group it always had.
+ * `manualHash` names a file whose text holds the job's own paths, so for a
+ * video job it differs from every other job's; `manualVersion` does not.
+ */
+function manualKey(job: { manualVersion?: string | null; manualHash: string | null } | null): ManualKey {
+  if (job === null) return { key: NO_JOB, keyedOn: null };
+  if (job.manualVersion !== undefined && job.manualVersion !== null) return { key: job.manualVersion, keyedOn: "version" };
+  if (job.manualHash !== null) return { key: job.manualHash, keyedOn: "hash" };
+  return { key: NO_MANUAL, keyedOn: null };
+}
+
 // ---------------------------------------------------------------------------
 // Corpus
 // ---------------------------------------------------------------------------
@@ -452,6 +483,12 @@ export function evalReport(
   libraryNames?: readonly string[],
 ): EvalReport {
   const ratings = ratingEntries(videos);
+  // Which kind of value each manual group is keyed on, for the `keyedOn` of its row.
+  const keyedOn = new Map<string, ManualKeyedOn>();
+  const note = (k: ManualKey): string => {
+    if (k.keyedOn !== null) keyedOn.set(k.key, k.keyedOn);
+    return k.key;
+  };
   return {
     totals: groupRow("all", videos, extraJobs, ratings),
     byTool: groupBy(
@@ -474,10 +511,10 @@ export function evalReport(
       videos,
       extraJobs,
       ratings,
-      (v) => (v.job ? (v.job.manualHash ?? NO_MANUAL) : NO_JOB),
-      (j) => j.manualHash ?? NO_MANUAL,
-      (r) => r.manual,
-    ),
+      (v) => note(manualKey(v.job)),
+      (j) => note(manualKey(j)),
+      (r) => note(r.manual),
+    ).map((row) => ({ ...row, keyedOn: keyedOn.get(row.key) ?? null })),
     corpus: corpusSummary(videos, libraryNames),
   };
 }
@@ -656,16 +693,20 @@ export function formatEvalReport(report: EvalReport): string {
 
   out.push(...groupSection("By tool", report.byTool, "Tool"));
   out.push(...groupSection("By model", report.byModel, "Model"));
-  out.push(
-    ...groupSection(
-      "By prompt version",
-      report.byManual.map((r) => ({
-        ...r,
-        key: r.key.startsWith("(") ? r.key : r.key.slice(0, 8),
-      })),
-      "Manual",
-    ),
+  // A group is keyed on the manual's version, or on its hash for a job
+  // recorded before versions. Say which only when the two sit side by side.
+  const mixed =
+    report.byManual.some((r) => r.keyedOn === "version") && report.byManual.some((r) => r.keyedOn === "hash");
+  const promptVersions = groupSection(
+    "By prompt version",
+    report.byManual.map((r) => ({
+      ...r,
+      key: r.key.startsWith("(") ? r.key : `${r.key.slice(0, 8)}${mixed && r.keyedOn === "hash" ? "*" : ""}`,
+    })),
+    "Manual",
   );
+  if (mixed) promptVersions.splice(-1, 0, "  *: an older job with no manual version, grouped by its manual's hash.");
+  out.push(...promptVersions);
 
   const c = report.corpus;
   out.push("Corpus calls", "");

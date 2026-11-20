@@ -992,6 +992,15 @@ export interface JobRun {
   model: { passed: string | null; resolved: string | null };
   effort: string | null;
   manualHash: string | null;
+  /**
+   * The hash of the manual's text with everything job-specific normalised
+   * out (the job's own paths), so two jobs run under the same manual share
+   * one. `manualHash` names the file the agent read and differs for every
+   * video job; this is the value to group jobs by. The one key a run record
+   * may leave out: a record written before it existed has none, and keeps
+   * none when checked.
+   */
+  manualVersion?: string | null;
   auth: string | null;
   attempts: JobRunAttempt[];
   /** How many times the job called each tool or helper, by name. */
@@ -1216,7 +1225,11 @@ const JOB_RUN_KEYS = [
   "calls",
   "renderSeconds",
   "transcriptPath",
+  "manualVersion",
 ] as const;
+
+/** The keys of a run record that a record written before they existed may leave out. */
+const JOB_RUN_OPTIONAL_KEYS: readonly string[] = ["manualVersion"];
 
 /**
  * A `JobRun` checked field by field, the way `catalog job finish --run-file`
@@ -1229,7 +1242,7 @@ export function checkJobRun(input: unknown): { ok: true; run: JobRun } | { ok: f
   if (!isPlainObject(input)) return { ok: false, reason: "A run record is a JSON object." };
   const stray = strayKeys(input, JOB_RUN_KEYS);
   if (stray.length > 0) return { ok: false, reason: `The run record has unknown fields: ${stray.join(", ")}.` };
-  const missing = JOB_RUN_KEYS.filter((key) => !Object.hasOwn(input, key));
+  const missing = JOB_RUN_KEYS.filter((key) => !JOB_RUN_OPTIONAL_KEYS.includes(key) && !Object.hasOwn(input, key));
   if (missing.length > 0) return { ok: false, reason: `The run record is missing: ${missing.join(", ")}.` };
 
   const harness = input.harness;
@@ -1255,6 +1268,14 @@ export function checkJobRun(input: unknown): { ok: true; run: JobRun } | { ok: f
     const checked = shortText(input[key], key, true);
     if (!checked.ok) return checked;
     texts[key] = checked.value;
+  }
+
+  // Carried only when the input had it, so an older record comes back as it went in.
+  let manualVersion: string | null | undefined;
+  if (Object.hasOwn(input, "manualVersion")) {
+    const checked = shortText(input.manualVersion, "manualVersion", true);
+    if (!checked.ok) return checked;
+    manualVersion = checked.value;
   }
 
   if (!Array.isArray(input.attempts) || input.attempts.length > JOB_RUN_LIMITS.maxAttempts) {
@@ -1299,6 +1320,7 @@ export function checkJobRun(input: unknown): { ok: true; run: JobRun } | { ok: f
       model: { passed: passed.value, resolved: resolved.value },
       effort: texts.effort,
       manualHash: texts.manualHash,
+      ...(manualVersion === undefined ? {} : { manualVersion }),
       auth: texts.auth,
       attempts,
       calls,

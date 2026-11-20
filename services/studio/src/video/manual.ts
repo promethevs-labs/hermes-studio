@@ -4,7 +4,8 @@ import path from "node:path";
 
 import { manualDir } from "../paths";
 import { run } from "../proc";
-import type { VideoPaths } from "./paths";
+import { rebasePaths } from "./checkout";
+import { videoPaths, type VideoPaths } from "./paths";
 import { shotTypesSection } from "./shots";
 import type { Toolchain } from "./toolchain";
 
@@ -274,6 +275,28 @@ export async function writeManual(text: string): Promise<VideoManual> {
   const existing = await readFile(file, "utf8").catch(() => null);
   if (existing !== text) await writeFile(file, text, "utf8");
   return { hash, path: file, chars: text.length };
+}
+
+/**
+ * The directory a manual's version is rendered against. Every path in a
+ * manual (the wrapper, the scene file, the narration, the sheets) is under
+ * the job's directory, so the version of a manual is the hash of its text
+ * with those paths moved here and the job's slug made `topic`. A fixed place,
+ * not under `STUDIO_HOME`, so the version is the same on every machine.
+ */
+const VERSION_JOB_DIR = "/manual-version/jobs/job";
+
+/**
+ * The hash of a manual's text with every job-specific path normalised: the
+ * value two jobs run under the same manual share, where `manualHash` (the hash
+ * of the text a job's own paths are in, and the name of its file) is different
+ * for each. Each backend gives its own render of the text, so this comes from
+ * the same function that writes the manual and cannot drift from it. A change
+ * to the manual's real content changes the version.
+ */
+export function manualVersionOf(render: (wrapper: string, paths: VideoPaths) => string): string {
+  const paths = rebasePaths(videoPaths("job", "topic"), VERSION_JOB_DIR);
+  return createHash("sha256").update(render(paths.wrapper, paths)).digest("hex");
 }
 
 /** The path of a manual already written under its hash, if its bytes still match. */
