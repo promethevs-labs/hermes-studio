@@ -1095,9 +1095,11 @@ not have to be worked out again.
   marker is put right. A root already claimed by the real database refuses the
   scratch import instead, naming nothing uploaded. That happened on
   2026-11-20. Set `HERMES_HOME` to a temp directory on every command of a
-  scratch recipe, next to `CATALOG_DB` (with `HERMES_HOME` set and no
-  `CATALOG_DB`, the database is `$HERMES_HOME/catalog.db` and the blobs sit
-  beside it, so it alone isolates both). `npm run e2e` in its default
+  scratch recipe, next to `CATALOG_DB`. Keep both: `HERMES_HOME` alone moves
+  the database to `$HERMES_HOME/catalog.db` only when neither `CATALOG_DB` nor
+  a `DATABASE_URL` that names a file is set in the shell or in
+  `services/catalog/.env` (`databaseUrl()` reads those first), so on its own
+  it can still open the real database. `npm run e2e` in its default
   seed mode already does this (`SEED_HOME` in `scripts/e2e.mjs`), and
   `scripts/worktree-setup.sh` only migrates its scratch file, which writes no
   blob; a hand-written recipe, a doc or a script that imports with only
