@@ -676,12 +676,18 @@ async function run() {
     assert((await node.locator('[data-spine-concept]').count()) > 0, `${topic}'s node holds no concepts`);
     const toggle = node.locator('[data-spine-toggle]');
     await hydrated(page, toggle);
-    if ((await node.getAttribute('data-done')) !== 'true') assert((await toggle.getAttribute('aria-expanded')) === 'true', `${topic} starts folded though it is not mastered`);
-    await toggle.click();
-    await node.and(page.locator('[data-open="false"]')).waitFor();
-    assert((await toggle.getAttribute('aria-expanded')) === 'false', 'a press did not fold the topic');
-    await toggle.click();
-    await node.and(page.locator('[data-open="true"]')).waitFor();
+    // D15: a topic starts folded only when all its concepts are mastered (a --copy run can hold one), open otherwise.
+    const startsOpen = (await toggle.getAttribute('aria-expanded')) === 'true';
+    if (!startsOpen) assert((await node.getAttribute('data-done')) === 'true', `${topic} starts folded though it is not mastered`);
+    const pressTo = async (open) => {
+      await toggle.click();
+      await node.and(page.locator(`[data-open="${open}"]`)).waitFor();
+      assert((await toggle.getAttribute('aria-expanded')) === String(open), `a press did not ${open ? 'open' : 'fold'} the topic`);
+    };
+    // Press it away from its starting state and back, then leave it open for what follows.
+    await pressTo(!startsOpen);
+    await pressTo(startsOpen);
+    if (!startsOpen) await pressTo(true);
 
     // D16: hovering a concept keeps it and its neighbours lit, fades the rest, and the list follows.
     const attention = spine.locator('[data-spine-concept="self-attention"]');
