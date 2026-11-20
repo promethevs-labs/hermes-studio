@@ -311,6 +311,7 @@ export function DraftPanel({
   // H8: a conversation opened on a concept takes a bare tag, which means "of this concept".
   const valueBlock = valueSendBlock(value, empty && concept === null);
   const busy = view.inFlight || pending !== null;
+  const indicator = turnIndicator(view, stream !== null);
   // A turn taken since the panel opened: what it brings (the reply being
   // written, a problem, the turn limit) arrives as news. On opening they are
   // part of the conversation as it stood, and stand still.
@@ -469,7 +470,8 @@ export function DraftPanel({
           <Arrive animate={liveTurn}>
             <Streaming
               text={stream?.text ?? null}
-              checking={pending === null && turnIndicator(view, stream !== null) === "checking"}
+              checking={pending === null && indicator !== null && indicator !== "thinking"}
+              shots={pending === null && indicator === "shots"}
             />
           </Arrive>
         )}

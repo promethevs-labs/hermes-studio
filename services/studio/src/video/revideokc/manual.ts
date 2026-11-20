@@ -2,7 +2,8 @@ import path from "node:path";
 
 import { run } from "../../proc";
 import { DATA_FENCE, DATA_FENCE_END } from "../../diagram/prompt";
-import { videoPromptFacing } from "../prompt";
+import { numberedSteps, videoPromptFacing } from "../prompt";
+import { shotTypesSection } from "../shots";
 import type { VideoPromptRequest } from "../backend";
 import type { VideoPaths } from "../paths";
 import { FIXTURE_SCENE } from "./fixture";
@@ -93,7 +94,7 @@ This machine's doctor rendered this inside the same sandbox your renders run in:
 ${FIXTURE_SCENE.trim()}
 \`\`\`
 
-## Looking at a sheet
+${shotTypesSection()}## Looking at a sheet
 
 In this order: anything cut off at the frame edge; two things overlapping; text hidden behind a 3D card in front of it; a label on the wrong row or box; an object from an earlier beat still on screen; an empty half of the frame. Then the timing: a still at a line's end should show what that line described, and every late cue is an animation that overran its narration.
 
@@ -159,11 +160,17 @@ export function revideokcPrompt(request: VideoPromptRequest): string {
         ``,
         `# What to do`,
         ``,
-        `1. Read CAPABILITIES.md, then write the scene: every chapter of narration.json, in order, keeping the scene names: ${request.classes.join(", ")}.`,
-        `2. Start from the brief's lines: each beat's \`say\` is one line of its chapter, and its \`show\` is what the screen does while that line plays. Cue each thing on the word that names it.`,
-        `3. Every beat's \`labels\` must be on screen during that beat, as text inside a string in your source.`,
-        `4. \`lint\`, \`still\`, Read the sheet it prints and its late cues, fix, \`still\` again, and when the sheet is clean, \`build\` and Read the build's sheet.`,
-        `5. Your final message: the length, every line you changed and why, any late cues left, and anything you could not check.`,
+        ...numberedSteps(
+          [
+            `Read CAPABILITIES.md, then write the scene: every chapter of narration.json, in order, keeping the scene names: ${request.classes.join(", ")}.`,
+            `Start from the brief's lines: each beat's \`say\` is one line of its chapter, and its \`show\` is what the screen does while that line plays. Cue each thing on the word that names it.`,
+            `Every beat's \`labels\` must be on screen during that beat, as text inside a string in your source.`,
+            `\`lint\`, \`still\`, Read the sheet it prints and its late cues, fix, \`still\` again, and when the sheet is clean, \`build\` and Read the build's sheet.`,
+            `Your final message: the length, every line you changed and why, any late cues left, and anything you could not check.`,
+          ],
+          brief,
+          2,
+        ),
         ``,
         `Pitch it for ${AUDIENCE[brief.audience]}. Aim for about ${brief.targetSeconds} seconds.`,
         ...(request.seededNote === undefined ? [] : [``, request.seededNote]),

@@ -1593,3 +1593,85 @@ export function isNarratedVoice(voice: string): boolean {
 export function silentSeconds(scenes: ReadonlyArray<{ beats: ReadonlyArray<{ seconds?: number }> }>): number {
   return scenes.reduce((sum, scene) => sum + scene.beats.reduce((s, beat) => s + (beat.seconds ?? 0), 0), 0);
 }
+
+/* -------------------------------------------------------------------------- */
+/* The shot plan (docs/STUDIO-VIDEOS.md, "The shot plan")                     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The kinds of picture a scene can be built as. The art director picks one
+ * per scene, the card shows it, and the video agent builds the scene to it.
+ */
+export const SHOT_TYPES = [
+  "title",
+  "build-up-diagram",
+  "code-walk",
+  "data-chart",
+  "comparison",
+  "timeline",
+  "array-or-memory",
+  "tree-or-graph",
+  "equation",
+  "object-3d",
+  "metaphor",
+  "recap-map",
+] as const;
+export type ShotType = (typeof SHOT_TYPES)[number];
+
+/** Each shot type as the card names it, in sentence case. */
+export const SHOT_TYPE_LABELS: Readonly<Record<ShotType, string>> = {
+  title: "Title",
+  "build-up-diagram": "Build-up diagram",
+  "code-walk": "Code walk",
+  "data-chart": "Data chart",
+  comparison: "Comparison",
+  timeline: "Timeline",
+  "array-or-memory": "Array or memory view",
+  "tree-or-graph": "Tree or graph",
+  equation: "Equation",
+  "object-3d": "3D object",
+  metaphor: "Metaphor",
+  "recap-map": "Recap map",
+};
+
+/**
+ * When each shot type is the right picture, one line each. These lines go
+ * into the art director's prompt and into each video tool's manual, so a
+ * change here changes both.
+ */
+export const SHOT_TYPE_USE: Readonly<Record<ShotType, string>> = {
+  title: "the opening only: the video's question or claim in large type, with one small picture that hints at the answer",
+  "build-up-diagram": "a mechanism with parts: boxes and arrows added one piece per beat until the whole system is on screen",
+  "code-walk": "real code read line by line: a code panel with the current line highlighted and its effect shown beside it",
+  "data-chart": "numbers compared or changing: a line, bar or share chart drawn from real values",
+  comparison: "two or three options side by side: matching columns or panels, with the difference marked on each",
+  timeline: "events or steps in order over time: an axis that fills from left to right as the voice moves on",
+  "array-or-memory": "how data sits in memory: cells in a row or grid, with indices, pointers and values that move or change",
+  "tree-or-graph": "nodes and edges: a hierarchy, a network or a search, with the current node or path lit",
+  equation: "a formula derived or explained: its terms built up and changed in place, each part tied to what it means",
+  "object-3d": "a physical thing or a shape in space: one object turned or cut open in depth, with light and shadow",
+  metaphor: "an abstract idea shown as a familiar picture (a queue at a counter, water in a pipe), then mapped back to the real terms",
+  "recap-map": "the closing only: every earlier idea as one small labelled map, each lit in turn as the voice names it",
+};
+
+/** One scene's picture plan, approved by a person on the card. */
+export interface VideoShot {
+  type: ShotType;
+  /** Where things sit in the frame, in frame terms: left third, centre, top band. */
+  layout: string;
+  /** The one motion idea that carries the scene. */
+  motion: string;
+  /** What the eye must land on, and how it is marked. */
+  emphasis: string;
+}
+
+/** The longest each shot field may be, in characters. */
+export const SHOT_TEXT_LIMITS: Readonly<Record<"layout" | "motion" | "emphasis", number>> = {
+  layout: 200,
+  motion: 200,
+  emphasis: 160,
+};
+
+export function isShotType(value: unknown): value is ShotType {
+  return typeof value === "string" && (SHOT_TYPES as readonly string[]).includes(value);
+}

@@ -385,6 +385,27 @@ async function handle(
     return draftRoutes(request, response, segments, method, url, drafts);
   }
 
+  /*
+   * /api/video/shots: a video brief's shot plan from the art director, for a
+   * tool such as the benchmark harness (docs/STUDIO-VIDEOS.md, "The shot plan").
+   */
+  if (segments[1] === "video" && segments[2] === "shots" && segments.length === 3) {
+    if (method !== "POST") return fail(response, 405, `${method} is not a thing /api/video/shots does`);
+    if (drafts === undefined) return fail(response, 404, "this studio was started without drafts, which plan the shots");
+    let body: unknown;
+    try {
+      body = await readJson(request);
+    } catch (error) {
+      return badBody(response, error);
+    }
+    try {
+      return send(response, 200, await drafts.planShots(body));
+    } catch (error) {
+      if (error instanceof JobRefused) return fail(response, error.status, error.message, error.detail);
+      throw error;
+    }
+  }
+
   /* /api/videos: the owner's landed studio videos, for the grid's poster tiles. */
   if (segments[1] === "videos" && segments.length === 2) {
     if (method !== "GET") return fail(response, 405, `${method} is not a thing /api/videos does`);
@@ -449,6 +470,7 @@ async function handle(
         "/api/diagrams/{name}/export|verify|inspect",
         "/api/mirrors",
         "/api/vocabulary",
+        "POST /api/video/shots",
         "/api/health",
       ],
     });

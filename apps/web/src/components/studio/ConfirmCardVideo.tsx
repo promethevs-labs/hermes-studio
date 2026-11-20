@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Chip } from "@/components/ui/Chip";
 import { FilterMenu } from "@/components/ui/FilterMenu";
-import { CARD_TITLE, cx } from "@/components/ui/classes";
+import { CARD_TITLE, cx, LABEL } from "@/components/ui/classes";
 import { Glyph } from "@/components/ui/Glyph";
 import { Callout } from "@/components/ui/Callout";
 import { ErrorText } from "@/components/ui/ErrorText";
@@ -20,8 +20,11 @@ import {
   beatCount,
   chapterTitle,
   isNarrated,
+  NO_SHOT_PLAN,
   sceneSeconds,
   shortLength,
+  shotLabel,
+  shotSummaryLine,
   toolRow,
   videoModeLine,
   videoSummaryLine,
@@ -122,6 +125,7 @@ export function ConfirmCardVideo({
   const mode = videoModeLine(brief);
   const warning = abbreviationWarning(runnerAbbreviations ?? abbreviations(brief));
   const holder = block?.holder ?? refusal?.holder ?? null;
+  const shotLine = shotSummaryLine(brief);
 
   return (
     <Card
@@ -162,11 +166,15 @@ export function ConfirmCardVideo({
             tools={tools}
             onSwitch={live && editBlock === null ? onSwitchTool : undefined}
           />
+          {shotLine !== null && <p className="text-[13px] leading-5 text-text2">{shotLine}</p>}
           <p className="flex flex-wrap items-center gap-x-1.5 text-[13px] text-text2">
             {mode.lead} <code className="rounded bg-surface2 px-1 py-0.5 font-mono text-[12px] text-text">{mode.slug}</code>
           </p>
 
-          <Storyboard brief={brief} charsPerSecond={charsPerSecond} />
+          <div className="flex flex-col gap-1.5">
+            <Storyboard brief={brief} charsPerSecond={charsPerSecond} />
+            {live && shotLine === null && <p className="text-[12px] leading-4 text-text3">{NO_SHOT_PLAN}</p>}
+          </div>
 
           {warning !== null && <Callout>{warning}</Callout>}
         </div>
@@ -218,7 +226,18 @@ export function ConfirmCardVideo({
   );
 }
 
-/** One collapsed row per scene; open, every beat as it will be spoken and shown. */
+/** The three rows of an open scene's shot, in order, with the name each row shows. */
+const SHOT_ROWS = [
+  ["layout", "Layout"],
+  ["motion", "Motion"],
+  ["emphasis", "Emphasis"],
+] as const;
+
+/**
+ * One collapsed row per scene, with its shot type when the brief has a shot
+ * plan; open, the shot's layout, motion and emphasis, then every beat as it
+ * will be spoken and shown.
+ */
 function Storyboard({ brief, charsPerSecond }: { brief: VideoBrief; charsPerSecond: number | undefined }) {
   const narrated = isNarrated(brief);
   const [open, setOpen] = useState<ReadonlySet<number>>(new Set());
@@ -247,6 +266,11 @@ function Storyboard({ brief, charsPerSecond }: { brief: VideoBrief; charsPerSeco
                 <>
                   <span className="w-5 shrink-0 text-[12px] tabular-nums text-text3">{at + 1}</span>
                   <span className="min-w-0 flex-1 text-[14px] font-medium text-text">{chapterTitle(scene.name)}</span>
+                  {scene.shot !== undefined && (
+                    <Chip size="sm" className="shrink-0">
+                      {shotLabel(scene.shot)}
+                    </Chip>
+                  )}
                   <span className="shrink-0 text-[12px] tabular-nums text-text2">
                     {beatCount(scene.beats.length)} · {shortLength(sceneSeconds(scene, narrated, charsPerSecond))}
                   </span>
@@ -261,7 +285,18 @@ function Storyboard({ brief, charsPerSecond }: { brief: VideoBrief; charsPerSeco
                 </>
               }
             >
-              <ol className="flex flex-col gap-3 px-3 pb-3 pl-11 pt-1">
+              <div className="flex flex-col gap-3 px-3 pb-3 pl-11 pt-1">
+              {scene.shot !== undefined && (
+                <dl aria-label="Shot" className="flex flex-col gap-1.5 rounded-lg bg-surface2 px-3 py-2">
+                  {SHOT_ROWS.map(([field, name]) => (
+                    <div key={field} className="flex gap-3">
+                      <dt className={cx(LABEL, "w-16 shrink-0 pt-0.5")}>{name}</dt>
+                      <dd className="min-w-0 text-[13px] leading-5 text-text">{scene.shot![field]}</dd>
+                    </div>
+                  ))}
+                </dl>
+              )}
+              <ol className="flex flex-col gap-3">
                 {scene.beats.map((beat, index) => (
                   <li key={index} className="flex flex-col gap-1">
                     <p className="text-[14px] leading-5 text-text">
@@ -281,6 +316,7 @@ function Storyboard({ brief, charsPerSecond }: { brief: VideoBrief; charsPerSeco
                   </li>
                 ))}
               </ol>
+              </div>
             </Disclosure>
           </li>
         );

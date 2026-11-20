@@ -13,7 +13,7 @@
  * runner computes with.
  */
 
-import { isNarratedVoice, narrationSeconds, silentSeconds } from "@hermes/schema/shared";
+import { isNarratedVoice, isShotType, narrationSeconds, SHOT_TYPE_LABELS, silentSeconds, type VideoShot } from "@hermes/schema/shared";
 
 export type VideoAudience = "new" | "familiar" | "expert";
 
@@ -25,9 +25,14 @@ export interface VideoBeat {
   seconds?: number;
 }
 
+/** A scene's picture plan, from the art director (docs/STUDIO-VIDEOS.md, "The shot plan"). */
+export type { VideoShot } from "@hermes/schema/shared";
+
 export interface VideoScene {
   name: string;
   beats: VideoBeat[];
+  /** Every scene has one, or none does. */
+  shot?: VideoShot;
 }
 
 export interface VideoBrief {
@@ -227,9 +232,47 @@ export function isVideoBrief(value: unknown): value is VideoBrief {
     typeof brief.voice === "string" &&
     (brief.concepts === undefined || (Array.isArray(brief.concepts) && brief.concepts.every((slug) => typeof slug === "string"))) &&
     Array.isArray(brief.scenes) &&
-    brief.scenes.every((scene) => typeof scene?.name === "string" && Array.isArray(scene.beats) && scene.beats.every(isBeat))
+    brief.scenes.every(
+      (scene) =>
+        typeof scene?.name === "string" &&
+        Array.isArray(scene.beats) &&
+        scene.beats.every(isBeat) &&
+        (scene.shot === undefined || isShot(scene.shot)),
+    )
   );
 }
+
+/** A scene's `shot`, checked strictly: a known type and three strings. */
+export function isShot(value: unknown): value is VideoShot {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const shot = value as Partial<Record<keyof VideoShot, unknown>>;
+  return isShotType(shot.type) && typeof shot.layout === "string" && typeof shot.motion === "string" && typeof shot.emphasis === "string";
+}
+
+/** Whether every scene of the brief carries a shot. */
+export function hasShots(brief: Pick<VideoBrief, "scenes">): boolean {
+  return brief.scenes.length > 0 && brief.scenes.every((scene) => scene.shot !== undefined);
+}
+
+/** A shot's type as the card names it: "Data chart". */
+export function shotLabel(shot: Pick<VideoShot, "type">): string {
+  return SHOT_TYPE_LABELS[shot.type] ?? shot.type;
+}
+
+/**
+ * The card's line under the tool row: "3 shot types across 4 scenes". Null
+ * when the brief has no shot plan, where the card says so under the
+ * storyboard instead.
+ */
+export function shotSummaryLine(brief: Pick<VideoBrief, "scenes">): string | null {
+  if (!hasShots(brief)) return null;
+  const types = new Set(brief.scenes.map((scene) => scene.shot!.type)).size;
+  const scenes = brief.scenes.length;
+  return `${types} shot ${types === 1 ? "type" : "types"} across ${scenes} ${scenes === 1 ? "scene" : "scenes"}`;
+}
+
+/** What a live card with no shot plan says under its storyboard. */
+export const NO_SHOT_PLAN = "No shot plan. The video agent will choose the pictures.";
 
 function isBeat(value: unknown): boolean {
   if (typeof value !== "object" || value === null) return false;

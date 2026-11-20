@@ -1,4 +1,16 @@
-import { isNarratedVoice, narrationSeconds, silentSeconds, SILENT_VOICE, VIDEO_OVER_SPEECH } from "@hermes/schema/shared";
+import { createHash } from "node:crypto";
+
+import {
+  isNarratedVoice,
+  narrationSeconds,
+  SHOT_TEXT_LIMITS,
+  SHOT_TYPES,
+  silentSeconds,
+  SILENT_VOICE,
+  VIDEO_OVER_SPEECH,
+  type ShotType,
+  type VideoShot,
+} from "@hermes/schema/shared";
 
 import { agentModelName, BriefError, SLUG_PATTERN, type Vocabulary } from "../diagram/brief";
 import { charsPerSecond } from "./narration";
@@ -40,6 +52,12 @@ export interface VideoBeat {
 export interface VideoScene {
   name: string;
   beats: VideoBeat[];
+  /**
+   * The scene's picture plan, written by the art director and never by the
+   * planner (docs/STUDIO-VIDEOS.md, "The shot plan"). Every scene has one or
+   * none does.
+   */
+  shot?: VideoShot;
 }
 
 export interface VideoBrief {
@@ -118,6 +136,107 @@ function oneOf<T extends string>(value: unknown, field: string, allowed: readonl
     throw new BriefError(field, `"${field}" must be one of ${allowed.join(", ")}`);
   }
   return value as T;
+}
+
+/* -------------------------------------------------------------------------- */
+/* The shot plan (docs/STUDIO-VIDEOS.md, "The shot plan")                     */
+/* -------------------------------------------------------------------------- */
+
+/** Shot types a brief may use at most once, whatever its length. */
+export const ONCE_ONLY_SHOTS: readonly ShotType[] = ["title", "recap-map"];
+
+/** The fewest scenes at which no one shot type may cover more than half of them. */
+export const SHOT_VARIETY_FROM = 4;
+
+/**
+ * One scene's `shot`, checked and rebuilt, or a refusal naming the field:
+ * `scenes[2].shot.layout`. Plain words on one line, with no straight double
+ * quote or backslash, the same stance as the brief's other text.
+ */
+export function validateShot(value: unknown, at: string): VideoShot {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new BriefError(at, `"${at}" is an object: { type, layout, motion, emphasis }`);
+  }
+  const raw = value as Record<string, unknown>;
+  const type = oneOf(raw.type, `${at}.type`, SHOT_TYPES);
+  const field = (name: "layout" | "motion" | "emphasis"): string => {
+    const value = text(raw[name], `${at}.${name}`, 1, SHOT_TEXT_LIMITS[name]);
+    if (/["\\]/.test(value)) throw new BriefError(`${at}.${name}`, `"${at}.${name}" cannot hold a straight double quote or a backslash`);
+    return value;
+  };
+  return { type, layout: field("layout"), motion: field("motion"), emphasis: field("emphasis") };
+}
+
+/**
+ * The rules across a brief's shots. Every scene has a shot or none does: no
+ * shots at all is valid (an old brief, a director that failed). `title` and
+ * `recap-map` are used at most once. From four scenes on, no one type covers
+ * more than half of them.
+ */
+export function checkShotPlan(scenes: readonly Pick<VideoScene, "shot">[]): void {
+  const planned = scenes.filter((scene) => scene.shot !== undefined).length;
+  if (planned === 0) return;
+  if (planned < scenes.length) {
+    const missing = scenes.findIndex((scene) => scene.shot === undefined);
+    throw new BriefError(
+      `scenes[${missing}].shot`,
+      `scene ${missing} has no shot while ${planned} of ${scenes.length} scenes do: every scene has a shot, or none does`,
+    );
+  }
+  const seen = new Map<ShotType, number>();
+  scenes.forEach((scene, i) => {
+    const type = scene.shot!.type;
+    const count = (seen.get(type) ?? 0) + 1;
+    seen.set(type, count);
+    if (count > 1 && ONCE_ONLY_SHOTS.includes(type)) {
+      throw new BriefError(`scenes[${i}].shot.type`, `"${type}" is used at most once in a brief, and scene ${i} is its second`);
+    }
+    if (scenes.length >= SHOT_VARIETY_FROM && count * 2 > scenes.length) {
+      throw new BriefError(
+        `scenes[${i}].shot.type`,
+        `"${type}" is on ${count} of ${scenes.length} scenes by scene ${i}; no one shot type may be on more than half of them`,
+      );
+    }
+  });
+}
+
+/** Whether every scene of a brief carries a shot. */
+export function hasShotPlan(brief: Pick<VideoBrief, "scenes">): boolean {
+  return brief.scenes.length > 0 && brief.scenes.every((scene) => scene.shot !== undefined);
+}
+
+/** The brief's shots in scene order, or null when it has none. */
+export function shotPlanOf(brief: Pick<VideoBrief, "scenes">): VideoShot[] | null {
+  return hasShotPlan(brief) ? brief.scenes.map((scene) => scene.shot!) : null;
+}
+
+/** The brief with every scene's `shot` taken off. */
+export function withoutShots<T extends Pick<VideoBrief, "scenes">>(brief: T): T {
+  return { ...brief, scenes: brief.scenes.map(sceneWithoutShot) };
+}
+
+/** The brief with `shots` laid on its scenes, in order. */
+export function withShots<T extends Pick<VideoBrief, "scenes">>(brief: T, shots: readonly VideoShot[]): T {
+  return { ...brief, scenes: brief.scenes.map((scene, i) => ({ ...sceneWithoutShot(scene), shot: shots[i]! })) };
+}
+
+function sceneWithoutShot(scene: VideoScene): VideoScene {
+  const kept = { ...scene };
+  delete kept.shot;
+  return kept;
+}
+
+/**
+ * The hash a shot plan is reused by: each scene's name and every beat's
+ * `say`, `show` and `labels`, in order. A tool switch, a title change or a
+ * voice change leaves it alone, so the shots planned for those scenes stand.
+ */
+export function shotPlanHash(brief: Pick<VideoBrief, "scenes">): string {
+  const words = brief.scenes.map((scene) => ({
+    name: scene.name,
+    beats: scene.beats.map((beat) => ({ say: beat.say, show: beat.show, labels: beat.labels })),
+  }));
+  return createHash("sha256").update(JSON.stringify(words)).digest("hex");
 }
 
 /**
@@ -208,9 +327,13 @@ export function validateVideoBrief(input: unknown, vocabulary: Vocabulary): Vali
       return { say, show, labels };
     });
     beatCount += beats.length;
-    return { name, beats };
+    // Rebuilt field by field like everything else here, so a key nobody
+    // validated never reaches the card or the agent.
+    if (scene.shot === undefined || scene.shot === null) return { name, beats };
+    return { name, beats, shot: validateShot(scene.shot, `scenes[${i}].shot`) };
   });
   if (beatCount > 40) throw new BriefError("scenes", `a brief holds at most 40 beats in all; this one has ${beatCount}`);
+  checkShotPlan(scenes);
 
   const concepts = Array.isArray(raw.concepts) ? raw.concepts : [];
   const conceptList = concepts.map((value, i) => {

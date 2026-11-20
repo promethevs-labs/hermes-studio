@@ -317,6 +317,14 @@ describe("turnIndicator", () => {
     const again = [...replied, entry(3, "person", "change it")];
     expect(turnIndicator(view({ inFlight: true, transcript: again }), false)).toBe("thinking");
   });
+
+  it("plans the shots once the reply has landed and the runner says the art director is at work", () => {
+    const replied = [entry(1, "person", "@video make it"), entry(2, "planner", "Here it is")];
+    expect(turnIndicator(view({ inFlight: true, transcript: replied, planningShots: true }), false)).toBe("shots");
+    // Before the reply lands it is still the planner thinking, whatever the flag says.
+    expect(turnIndicator(view({ inFlight: true, transcript: replied.slice(0, 1), planningShots: true }), false)).toBe("thinking");
+    expect(turnIndicator(view({ inFlight: false, transcript: replied, planningShots: true }), false)).toBeNull();
+  });
 });
 
 describe("threadProblem", () => {

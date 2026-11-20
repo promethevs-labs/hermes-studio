@@ -492,6 +492,7 @@ decides is everything on screen.
 | `source` | optional: a concept slug, whose note the runner hands the agent as material | As the diagram brief's `source` |
 | `tool` | optional: `manimkc`, `remotionkc` or `revideokc`, one the studio can make; absent is manimkc | Which tool makes the video ([STUDIO-VIDEO-TOOLS.md](STUDIO-VIDEO-TOOLS.md), D71 to D74). A change keeps its video's tool |
 | `toolReason` | optional, with `tool`: one sentence, at most 160 characters | The row that chose the tool and the runner-up, shown beside the chip on the card |
+| `shot` | optional, on a scene: `{type, layout, motion, emphasis}`, on every scene or on none; written by the art director, never by the planner | The picture plan the person approves; see "The shot plan" below |
 
 There is no `model` field. The agent's model and effort come from the
 settings panel (D53), so a person never picks one per video.
@@ -546,6 +547,130 @@ the note is an `internal` studio entry, which the person's thread leaves out,
 since the card already carries the warning. The agent may also respell a word
 while voicing it (D47), which the job view shows as a changed line; it cannot
 edit the table, which lives in the venv.
+
+## The shot plan
+
+Every studio video looked the same, and one measured cause was that no step
+planned the picture: the planner writes what each beat shows, and the video
+agent drew whatever came first, most often boxes and arrows. The shot plan is
+that step. A second sealed agent turn, the art director, reads the approved
+script and writes one shot per scene. The card shows it, the brief keeps it,
+and the video agent builds each scene to it.
+
+**The field.** A scene may carry `shot`:
+
+```json
+{"type": "data-chart",
+ "layout": "Chart in the right two thirds, the year labels along a bottom strip",
+ "motion": "Each bar grows as the voice says its year",
+ "emphasis": "The 2020 bar, in the accent colour, the rest dimmed"}
+```
+
+`type` is one of twelve shot types, defined once in `SHOT_TYPES`,
+`SHOT_TYPE_LABELS` and `SHOT_TYPE_USE` in `packages/schema/src/shared.ts`:
+title, build-up diagram, code walk, data chart, comparison, timeline, array
+or memory view, tree or graph, equation, 3D object, metaphor and recap map.
+`layout` says where things sit in the frame (1 to 200 characters), `motion`
+the one motion idea that carries the scene (1 to 200), and `emphasis` what the
+eye must land on and how it is marked (1 to 160). Each is plain words on one
+line, with no control character, straight double quote or backslash, the same
+stance as the brief's other text.
+
+**The rules** (`validateShot` and `checkShotPlan` in
+`services/studio/src/video/brief.ts`):
+
+- Every scene has a shot, or none does. A brief with no shots at all is valid:
+  an old brief, an old job, a brief whose art director failed. A brief where
+  only some scenes have one is refused, naming the first scene without one.
+- `title` and `recap-map` are each used at most once in any brief.
+- In a brief of four or more scenes, no one type may be on more than half of
+  them. Two or three scenes may repeat a type.
+- A refusal names the field: `scenes[2].shot.layout`.
+
+The validator rebuilds every scene field by field, so `shot` is rebuilt too
+and an unchecked key in it never reaches the card or the agent.
+
+**The planner never writes shots.** `plannerVideoFields` in
+`services/studio/src/drafts/planner.ts` takes `shot` off every scene of a
+planner's video block before the validator reads it, so a planner that writes
+one, whole or in part, is neither refused nor believed. The planner's prompt
+is unchanged and says nothing about shots.
+
+**The art director's seal.** `services/studio/src/drafts/art-director.ts`
+spawns one `claude -p` through the planner's own `plannerArgv` and
+`startPlanner`: no tools, an empty MCP config with `--strict-mcp-config`,
+`--safe-mode`, `--disable-slash-commands`, no setting sources, a deny-everything
+settings file and `--permission-prompts none`. A spawn whose `system/init`
+lists any tool or MCP server is stopped before its reply, as a planner turn
+is. It always runs on `claude` and the machine's login, whatever harness the
+conversation's planner uses. Its prompt is
+`services/studio/src/drafts/art-director-prompt.ts`: its role (it never changes
+a word of `say`, `show` or `labels`), the twelve types with `SHOT_TYPE_USE`,
+how to choose, how to write each field, and a TOOL block built from the same
+tables in `services/studio/src/video/tools.ts` the planner's TOOLS block uses,
+with the brief's tool and its column of the capability matrix. The brief goes
+in the user message, inside the same data fence the video agent's prompt
+uses. The reply is one fenced block tagged `shots`:
+
+```shots
+{"scenes": [{"name": "why_it_matters", "shot": {"type": "title", "layout": "...", "motion": "...", "emphasis": "..."}}]}
+```
+
+One entry per scene, with the brief's names in the brief's order. The runner
+reads it with `readShots` and checks it with the validator's shot rules. A
+reply that fails gets one follow-up, a STUDIO message in the same session
+naming exactly what was wrong. A second failure, a timeout or a broken seal
+leaves the brief without shots and records why.
+
+**When it runs.** Inside a planner turn, when the turn yields a valid video
+brief for the video slot: after the brief is judged and before the turn
+settles (`withShotPlan` in `services/studio/src/drafts/drafts.ts`), so the
+card the person first sees already carries the shots. While it runs the
+draft's state says `planningShots: true` on the event stream and in
+`GET /api/drafts/{id}`, and the thread's foot reads "Planning the shots"
+where it otherwise reads "Checking the brief". The outcome is saved on the
+video slot with the brief, as `shotNote` (planned, reused, failed, off or
+skipped, with the reason), and only when that brief lands.
+
+**Reuse.** The slot keeps the last plan as `shotPlan`, with the hash of the
+scenes it was written for (`shotPlanHash`: each scene's name and every beat's
+`say`, `show` and `labels`, in order). A later brief with the same hash takes
+those shots and makes no call, so a tool switch, a new title or "Use this
+brief" costs nothing. A person's edit keeps whatever shots the brief carries.
+Shots do not depend on the tool in this version.
+
+**Settings and cost.** `STUDIO_ART_DIRECTOR=off` turns the step off (the test
+setup does this for every suite but the ones about it). `STUDIO_ART_DIRECTOR_MODEL`
+names the model; unset, it is the conversation's own claude pick, else
+`STUDIO_PLANNER_MODEL`, else `sonnet`. `STUDIO_ART_DIRECTOR_MS` bounds each
+spawn, 120 seconds by default, and a spawn that runs past it is a failure.
+Every spawn's cost is metered as a planner turn's is and dated at its own end:
+a draft's spawns go on the draft's `spend` beside its turns (marked `what:
+"shots"`), so they count in the conversation's cost and in the rolling window
+behind `STUDIO_DAILY_USD`. When the cap is already reached the step is
+skipped and the brief lands without shots. A failure never fails the
+planner's turn and never blocks the press.
+
+**For tools: `POST /api/video/shots`.** The body is `{ brief }`, a whole video
+brief, validated against the runner's vocabulary as `POST /api/jobs`
+validates one. The answer is `{ brief, shotPlan, costUsd, reason? }`, where
+`shotPlan` is `planned` (the brief carries the shots), `reused` (the posted
+brief already had a whole plan, and no call was made), `failed` (with the
+reason) or `off`. It sits behind the same guard and owner check as every
+other route. Over the daily cap it is refused with the job cap's 429, and its
+spend goes to `$STUDIO_HOME/shots/spend.ndjson`, read back at start, so the
+cap counts it. The benchmark harness calls it.
+
+**What the video agent is told.** `videoPromptFacing` carries each scene's
+`shot` in the brief it hands the agent. When the brief has shots, each tool's
+first prompt (`video/prompt.ts`, `video/remotionkc/manual.ts`,
+`video/revideokc/manual.ts`) gains one step after the labels step: each
+scene's `shot` is the picture plan the person approved, build the scene to it,
+`show` says what each beat changes within it, and two scenes with different
+shot types must not end up with the same layout. Every tool's manual has a
+"Shot types" section generated from the three tables
+(`services/studio/src/video/shots.ts`), so the manual's hash changes with the
+vocabulary.
 
 ## The planner's prompt
 
