@@ -4,10 +4,13 @@
 import { knownCostOf } from './cost.mjs';
 
 /** The look numbers, per result. Each is `{ key, label, get, digits }`. */
+/** A result's look metrics, only when its video landed; any other result has none to compare. */
+const lookOf = (r) => (r.state === 'accepted' ? r.metrics : null);
+
 const BASE_LOOK = [
-  { key: 'variety', label: 'variety', get: (r) => r.metrics?.variety ?? null, digits: 2 },
-  { key: 'helperTop5Share', label: 'top-five share', get: (r) => r.metrics?.helperTop5Share ?? null, digits: 2 },
-  { key: 'fadeShare', label: 'fade share', get: (r) => r.metrics?.fadeShare ?? null, digits: 2 },
+  { key: 'variety', label: 'variety', get: (r) => lookOf(r)?.variety ?? null, digits: 2 },
+  { key: 'helperTop5Share', label: 'top-five share', get: (r) => lookOf(r)?.helperTop5Share ?? null, digits: 2 },
+  { key: 'fadeShare', label: 'fade share', get: (r) => lookOf(r)?.fadeShare ?? null, digits: 2 },
 ];
 
 /**
@@ -78,8 +81,8 @@ export function compareRuns(a, b) {
       row.b[column.key] = num(column.get(rb));
       row.diff[column.key] = diffOf(row.a[column.key], row.b[column.key]);
     }
-    row.a.uses3d = typeof ra.metrics?.uses3d === 'boolean' ? ra.metrics.uses3d : null;
-    row.b.uses3d = typeof rb.metrics?.uses3d === 'boolean' ? rb.metrics.uses3d : null;
+    row.a.uses3d = typeof lookOf(ra)?.uses3d === 'boolean' ? ra.metrics.uses3d : null;
+    row.b.uses3d = typeof lookOf(rb)?.uses3d === 'boolean' ? rb.metrics.uses3d : null;
     row.a.gateOk = typeof ra.gateOk === 'boolean' ? ra.gateOk : null;
     row.b.gateOk = typeof rb.gateOk === 'boolean' ? rb.gateOk : null;
     return row;

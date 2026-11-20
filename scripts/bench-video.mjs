@@ -30,7 +30,7 @@ import { compareRuns, formatCompare } from './lib/bench-video/compare.mjs';
 import { DEFAULT_PORT, homePaths, homeRefusal, parseCap, readMarker, runnerEnv, setupHome, STUDIO_PORT } from './lib/bench-video/home.mjs';
 import { readJobFiles, sourceMetrics } from './lib/bench-video/metrics.mjs';
 import { readRun, runBench } from './lib/bench-video/run.mjs';
-import { call, portFree, startRunner, stopGroup } from './lib/bench-video/runner.mjs';
+import { call, portFree, startRunner, stopTree } from './lib/bench-video/runner.mjs';
 import { validateBench } from './lib/bench-video/validate.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -175,12 +175,26 @@ async function verbRun(args) {
 
   let interrupted = false;
   let runnerPid = null;
+  let currentJob = null;
   for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
     process.on(signal, () => {
       if (interrupted) {
         // A second signal: stop the runner now and leave.
-        if (runnerPid !== null) void stopGroup(runnerPid, { graceMs: 2_000 }).finally(() => process.exit(130));
-        else process.exit(130);
+        // A second signal: ask the runner to cancel the job while it still
+        // answers, then stop it and every process group it started.
+        if (runnerPid === null) process.exit(130);
+        const base = `http://127.0.0.1:${port}`;
+        const cancel = currentJob === null ? Promise.resolve() : call(base, 'POST', `/api/jobs/${encodeURIComponent(currentJob)}/cancel`, {}, { timeoutMs: 2_000 }).catch(() => null);
+        void cancel
+          .then(() => stopTree(runnerPid, { graceMs: 2_000 }))
+          .then((stopped) => {
+            process.stderr.write(
+              stopped.clean
+                ? 'bench:video: the runner and every process group it started are stopped\n'
+                : `bench:video: process groups ${stopped.survivors.join(', ')} survived SIGKILL; check them with ps -g and stop them by hand\n`,
+            );
+          })
+          .finally(() => process.exit(130));
         return;
       }
       interrupted = true;
@@ -202,6 +216,7 @@ async function verbRun(args) {
       metrics: (jobId) => sourceMetrics(paths.studio, jobId, chosen, libraryNames),
       log: (line) => process.stdout.write(`${line}\n`),
       stopped: () => interrupted,
+      onJob: (jobId) => (currentJob = jobId),
     },
   );
   const settled = run.results.filter((result) => ['accepted', 'failed', 'cancelled'].includes(result.state)).length;

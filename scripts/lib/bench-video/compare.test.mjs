@@ -103,6 +103,16 @@ describe('compare', () => {
     expect(formatCompare(comparison)).toMatch(/pairs in the mean\s+1\s+2\s+2\n/);
   });
 
+  it('never averages a result that did not land into the look means', () => {
+    const failed = structuredClone(B);
+    failed.results[1] = { ...failed.results[1], state: 'failed', metrics: { variety: 0.97, helperTop5Share: 1, fadeShare: 0, uses3d: true } };
+    const comparison = compareRuns(A, failed);
+    expect(comparison.rows[1].b).toMatchObject({ variety: null, helperTop5Share: null, fadeShare: null, uses3d: null });
+    expect(comparison.totals.pairs).toEqual({ variety: 1, helperTop5Share: 1, fadeShare: 1 });
+    expect(comparison.totals.b.variety).toBeCloseTo(0.72);
+    expect(comparison.totals.b.uses3d).toBe(1);
+  });
+
   it('adds a column for each critic score a result carries', () => {
     const scored = structuredClone(B);
     scored.results[0].critic = { clarity: 0.8 };

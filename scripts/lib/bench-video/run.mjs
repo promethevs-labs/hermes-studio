@@ -240,6 +240,7 @@ export async function runBench(options, deps) {
         }
         jobId = answer.json?.jobId;
         put({ ...results.get(entry.id), jobId, state: answer.json?.state ?? 'queued' });
+        deps.onJob?.(jobId);
         log(`${entry.id}: job ${jobId} ${answer.status === 201 ? 'queued' : 'was already queued under this key'}`);
       }
 
@@ -282,6 +283,9 @@ export async function runBench(options, deps) {
         }
       }
       const fields = recordFields(deps.readJob(jobId), Math.round((now() - posted) / 100) / 10);
+      // Look metrics only for a video that landed: a failed job's kept source
+      // can be the untouched scene stub, which scans as a busy picture.
+      const metrics = state === 'accepted' ? deps.metrics(jobId) : null;
       const result = {
         ...emptyResult(entry.id),
         earlierCostUsd: results.get(entry.id)?.earlierCostUsd ?? 0,
@@ -291,7 +295,7 @@ export async function runBench(options, deps) {
         jobId,
         state,
         ...fields,
-        metrics: deps.metrics(jobId),
+        metrics,
         error,
         errorKind: view.errorKind ?? null,
       };
@@ -316,8 +320,12 @@ export async function runBench(options, deps) {
       // runner is never left running paid work; the save's error still
       // reaches the caller once the runner is down.
       if (runner !== null) {
-        const clean = await runner.stop();
-        if (clean === false) log(`bench: the runner's process group survived SIGKILL; check for leftover processes`);
+        const stopped = await runner.stop();
+        if (stopped?.clean === false) {
+          log(`bench: process groups ${stopped.survivors.join(', ')} survived SIGKILL; check them with ps -g and stop them by hand`);
+        } else if (stopped?.clean === true) {
+          log('bench: the runner and every process group it started are stopped');
+        }
       }
     }
   }

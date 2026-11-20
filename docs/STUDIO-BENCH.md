@@ -132,8 +132,19 @@ It stops cleanly, with what finished written down, when:
   `toolchain`, `internal`, `not-claimed`) comes back, unless `--keep-going`;
 - a job runs past three hours, which it cancels;
 - it gets SIGINT, SIGTERM or SIGHUP. It cancels the running job and stops
-  the runner's process group (SIGTERM, then SIGKILL after 45 seconds). A
-  second signal stops the runner at once.
+  the runner, then everything the runner started. A second signal asks the
+  runner to cancel the job while it still answers, then stops it at once.
+
+Stopping is `stopTree` in `scripts/lib/bench-video/runner.mjs`. The runner
+puts each agent and each render in a process group of its own, so its own
+group never reaches them. Before signalling, the bench walks the process
+table (`ps -axo pid,ppid,pgid`) down from the runner and notes every group
+under it, and walks again on every poll while the runner drains, since a
+detached child keeps the runner as its parent only while the runner lives.
+It sends SIGTERM to the runner's group and waits up to 45 seconds (two after
+a second signal), then sends SIGTERM and, five seconds later, SIGKILL to
+every noted group still alive, and polls each one. The log says when all
+are stopped, or which groups survived.
 
 The run file is written after every step: `{ label, tool, model, capUsd,
 startedAt, endedAt, manualHashes, results, stopReason? }`, each result `{ id,
@@ -156,8 +167,10 @@ under `DIR/studio`, scanned by the catalog's own `scanSources`
 (`services/catalog/src/ingredients/scan.ts`), with manimkc's library names
 read from `MANIMKC_ROOT`, as `catalog video put` does. That is simpler than
 reading `catalog eval report`, which reports by tool, model and manual rather
-than by job. The kept source exists only after a verdict, so a failed job has
-no metrics.
+than by job. A result has metrics only when its state is `accepted`: a
+failed job can keep the untouched scene stub, which scans like a busy
+picture. `compare` likewise leaves any result that did not land out of the
+look means.
 
 ## Starting a real run on the owner's Mac
 

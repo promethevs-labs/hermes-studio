@@ -45,6 +45,8 @@ function standIn({ studioHome, scripts, capUsd = 5, doctorAfter = 1, toolAvailab
   const writeFiles = (job) => {
     const dir = join(studioHome, 'jobs', job.id);
     mkdirSync(join(dir, 'source'), { recursive: true });
+    // A failed job can keep the untouched scene stub, which scans like a picture.
+    if (job.script.stub === true) writeFileSync(join(dir, 'source', 'scenes.py'), SCENE);
     const started = '2026-11-20T10:00:00.000Z';
     writeFileSync(
       join(dir, 'job.json'),
@@ -232,6 +234,13 @@ describe('runBench', () => {
       ['b-two', 'accepted'],
     ]);
     expect(kept.stopReason).toBeUndefined();
+  });
+
+  it('records no look metrics for a job that did not land, even with a scene file kept', async () => {
+    stand = await standIn({ studioHome, scripts: { 'a-one': { end: 'failed', stub: true, cost: 0 } } });
+    const run = await runBench(options(['a-one'].map(brief)), deps().deps);
+    expect(sourceMetrics(studioHome, 'job-1', 'manimkc')).not.toBeNull();
+    expect(run.results[0]).toMatchObject({ state: 'failed', metrics: null });
   });
 
   it('stops on a failure that says the machine is the problem', async () => {
