@@ -419,6 +419,8 @@ Options:
   --error-kind K           job finish: a short machine-readable reason.
   --error M                job finish: the message a person reads.
   --limit N                job ls: rows to return. Default 20, max 100.
+  --active                 job ls: every job that holds a lease (queued,
+                           running or awaiting_review), with no limit.
   --id ID                  session: which session.
   --title T                session start: what it is about.
   --goal G                 session start: what it set out to do.
@@ -662,6 +664,7 @@ export async function main(argv: string[]): Promise<number> {
         key: { type: "string" },
         value: { type: "string" },
         "discard-parent": { type: "string" },
+        active: { type: "boolean", default: false },
         help: { type: "boolean", short: "h", default: false },
       },
     });
@@ -1231,6 +1234,7 @@ type Values = {
   "agent-session"?: string;
   owner?: string;
   "discard-parent"?: string;
+  active?: boolean;
 };
 
 /**
@@ -1342,6 +1346,7 @@ async function job(positionals: string[], values: Values): Promise<JobResult> {
       return runList({
         state: values.state,
         kind: values.kind,
+        active: values.active,
         limit: number(values.limit, "--limit"),
         owner: values.owner,
       });

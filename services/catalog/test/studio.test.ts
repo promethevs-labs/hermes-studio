@@ -400,6 +400,20 @@ describe.skipIf(!reachable.ok)("the studio schema", () => {
 
       await expect(runList({ state: "nonsense" })).rejects.toThrow(/unknown job state/);
     });
+
+    it("lists every job that holds a lease with --active, past the limit, and no finished one", async () => {
+      const queued = await enqueue({ target: "learn/assets/a.tldr" });
+      const running = await enqueue({ target: "learn/assets/b.tldr" });
+      const done = await enqueue({ target: "learn/assets/c.tldr" });
+      await runClaim({ jobId: running.job.id });
+      await runClaim({ jobId: done.job.id });
+      await runFinish({ jobId: done.job.id, state: "cancelled" });
+
+      const active = await runList({ active: true, limit: 1 });
+      expect(active.jobs.map((j) => j.id).sort()).toEqual([queued.job.id, running.job.id].sort());
+      expect(active.total).toBe(2);
+      await expect(runList({ active: true, state: "running" })).rejects.toThrow(/no --state/);
+    });
   });
 
   describe("what cannot be deleted", () => {

@@ -455,6 +455,37 @@ describe("a claim the catalog refuses", () => {
     expect(catalogMock.jobFinish).not.toHaveBeenCalled();
   });
 
+  it("still leaves the holder's row alone when recording the refusal throws", async () => {
+    // Greptile on #735: a throw while writing the refusal reached the crash
+    // handler, which wrote `internal` over `not-claimed` and finished the
+    // other runner's live row as failed.
+    catalogMock.jobClaim.mockResolvedValue({ ok: false, json: null, error: "job x is running, and running → running is not a transition.", offline: false });
+    const update = store.update.bind(store);
+    let thrown = false;
+    vi.spyOn(store, "update").mockImplementation(async (id, patch) => {
+      if (!thrown && patch.errorKind === "not-claimed") {
+        thrown = true;
+        throw new Error("ENOSPC: no space left on device");
+      }
+      return update(id, patch);
+    });
+
+    const { record } = await runner.enqueue(await brief());
+    await runner.settled(record.id);
+
+    expect(thrown).toBe(true);
+    expect(store.get(record.id)).toMatchObject({ state: "failed", errorKind: "not-claimed" });
+    expect(catalogMock.jobFinish).not.toHaveBeenCalled();
+  });
+
+  it("finishes the row when the attempt held the claim and then threw", async () => {
+    reviewMock.dirtyFiles.mockRejectedValueOnce(new Error("git is not on PATH"));
+    const { record } = await runner.enqueue(await brief());
+    await runner.settled(record.id);
+    expect(store.get(record.id)).toMatchObject({ state: "failed", errorKind: "internal" });
+    expect(catalogMock.jobFinish).toHaveBeenCalledWith(expect.objectContaining({ jobId: record.id, state: "failed", errorKind: "internal" }));
+  });
+
   it("runs anyway when the claim failed because nothing answered", async () => {
     catalogMock.jobClaim.mockResolvedValue({
       ok: false,
@@ -585,6 +616,49 @@ describe("the job ceiling", () => {
 
     expect(store.get(record.id)?.state).toBe("cancelled");
     expect(store.get(record.id)?.errorKind).toBe("cancelled");
+  });
+});
+
+describe("the shutdown's drain", () => {
+  beforeEach(() => {
+    agentMock.startAgent.mockReset();
+    started.length = 0;
+    stageAgent(true);
+  });
+
+  /*
+   * What shutdown waits on (`index.ts`): the drain stops the agent, and
+   * `settledAll` resolves only once the job's `job finish` and session end
+   * have been sent. On 2026-11-20 the exit came between the record and the
+   * `job finish`, and the row held its path's lease after the restart.
+   */
+  it("resolves only after the stopped job's verdict has reached the catalog", async () => {
+    const { record } = await runner.enqueue(await brief());
+    await agentsStarted(1);
+    let release: () => void = () => undefined;
+    catalogMock.jobFinish.mockImplementation(() => new Promise((resolve) => (release = () => resolve(ok))));
+    await runner.drain();
+    let settled = false;
+    const waiting = runner.settledAll().then(() => {
+      settled = true;
+    });
+    await until(() => catalogMock.jobFinish.mock.calls.length === 1, "the cancelled job never sent its job finish");
+    expect(store.get(record.id)?.state).toBe("cancelled");
+    expect(settled).toBe(false);
+    release();
+    await waiting;
+    expect(catalogMock.sessionEnd).toHaveBeenCalledWith(`studio-${record.id}`, "cancelled", expect.any(String));
+  });
+});
+
+describe("a job finish the catalog does not take", () => {
+  it("is owed to the reconcile, which health then retries", async () => {
+    const { record } = await runner.enqueue(await brief());
+    catalogMock.jobFinish.mockResolvedValue({ ok: false, json: null, error: "catalog job finish: database is locked", offline: false });
+    await runner.settled(record.id);
+    expect(store.get(record.id)?.state).toBe("awaiting_review");
+    expect(runner.rows.status().pending).toMatchObject({ error: expect.stringContaining("database is locked") });
+    expect(store.get(record.id)?.catalogErrors.at(-1)).toContain("database is locked");
   });
 });
 
