@@ -90,7 +90,7 @@ export const manimkcBackend: VideoBackend = {
     await keepClipFiles(job.paths, keys);
   },
 
-  manual: (wrapper, listing) => manualText(wrapper, listing),
+  manual: (wrapper, listing, paths) => manualText(wrapper, listing, paths),
 
   settings(job, input) {
     // The owner's manimkc data root, two levels above its shared TTS cache.
@@ -132,7 +132,7 @@ export const manimkcBackend: VideoBackend = {
   sourceFiles: async (paths) => [paths.sceneFile, paths.topicYml],
   sheets: (paths, classes) => classes.map((scene) => ({ id: scene, title: null, file: sheetPath(paths, scene), kept: `${scene}.sheet.png`, scenes: [scene] })),
   isSheet: (_paths, file) => file.endsWith(".sheet.png"),
-  addDirs: (paths) => [paths.lib, paths.out],
+  addDirs: (paths) => [paths.lib, path.dirname(paths.shotsGuide), paths.out],
   hasCheckout: () => existsSync(path.join(manimkcRoot(), "tools", "cli", "manimkc")),
   doctor: () => runVideoDoctor(),
 

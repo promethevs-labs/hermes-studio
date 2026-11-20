@@ -78,6 +78,13 @@ export async function resolvedPaths(jobId: string, slug: string, jobDirectory?: 
 /** The skeleton every job has before a topic is put in it. */
 export async function buildCheckout(tools: Toolchain, paths: VideoPaths, voice: string): Promise<void> {
   await copyTree(path.join(tools.manimkcRoot, "lib"), paths.lib);
+  // The shot guide, which `api` points at (D113 of docs/STUDIO-LOOK.md). A checkout
+  // from before manimkc#86 has none, and the manual's pointer is then to a missing file.
+  const shots = await readFile(path.join(tools.manimkcRoot, "docs", "SHOTS.md"), "utf8").catch(() => null);
+  if (shots !== null) {
+    await mkdir(path.dirname(paths.shotsGuide), { recursive: true });
+    await writeFile(paths.shotsGuide, shots, "utf8");
+  }
   for (const name of LINKED) {
     const target = path.join(paths.checkout, name);
     if ((await lstat(target).catch(() => null)) !== null) continue;

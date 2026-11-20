@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { manualDir } from "../paths";
 import { run } from "../proc";
+import type { VideoPaths } from "./paths";
 import { shotTypesSection } from "./shots";
 import type { Toolchain } from "./toolchain";
 
@@ -100,7 +101,7 @@ from cslib import *
 from narration import VoiceScene
 `;
 
-function sections(wrapper: string, listing: string): string {
+function sections(wrapper: string, listing: string, paths: Pick<VideoPaths, "shotsGuide">): string {
   return `# Making a video in the studio
 
 You are the video agent. You write one narrated ManimGL explainer from an approved brief, the way its owner does by hand with the manimkc-video skill: write the scenes, voice them, preview, look at every contact sheet, fix, and build. The runner checks your build when you exit.
@@ -175,7 +176,7 @@ A series keeps one look, and its scenes differ on purpose:
 
 ## The library
 
-The whole vocabulary, from the manimkc checkout. \`api <name>\` prints one entry again.
+The whole vocabulary, from the manimkc checkout, grouped by purpose. \`api <name>\` prints one entry again. The listing names a shot guide, docs/SHOTS.md; the job has it at \`${paths.shotsGuide}\`. Read the entry for a scene's shot type there before you plan the scene.
 
 \`\`\`text
 ${listing.trim()}
@@ -218,7 +219,7 @@ ${WORKED_CHART.trim()}
 ## Never
 
 - Change the scenes the brief names, their names or their order.
-- Reach for other topics, \`new\`, \`example\`, the network, or any file outside the topic folder, the lib copy and the renders.
+- Reach for other topics, \`new\`, \`example\`, the network, or any file outside the topic folder, the lib copy, the shot guide and the renders.
 - Read \`lib/\` to find a helper \`api\` already lists.
 `;
 }
@@ -255,8 +256,8 @@ export async function apiListing(tools: Toolchain): Promise<{ text: string; name
 }
 
 /** The manual's text for a wrapper path and a listing. */
-export function manualText(wrapper: string, listing: string): string {
-  return sections(wrapper, listing);
+export function manualText(wrapper: string, listing: string, paths: Pick<VideoPaths, "shotsGuide">): string {
+  return sections(wrapper, listing, paths);
 }
 
 /**

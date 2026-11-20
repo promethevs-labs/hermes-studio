@@ -63,6 +63,8 @@ export interface VideoPaths {
   sandboxEmptyFile: string;
   checkout: string;
   lib: string;
+  /** `checkout/docs/SHOTS.md`: manimkc's shot guide, a copy the agent may Read. */
+  shotsGuide: string;
   topicDir: string;
   sceneFile: string;
   topicYml: string;
@@ -121,6 +123,7 @@ export function videoPaths(jobId: string, slug: string): VideoPaths {
     sandboxEmptyFile: path.join(job, "sandbox-empty-file"),
     checkout,
     lib: path.join(checkout, "lib"),
+    shotsGuide: path.join(checkout, "docs", "SHOTS.md"),
     topicDir,
     sceneFile: path.join(topicDir, `${moduleName}.py`),
     topicYml: path.join(topicDir, "topic.yml"),
