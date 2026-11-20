@@ -144,6 +144,24 @@ otherwise.
 No licensed audio exists in any tool's repository, and a studio job cannot
 fetch any. It is a later piece of work with its own licence question.
 
+### D120. At a terminal too, remotionkc is the default
+
+D112 moved the studio's default and left the terminal with manimkc, because
+the owner had not decided it. The owner decided it on 2026-11-20: a video
+made at a terminal goes to remotionkc unless it continues an existing
+manimkc series, needs ManimGL's maths animation (function plots, glyph-level
+equation morphs, vector fields, 3D maths surfaces), or needs Blender's
+photoreal 3D. Those are rows of the routing table in
+[VIDEO-TOOLS.md](VIDEO-TOOLS.md) that sit above its last row, so nothing in
+the table moves: its last row is now the default everywhere, and the other
+rows above it (the silent video, revideokc's code edited in place and lit 3D
+stage) still win as before. This amends the sentence in D112 that manimkc
+keeps the terminal.
+
+Why: the reason D112 gives for the studio holds at a terminal. The same
+plain diagram video went to manimkc there, and the audit's sameness came
+from that route.
+
 ## The pieces
 
 | Piece | What it is | Where it is written down | State |
