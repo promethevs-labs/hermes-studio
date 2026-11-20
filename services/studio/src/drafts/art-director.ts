@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import type { VideoShot } from "@hermes/schema/shared";
+import { SHOT_TEXT_LIMITS, type VideoShot } from "@hermes/schema/shared";
 
 import { agentAuth, artDirectorMs, PLANNER_IDLE_MS } from "../config";
 import { costFromLog, JobCostMeter, type CostSource, type SpendEntry } from "../cost";
@@ -74,12 +74,62 @@ export interface DirectInput {
   stopped?: () => boolean;
 }
 
+/** A line over its limit by more than this factor is refused, not cut: the reply did not mean the field. */
+export const SHOT_TEXT_CUT_FACTOR = 2;
+
+/**
+ * A shot text field a little over its limit, cut back to the last whole word
+ * that fits, with no mark added and no trailing comma, colon or dash. Returns
+ * null when the value is not a string, is already within the limit, is more
+ * than `SHOT_TEXT_CUT_FACTOR` times the limit, or has no word boundary to cut
+ * at; the validator then reads the value as it came, and refuses what it
+ * should.
+ */
+export function cutToFit(value: unknown, limit: number): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (trimmed.length <= limit || trimmed.length > limit * SHOT_TEXT_CUT_FACTOR) return null;
+  // The cut is at a space inside the limit, or at the limit when the next character is one.
+  const head = trimmed.slice(0, limit + 1);
+  const space = head.search(/\s\S*$/);
+  if (space <= 0) return null;
+  const cut = head.slice(0, space).replace(/[\s,;:-]+$/, "");
+  return cut === "" ? null : cut;
+}
+
+/**
+ * The reply's entries with each over-long `layout`, `motion` or `emphasis`
+ * cut to fit (`cutToFit`), and a note for each cut line, such as
+ * `scenes[1].shot.layout 203 to 188 characters`. The entries are copied,
+ * never edited in place.
+ */
+function fitShotText(scenes: unknown[]): { scenes: unknown[]; shortened: string[] } {
+  const shortened: string[] = [];
+  const fitted = scenes.map((entry, i) => {
+    if (typeof entry !== "object" || entry === null) return entry;
+    const shot = (entry as { shot?: unknown }).shot;
+    if (typeof shot !== "object" || shot === null || Array.isArray(shot)) return entry;
+    const next: Record<string, unknown> = { ...(shot as Record<string, unknown>) };
+    for (const name of ["layout", "motion", "emphasis"] as const) {
+      const cut = cutToFit(next[name], SHOT_TEXT_LIMITS[name]);
+      if (cut === null) continue;
+      shortened.push(`scenes[${i}].shot.${name} ${(next[name] as string).trim().length} to ${cut.length} characters`);
+      next[name] = cut;
+    }
+    return { ...(entry as object), shot: next };
+  });
+  return { scenes: fitted, shortened };
+}
+
 /**
  * Read a reply's `shots` block against the brief: one valid shot per scene,
- * the brief's names in the brief's order, and the plan's own rules. Returns
- * the shots, or a sentence naming exactly what was wrong.
+ * the brief's names in the brief's order, and the plan's own rules. A text
+ * field a little over its limit is cut to fit at a word boundary instead of
+ * failing the plan, and named in `shortened`; one over twice its limit is
+ * refused like any other fault. Returns the shots, or a sentence naming
+ * exactly what was wrong.
  */
-export function readShots(text: string, brief: Pick<VideoBrief, "scenes">): { shots: VideoShot[] } | { problem: string } {
+export function readShots(text: string, brief: Pick<VideoBrief, "scenes">): { shots: VideoShot[]; shortened: string[] } | { problem: string } {
   const body = fencedBlocks(text, "shots").at(-1);
   if (body === undefined) return { problem: "The reply has no fenced block tagged shots." };
   let parsed: unknown;
@@ -93,8 +143,9 @@ export function readShots(text: string, brief: Pick<VideoBrief, "scenes">): { sh
   if (scenes.length !== brief.scenes.length) {
     return { problem: `The shots block has ${scenes.length} entries and the brief has ${brief.scenes.length} scenes; give exactly one per scene.` };
   }
+  const { scenes: fitted, shortened } = fitShotText(scenes);
   try {
-    const shots = scenes.map((entry: unknown, i) => {
+    const shots = fitted.map((entry: unknown, i) => {
       const name = typeof entry === "object" && entry !== null ? (entry as { name?: unknown }).name : undefined;
       const want = brief.scenes[i]!.name;
       if (name !== want) {
@@ -103,7 +154,7 @@ export function readShots(text: string, brief: Pick<VideoBrief, "scenes">): { sh
       return validateShot((entry as { shot?: unknown }).shot, `scenes[${i}].shot`);
     });
     checkShotPlan(shots.map((shot) => ({ shot })));
-    return { shots };
+    return { shots, shortened };
   } catch (error) {
     if (error instanceof BriefError) return { problem: `${error.field}: ${error.message}` };
     throw error;
@@ -228,7 +279,11 @@ export async function directShots(input: DirectInput): Promise<DirectorResult> {
     const failed = noReply(outcome, timeoutMs, idleMs);
     if (failed !== null) return result("failed", null, failed);
     const read = readShots(outcome.text, input.brief);
-    if ("shots" in read) return result("planned", read.shots, null);
+    if ("shots" in read) {
+      // The plan's record has no place for a note, so a cut line is logged.
+      if (read.shortened.length > 0) console.warn(`studio: the art director's shot plan was shortened to fit: ${read.shortened.join("; ")}`);
+      return result("planned", read.shots, null);
+    }
     lastProblem = read.problem;
     prompt = artDirectorFollowUp(read.problem);
   }

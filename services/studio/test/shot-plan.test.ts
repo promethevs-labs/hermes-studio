@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { SHOT_TYPE_LABELS, SHOT_TYPE_USE, SHOT_TYPES, type ShotType } from "@hermes/schema/shared";
+import { SHOT_TEXT_LIMITS, SHOT_TYPE_LABELS, SHOT_TYPE_USE, SHOT_TYPES, type ShotType } from "@hermes/schema/shared";
 
-import { readShots } from "../src/drafts/art-director";
-import { ART_DIRECTOR_PROMPT, artDirectorMessage, buildArtDirectorSystemPrompt, toolBlock } from "../src/drafts/art-director-prompt";
+import { cutToFit, readShots } from "../src/drafts/art-director";
+import { ART_DIRECTOR_PROMPT, artDirectorMessage, askedShotLength, buildArtDirectorSystemPrompt, toolBlock } from "../src/drafts/art-director-prompt";
 import { evaluateBrief } from "../src/drafts/planner";
 import { BriefError } from "../src/diagram/brief";
 import { DATA_FENCE, DATA_FENCE_END } from "../src/diagram/prompt";
@@ -181,7 +181,64 @@ describe("the art director's reply", () => {
 
   it("is read as one shot per scene", () => {
     const read = readShots(reply(both), brief);
-    expect(read).toEqual({ shots: [shot("build-up-diagram"), shot("recap-map")] });
+    expect(read).toEqual({ shots: [shot("build-up-diagram"), shot("recap-map")], shortened: [] });
+  });
+
+  /** Words joined by single spaces, cut to exactly `length` characters, so a limit's edge usually lands inside a word. */
+  const words = (length: number): string => "alpha beta gamma delta epsilon zeta eta theta iota kappa ".repeat(12).slice(0, length).trimEnd();
+
+  it("cuts a line a little over its limit at a word boundary and names it, where it used to refuse the plan", () => {
+    const long = words(203);
+    expect(long.length).toBe(203);
+    const read = readShots(reply([{ name: "why_it_matters", shot: { ...shot("build-up-diagram"), layout: long } }, both[1]]), brief);
+    if (!("shots" in read)) throw new Error(read.problem);
+    const layout = read.shots[0]!.layout;
+    expect(layout.length).toBeLessThanOrEqual(SHOT_TEXT_LIMITS.layout);
+    expect(long.startsWith(layout)).toBe(true);
+    expect(long.slice(layout.length)).toMatch(/^\s/);
+    expect(layout).not.toMatch(/[\s,;:-]$/);
+    expect(read.shortened).toEqual([`scenes[0].shot.layout 203 to ${layout.length} characters`]);
+    // The other fields and the other shot are as they came.
+    expect(read.shots[0]!.motion).toBe(shot("build-up-diagram").motion);
+    expect(read.shots[1]).toEqual(shot("recap-map"));
+  });
+
+  it("cuts at the limit when the next character is a space, and leaves a line within its limit alone", () => {
+    const edge = `${"a".repeat(200)} ${"b".repeat(2)}`;
+    expect(cutToFit(edge, 200)).toBe("a".repeat(200));
+    expect(cutToFit(words(200), 200)).toBeNull();
+    expect(cutToFit(words(100), 200)).toBeNull();
+    expect(cutToFit(`${words(190)}, ${words(10)}`, 200)).not.toMatch(/,$/);
+  });
+
+  it("applies to motion and emphasis too, each at its own limit", () => {
+    const read = readShots(reply([{ name: "why_it_matters", shot: { ...shot("title"), motion: words(205), emphasis: words(165) } }, both[1]]), brief);
+    if (!("shots" in read)) throw new Error(read.problem);
+    expect(read.shots[0]!.motion.length).toBeLessThanOrEqual(SHOT_TEXT_LIMITS.motion);
+    expect(read.shots[0]!.emphasis.length).toBeLessThanOrEqual(SHOT_TEXT_LIMITS.emphasis);
+    expect(read.shortened).toHaveLength(2);
+  });
+
+  it("still refuses a line wildly over its limit, one with no word to cut at, and a quote kept by a cut", () => {
+    const wild = words(SHOT_TEXT_LIMITS.layout * 2 + 1);
+    expect(cutToFit(wild, SHOT_TEXT_LIMITS.layout)).toBeNull();
+    expect(readShots(reply([{ name: "why_it_matters", shot: { ...shot("title"), layout: wild } }, both[1]]), brief)).toMatchObject({
+      problem: expect.stringMatching(new RegExp(`^scenes\\[0\\]\\.shot\\.layout: .*is ${wild.length} characters; it must be 1 to 200`)),
+    });
+    expect(cutToFit("x".repeat(210), 200)).toBeNull();
+    expect(readShots(reply([{ name: "why_it_matters", shot: { ...shot("title"), layout: "x".repeat(210) } }, both[1]]), brief)).toMatchObject({
+      problem: expect.stringMatching(/^scenes\[0\]\.shot\.layout: /),
+    });
+    const quoted = `${words(150)} "in quotes" ${words(40)}`;
+    expect(readShots(reply([{ name: "why_it_matters", shot: { ...shot("title"), layout: quoted } }, both[1]]), brief)).toMatchObject({
+      problem: expect.stringMatching(/straight double quote/),
+    });
+  });
+
+  it("leaves the brief validator strict: an over-long line in a brief is still refused", () => {
+    const input = scenes(4, ["title", "comparison", "timeline", "recap-map"]) as { scenes: { shot: Record<string, unknown> }[] };
+    input.scenes[0]!.shot.layout = words(203);
+    expect(refusal(input).field).toBe("scenes[0].shot.layout");
   });
 
   it("names exactly what is wrong", () => {
@@ -205,6 +262,22 @@ describe("the art director's prompt", () => {
     expect(ART_DIRECTOR_PROMPT).toContain("no one type may be on more than half");
     expect(ART_DIRECTOR_PROMPT).toContain("```shots");
     expect(ART_DIRECTOR_PROMPT).not.toContain(EM_DASH);
+  });
+
+  it("asks for each field a tenth under the validator's limit, both from SHOT_TEXT_LIMITS", () => {
+    expect(askedShotLength("layout")).toBe(180);
+    expect(askedShotLength("motion")).toBe(180);
+    expect(askedShotLength("emphasis")).toBe(144);
+    for (const name of ["layout", "motion", "emphasis"] as const) {
+      expect(askedShotLength(name)).toBeLessThan(SHOT_TEXT_LIMITS[name]);
+      expect(ART_DIRECTOR_PROMPT).toContain(`\`${name}\`: `);
+      expect(ART_DIRECTOR_PROMPT).toContain(`At most ${SHOT_TEXT_LIMITS[name] - Math.ceil(SHOT_TEXT_LIMITS[name] / 10)} characters`);
+    }
+    // The validator's own number is never the one the prompt asks for.
+    expect(ART_DIRECTOR_PROMPT).not.toContain(`At most ${SHOT_TEXT_LIMITS.layout} characters`);
+  });
+
+  it("is built from the same tables the validator reads", () => {
     const system = buildArtDirectorSystemPrompt("remotionkc");
     expect(system.startsWith(ART_DIRECTOR_PROMPT)).toBe(true);
     expect(system).toContain(toolBlock("remotionkc"));
