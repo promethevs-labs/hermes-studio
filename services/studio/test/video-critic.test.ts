@@ -9,6 +9,10 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vites
 
 import { until } from "./wait";
 
+// Each case runs a whole job through two stand-in processes; under a loaded
+// machine one took six seconds, past the default five.
+vi.setConfig({ testTimeout: 30_000 });
+
 /**
  * The picture check (docs/STUDIO-VIDEOS.md, "The critic"), end to end
  * through the video runner with no paid call: one stand-in `claude` answers
