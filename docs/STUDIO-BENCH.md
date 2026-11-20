@@ -1,6 +1,7 @@
 # The video bench
 
-Built 2026-11-20, never run against a real model yet. A fixed set of twelve
+Built 2026-11-20 and run twice that day, before and after the look
+milestone (docs/STUDIO-LOOK.md, "Results"). A fixed set of twelve
 video briefs, a command that runs them through the studio's video runner
 against a scratch home, and a report that compares two runs.
 
@@ -274,15 +275,19 @@ fails, and says why.
 
 ## What it costs
 
-Unknown until measured. Past studio videos cost about $2 to $3.60 each, and
-these are 60 to 75 seconds, so a guess for twelve is $25 to $45 a run. The
-first real run is the measurement.
+Measured on 2026-11-20, remotionkc with the `sonnet` model:
 
-What the art director's plan (`--shots`), the runner's own critic and a
-standalone check (`--critic`, `score`) cost per brief is unmeasured too,
-until the first real run that uses them. Each is recorded per result
-(`shots.costUsd`, `criticCostUsd`, `checkCostUsd`) and counted toward the
-cap.
+| Run | Twelve briefs | A video | Wall time a video |
+| --- | --- | --- | --- |
+| `run`, before the look milestone | $10.21 | $0.46 to $1.56, mean $0.85 | 9 minutes |
+| `run --shots --critic` on main, the critic's retry on | $35.38 | $2.44 to $3.82, mean $2.95 | 16 minutes |
+| `score` on twelve accepted videos | $0.51 | $0.04 | half a minute |
+
+In the second run a shot plan cost $0.02 to $0.06 a brief ($0.36 in all),
+the runner's own critic about $0.05 a read ($1.20 for 24 reads), and the
+critic's retry $20.22 of the $33.82 the jobs cost. Each is recorded per
+result (`shots.costUsd`, `criticCostUsd`, `checkCostUsd`) and counted toward
+the cap. Other tools and models are unmeasured.
 
 A paid run needs the owner's go-ahead and `--cap`, which has no default. The
 cap is the runner's `STUDIO_DAILY_USD`: a rolling 24 hours over everything
