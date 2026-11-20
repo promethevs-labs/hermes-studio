@@ -106,6 +106,14 @@ of them, and `title` and `recap-map` appear at most once. A brief with no
 shots stays valid, so old briefs, old jobs and a failed art-director turn
 still make a video.
 
+The art director's own reply is read more gently than a brief. Its prompt asks
+for a tenth under each text limit (180 characters for `layout` and `motion`,
+144 for `emphasis`, derived from `SHOT_TEXT_LIMITS`), and a line over its limit
+by up to the limit again is cut back to the last whole word that fits, with
+nothing added, and logged by the runner, instead of failing the plan. A line
+more than twice its limit, or any other fault, is refused as before, and the
+brief validator stays strict for a person's edits.
+
 ### D116. The critic sends back what it can point to, once, and only reports the scores
 
 After a build passes the gate, a model reads the contact sheets against a
