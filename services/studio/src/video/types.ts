@@ -2,9 +2,10 @@ import type { JobState } from "@hermes/schema";
 import type { JobReview, JobRunAttempt } from "@hermes/schema/shared";
 
 import type { AgentAuth } from "../config";
-import type { CostSource } from "../cost";
+import type { CostSource, SpendEntry } from "../cost";
 import type { GateStep } from "../data/store";
 import type { ValidVideoBrief } from "./brief";
+import type { CriticRun } from "./critic";
 import type { DeadTools } from "./dead-tools";
 
 /**
@@ -70,7 +71,7 @@ export interface VideoGateResult {
 
 /** One step of the manimkc-video skill, as the job view lists it. */
 export interface VideoStep {
-  name: "storyboard" | "narration" | "setup" | "scene-code" | "lint" | "preview" | "look" | "build" | "check" | "poster" | "ready";
+  name: "storyboard" | "narration" | "setup" | "scene-code" | "lint" | "preview" | "look" | "build" | "check" | "poster" | "critic" | "ready";
   state: "pending" | "running" | "done" | "failed";
   rounds: number;
   note: string | null;
@@ -151,4 +152,33 @@ export interface VideoJobRecord {
   runRecordError?: string | null;
   /** A person's verdict detail, kept beside the catalog's `job.review`. Null until one is written. */
   review?: JobReview | null;
+  /**
+   * Every picture check the job had, in order (`critic.ts`): each attempt's
+   * after its gate passed, and any from the standalone route, with the whole
+   * text of what it found, the sheets it read and why it gave nothing when it
+   * did not. Absent on a record from before the critic, which reads as none.
+   * The attempt's scores alone go on `attempts[n].critic` for the run record.
+   */
+  critic?: CriticRun[];
+  /**
+   * What every critic run of this job spent, for the rolling window behind
+   * `STUDIO_DAILY_USD`: an entry per run that cost something, dropped only
+   * once it ended before the window, never by the history's trim
+   * (`withCriticSpend` in critic.ts). Absent on a record from before it,
+   * whose spend is read from `critic`.
+   */
+  criticSpend?: SpendEntry[];
+  /**
+   * The build kept when a picture check sent defects back (`keepPassedBuild`
+   * in runner.ts): that attempt's gate result and line changes, its gate's
+   * copies renamed to `candidate.passed/`. Cleared when a later attempt passes
+   * the gate or the job falls back to it. Absent on every other job.
+   */
+  passedBuild?: { attempt: number; gate: VideoGateResult; lineChanges: LineChange[]; at: string } | null;
+  /**
+   * Set when the retry after a picture check did not pass and the job went to
+   * review with the earlier build instead: which attempt it is, and how the
+   * retry ended, kept here because `error` is the verdict's and is null.
+   */
+  fallback?: { attempt: number; retryErrorKind: string | null; retryError: string | null; at: string } | null;
 }
