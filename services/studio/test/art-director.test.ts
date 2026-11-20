@@ -8,6 +8,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vites
 
 import { fakeClaude, type FakeClaude } from "./fake-claude";
 import { topicListAnswer } from "./vocabulary";
+import { until } from "./wait";
 
 /**
  * The art director (docs/STUDIO-VIDEOS.md, "The shot plan"), spawned through
@@ -24,6 +25,8 @@ import { topicListAnswer } from "./vocabulary";
 vi.hoisted(() => {
   process.env.STUDIO_CLAUDE_BIN = "/nonexistent/claude-until-the-fake-is-ready";
   process.env.STUDIO_VIDEO_KIND = "on";
+  // One slot, so a route plan and a planner turn can be seen to share it.
+  process.env.STUDIO_PLANNER_CONCURRENCY = "1";
 });
 let fake: FakeClaude;
 const fakeReady = fakeClaude().then((made) => {
@@ -84,6 +87,7 @@ let runner: { enqueue: ReturnType<typeof vi.fn>; admit: ReturnType<typeof vi.fn>
 afterAll(async () => {
   await fake.cleanup();
   delete process.env.STUDIO_VIDEO_KIND;
+  delete process.env.STUDIO_PLANNER_CONCURRENCY;
 });
 
 beforeEach(async () => {
@@ -162,8 +166,32 @@ describe("the art director's spawn", () => {
     await fake.script([{ text: shotsReply(["title", "recap-map"]), hangMs: 5_000 }]);
     const result = await directShots({ brief, dir: dir(), model: "sonnet", timeoutMs: 1_000 });
     expect(result).toMatchObject({ status: "failed", shots: null, attempts: 1 });
-    expect(result.reason).toBe("the art director took longer than 1 seconds");
+    expect(result.reason).toBe("the art director took longer than 1 second");
     expect(await fake.argvs()).toHaveLength(1);
+  });
+
+  it("names the silence limit, not the whole-call limit, when it goes quiet (Greptile on #722)", async () => {
+    await fake.script([{ text: shotsReply(["title", "recap-map"]), hangMs: 5_000 }]);
+    const result = await directShots({ brief, dir: dir(), model: "sonnet", timeoutMs: 20_000, idleMs: 1_000 });
+    expect(result).toMatchObject({ status: "failed", attempts: 1 });
+    expect(result.reason).toBe("the art director went quiet for 1 second, so it was stopped");
+  });
+
+  it("hands each spawn's spend over the moment it ends, before the follow-up starts (Greptile on #722)", async () => {
+    await fake.script([{ text: "no plan", cost: 0.02 }, { text: shotsReply(["title", "recap-map"]), cost: 0.03 }]);
+    const seen: { costUsd: number | null; spawnsSoFar: number }[] = [];
+    await directShots({
+      brief,
+      dir: dir(),
+      model: "sonnet",
+      onSpend: async (entry) => {
+        seen.push({ costUsd: entry.costUsd, spawnsSoFar: (await fake.argvs()).length });
+      },
+    });
+    expect(seen).toEqual([
+      { costUsd: 0.02, spawnsSoFar: 1 },
+      { costUsd: 0.03, spawnsSoFar: 2 },
+    ]);
   });
 
   it("stops a spawn whose init lists a tool, before its reply is read", async () => {
@@ -280,6 +308,109 @@ describe("a planner turn with a valid video brief", () => {
     await videoTurn(record.id);
     const slot = (await drafts.view(record.id)).slots.video!;
     expect((slot.brief as typeof brief).scenes.map((scene) => scene.shot?.type)).toEqual(["build-up-diagram", "recap-map"]);
+  });
+});
+
+describe("shot work and the rest of the service (Greptile on #722)", () => {
+  /** A spawn log as a studio that stopped mid-plan leaves it: the marker, then the stream, cut off after its result. */
+  const cutLog = (at: string, cost: number): string =>
+    [
+      JSON.stringify({ type: "studio-shots", attempt: 1, at, model: "sonnet" }),
+      JSON.stringify({ type: "system", subtype: "init", session_id: "s", tools: [], mcp_servers: [] }),
+      JSON.stringify({ type: "result", subtype: "success", is_error: false, result: "", num_turns: 1, total_cost_usd: cost }),
+      "",
+    ].join("\n");
+
+  it("keeps a person's edited shots over the cached plan when the planner repeats the scenes", async () => {
+    await fake.script([{ text: videoReply() }, { text: shotsReply(["build-up-diagram", "recap-map"]) }, { text: videoReply() }]);
+    const { record } = await drafts.create({});
+    await videoTurn(record.id);
+    const slot = (await drafts.view(record.id)).slots.video!;
+    const edited = { ...(slot.brief as typeof brief), scenes: (slot.brief as typeof brief).scenes.map((scene, i) => ({ ...scene, shot: shot(["comparison", "recap-map"][i]!) })) };
+    await drafts.editBrief(record.id, edited, String(slot.briefSeq), "video");
+    await videoTurn(record.id, "the same again");
+    // No new art director call, and the person's shots, not the first plan's.
+    expect(await fake.argvs()).toHaveLength(3);
+    const after = (await drafts.view(record.id)).slots.video!;
+    expect((after.brief as typeof brief).scenes.map((scene) => scene.shot?.type)).toEqual(["comparison", "recap-map"]);
+  });
+
+  it("writes a draft's first spawn's spend down before its follow-up ends", async () => {
+    await fake.script([{ text: videoReply(), cost: 0.05 }, { text: "no plan", cost: 0.02 }, { text: shotsReply(["title", "recap-map"]), cost: 0.03, hangMs: 1_500 }]);
+    const { record } = await drafts.create({});
+    await drafts.send(record.id, "@video make it", [{ kind: "video", start: 0, end: 6 }]);
+    const { draftJsonPath } = await import("../src/paths");
+    const onDisk = async () => JSON.parse(await readFile(draftJsonPath(record.id), "utf8")) as { spend: { costUsd: number; what?: string }[] };
+    // While the follow-up still runs, the first spawn's spend is on disk.
+    const deadline = Date.now() + 10_000;
+    let shots: number[] = [];
+    for (;;) {
+      shots = (await onDisk()).spend.filter((entry) => entry.what === "shots").map((entry) => entry.costUsd);
+      if (shots.length === 1 && drafts.busy === 1) break;
+      if (Date.now() > deadline) throw new Error(`the first spawn's spend never reached the disk while the follow-up ran (${JSON.stringify(shots)})`);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    expect(shots).toEqual([0.02]);
+    await drafts.settled(record.id);
+    expect((await onDisk()).spend.filter((entry) => entry.what === "shots").map((entry) => entry.costUsd)).toEqual([0.02, 0.03]);
+  });
+
+  it("prices a draft's shot spawn a restart found unrecorded, once", async () => {
+    const { record } = await drafts.create({});
+    await drafts.settled(record.id);
+    const { draftDir } = await import("../src/paths");
+    const plan = path.join(draftDir(record.id), "shots", "3-abcdef12");
+    await mkdir(plan, { recursive: true });
+    const { writeFile } = await import("node:fs/promises");
+    await writeFile(path.join(plan, "session.ndjson"), cutLog(new Date().toISOString(), 0.04), "utf8");
+    for (let restart = 0; restart < 2; restart += 1) {
+      const again = new Drafts(store, runner as never);
+      await again.load();
+      await again.reconcile();
+      await again.settled(record.id);
+      expect(again.spendEntries().map((entry) => entry.costUsd)).toEqual([0.04]);
+      expect((await again.view(record.id)).costUsd).toBe(0.04);
+    }
+  });
+
+  it("prices a route plan a restart found unrecorded, once, on the ledger", async () => {
+    const plan = path.join(process.env.STUDIO_HOME!, "shots", "0f0f0f0f-aaaa-4bbb-8ccc-123456789abc");
+    await mkdir(plan, { recursive: true });
+    const { writeFile } = await import("node:fs/promises");
+    await writeFile(path.join(plan, "session.ndjson"), cutLog(new Date().toISOString(), 0.04), "utf8");
+    for (let restart = 0; restart < 2; restart += 1) {
+      const again = new Drafts(store, runner as never);
+      await again.load();
+      expect(again.spendEntries().map((entry) => entry.costUsd)).toEqual([0.04]);
+    }
+    expect((await readFile(path.join(process.env.STUDIO_HOME!, "shots", "spend.ndjson"), "utf8")).trim().split("\n")).toHaveLength(1);
+  });
+
+  it("counts a route plan against the planner slots, and in busy, so a turn waits for it", async () => {
+    await fake.script([{ text: shotsReply(["build-up-diagram", "recap-map"]), hangMs: 1_500 }]);
+    const { record } = await drafts.create({});
+    const planning = drafts.planShots({ brief });
+    await until(() => drafts.busy === 1, "the route's art director to be running");
+    await expect(drafts.send(record.id, "@video make it", [{ kind: "video", start: 0, end: 6 }])).rejects.toMatchObject({ status: 503, detail: { reason: "planner-busy" } });
+    expect(await planning).toMatchObject({ shotPlan: "planned" });
+    expect(drafts.busy).toBe(0);
+  });
+
+  it("refuses a route plan while a planner turn holds the one slot", async () => {
+    await fake.script([{ text: "Narrated, or silent?", hangMs: 1_500 }]);
+    const { record } = await drafts.create({});
+    await drafts.send(record.id, "@video make it", [{ kind: "video", start: 0, end: 6 }]);
+    await expect(drafts.planShots({ brief })).rejects.toMatchObject({ status: 503, detail: { reason: "planner-busy" } });
+    await drafts.settled(record.id);
+  });
+
+  it("counts a draft's own art director call in busy", async () => {
+    await fake.script([{ text: videoReply() }, { text: shotsReply(["build-up-diagram", "recap-map"]), hangMs: 1_000 }]);
+    const { record } = await drafts.create({});
+    await drafts.send(record.id, "@video make it", [{ kind: "video", start: 0, end: 6 }]);
+    await until(() => drafts.busy === 1 && (drafts as unknown as { directing: Map<string, unknown> }).directing.size === 1, "the draft's art director to be running", 10_000);
+    await drafts.settled(record.id);
+    expect(drafts.busy).toBe(0);
   });
 });
 

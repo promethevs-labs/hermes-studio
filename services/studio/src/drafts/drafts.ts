@@ -29,7 +29,7 @@ import {
   studioOwner,
   VERB_TIMEOUT_MS,
 } from "../config";
-import { directShots, type ShotSpend } from "./art-director";
+import { directShots, unrecordedShotSpend, type ShotSpend } from "./art-director";
 import { costFromLog, JobCostMeter, type CostSource, type SpendEntry } from "../cost";
 import { checkoutRevision, documentHashOf, ensureCheckout, isDiagramName, listDiagrams } from "../canvas/diagrams";
 import {
@@ -97,6 +97,7 @@ import type { JobRecord, JobStore } from "../data/store";
 import {
   hasShotPlan,
   shotPlanHash,
+  shotPlanOf,
   validateVideoBrief,
   withoutShots,
   withShots,
@@ -890,6 +891,13 @@ export class Drafts {
   /** Read every draft workspace back into memory. Called once, at start. */
   async load(): Promise<void> {
     this.routeSpend = await readRouteSpend();
+    // A route plan the studio stopped during: priced from its log and put on
+    // the ledger, so the cap counts it after the restart and only once.
+    const recovered = await unrecordedRouteSpend(this.routeSpend);
+    if (recovered.length > 0) {
+      await appendRouteSpend(recovered);
+      this.routeSpend = [...this.routeSpend, ...recovered];
+    }
     let entries: string[];
     try {
       entries = await readdir(`${studioHome()}/drafts`);
@@ -953,6 +961,7 @@ export class Drafts {
    * draft is left `open`. Nothing is resent by itself (D15).
    */
   async reconcile(): Promise<string[]> {
+    await this.recoverShotSpend();
     const interrupted: string[] = [];
     for (const record of this.records.values()) {
       if (record.inFlight === null) continue;
@@ -1020,6 +1029,34 @@ export class Drafts {
       interrupted.push(record.id);
     }
     return interrupted;
+  }
+
+  /**
+   * Art director spawns a stopped studio never wrote down: every draft's
+   * `shots/<turn>-<id>/session.ndjson` is read against the draft's own
+   * `what: "shots"` spend, and each spawn missing from it is priced from its
+   * log and added, so the conversation's cost and the daily cap see it after
+   * a restart. Run once at start, before anything new can spawn.
+   */
+  private async recoverShotSpend(): Promise<void> {
+    for (const record of this.records.values()) {
+      const root = path.join(draftDir(record.id), "shots");
+      const plans = await readdir(root).catch(() => [] as string[]);
+      if (plans.length === 0) continue;
+      const recorded = new Set(record.spend.filter((entry) => entry.what === "shots").map((entry) => entry.startedAt));
+      const found: TurnSpend[] = [];
+      for (const plan of plans) {
+        const turn = Number.parseInt(plan.split("-")[0] ?? "", 10);
+        for (const entry of await unrecordedShotSpend(path.join(root, plan, "session.ndjson"), recorded)) {
+          found.push({ ...entry, turn: Number.isFinite(turn) ? turn : 0, what: "shots" });
+        }
+      }
+      if (found.length === 0) continue;
+      await this.write(record.id, async () => {
+        const nextSpend = [...this.require(record.id).spend, ...found];
+        await this.save(record.id, { spend: nextSpend, ...sumCost(nextSpend) });
+      });
+    }
   }
 
   /**
@@ -1123,9 +1160,13 @@ export class Drafts {
     return [...[...this.records.values()].flatMap((record) => record.spend), ...this.routeSpend];
   }
 
-  /** How many planner turns are running right now. */
+  /**
+   * How many `claude -p` spawns this service is running right now: planner
+   * turns and art director calls, a draft's and the route's, so the idle
+   * check never takes shot work for quiet.
+   */
   get busy(): number {
-    return this.running.size;
+    return this.running.size + this.directing.size + this.routeDirecting.size;
   }
 
   async events(id: string): Promise<TranscriptEvent[]> {
@@ -1772,7 +1813,8 @@ export class Drafts {
     }
     // The job cap's own refusal, body and all: spend is spend (D36).
     this.runner.assertUnderCap();
-    if (this.turnsInFlight.size >= PLANNER_CONCURRENCY) {
+    // The route's shot plans share the budget (`planShots`).
+    if (this.turnsInFlight.size + this.routePlans >= PLANNER_CONCURRENCY) {
       throw new JobRefused(503, `every planner slot is busy (${PLANNER_CONCURRENCY}); try again in a few seconds`, {
         reason: "planner-busy",
         concurrency: PLANNER_CONCURRENCY,
@@ -2324,16 +2366,20 @@ export class Drafts {
           else this.directing.set(id, run);
         },
         stopped: () => this.draining || this.records.get(id)?.state === "abandoned",
+        // Each spawn's spend is on the record as it ends, dated at its own
+        // end and counted in the rolling window beside the planner's turns
+        // (D36) and in the conversation's own cost, whether or not the brief
+        // it planned for lands. A crash between two spawns loses neither;
+        // one during a spawn is priced from its log at the next start
+        // (`recoverShotSpend`).
+        onSpend: (entry) =>
+          this.write(id, async () => {
+            const current = this.require(id);
+            const nextSpend = [...current.spend, { ...entry, turn, what: "shots" as const }];
+            await this.save(id, { spend: nextSpend, ...sumCost(nextSpend) });
+          }),
       });
       this.directing.delete(id);
-      // Dated at each spawn's end and counted in the rolling window beside
-      // the planner's turns (D36), and in the conversation's own cost,
-      // whether or not the brief it planned for lands.
-      await this.write(id, async () => {
-        const current = this.require(id);
-        const nextSpend = [...current.spend, ...result.spend.map((entry) => ({ ...entry, turn, what: "shots" as const }))];
-        await this.save(id, { spend: nextSpend, ...sumCost(nextSpend) });
-      }).catch(() => undefined);
       if (result.status === "planned" && result.shots !== null) {
         return outcome(withShots(brief, result.shots), "planned", null, result.costUsd, { hash, shots: result.shots });
       }
@@ -2398,8 +2444,10 @@ export class Drafts {
     }
     // The job cap's own refusal, body and all: spend is spend (D36).
     this.runner.assertUnderCap();
-    if (this.routePlans >= PLANNER_CONCURRENCY) {
-      throw new JobRefused(503, `every shot plan slot is busy (${PLANNER_CONCURRENCY}); try again in a few seconds`, {
+    // One budget for every `claude -p` this service starts: planner turns
+    // (each with its own shot plan inside it) and the route's plans.
+    if (this.turnsInFlight.size + this.routePlans >= PLANNER_CONCURRENCY) {
+      throw new JobRefused(503, `every planner slot is busy (${PLANNER_CONCURRENCY}); try again in a few seconds`, {
         reason: "planner-busy",
         concurrency: PLANNER_CONCURRENCY,
       });
@@ -2418,9 +2466,12 @@ export class Drafts {
             if (run !== null) this.routeDirecting.add(run);
           },
           stopped: () => this.draining,
+          // On the ledger as each spawn ends, as a draft's are on its record.
+          onSpend: async (entry) => {
+            this.routeSpend = [...this.routeSpend, entry];
+            await appendRouteSpend([entry]);
+          },
         });
-        this.routeSpend = [...this.routeSpend, ...result.spend];
-        await appendRouteSpend(result.spend);
         if (result.status === "planned" && result.shots !== null) {
           return { brief: answerOf(withShots(brief, result.shots)), shotPlan: "planned" as const, costUsd: result.costUsd ?? 0 };
         }
@@ -3600,6 +3651,7 @@ export class Drafts {
               `${kind === "video" ? "Video brief. " : conversationalPrefix(now)}${told}\n\n` +
               `This is the brief in force; build on it, and a change is still a whole new brief:\n${JSON.stringify(brief, null, 1)}`,
           },
+          ...(kind === "video" ? shotCacheAfterEdit(slotOf(now, "video"), brief as DraftVideoBrief) : {}),
         }),
       );
       return { record: this.require(id), changed: true, kind };
@@ -4223,6 +4275,22 @@ async function readVideoCorpus(): Promise<VideoCorpusEntry[] | null> {
 /** The fields a person's edit of a video brief may set: the planner's, and the concept note it draws from. */
 export const EDITABLE_VIDEO_FIELDS = [...PLANNER_VIDEO_FIELDS, "source"] as const;
 
+/**
+ * The video slot's cached shot plan after a person saves a brief: the shots
+ * the saved brief carries become the plan for its scenes, so a later planner
+ * brief with the same scenes brings back the person's shots, never older
+ * ones. A saved brief with no shots clears a cached plan written for the
+ * same scenes, since the person took those shots off; a plan for other
+ * scenes stays, as it could not be reused here anyway.
+ */
+export function shotCacheAfterEdit(slot: Pick<KindSlot, "shotPlan">, brief: DraftVideoBrief): Pick<KindSlot, "shotPlan"> {
+  const hash = shotPlanHash(brief);
+  const shots = shotPlanOf(brief);
+  if (shots !== null) return { shotPlan: { hash, shots } };
+  if (slot.shotPlan != null && slot.shotPlan.hash === hash) return { shotPlan: null };
+  return {};
+}
+
 /** `POST /api/video/shots`'s spend ledger: one `ShotSpend` per line, appended, read back at start. */
 function routeSpendPath(): string {
   return path.join(studioHome(), "shots", "spend.ndjson");
@@ -4247,6 +4315,26 @@ async function readRouteSpend(): Promise<ShotSpend[]> {
       }),
     )
     .filter((entry) => Date.parse(entry.finishedAt) >= floor);
+}
+
+/**
+ * The route's spawns the ledger misses: each `shots/<id>/session.ndjson`
+ * read against the ledger by start, inside the ledger's own two days (a
+ * spawn older than that was either written down or is past every window).
+ */
+async function unrecordedRouteSpend(ledger: readonly ShotSpend[]): Promise<ShotSpend[]> {
+  const root = path.dirname(routeSpendPath());
+  const plans = await readdir(root).catch(() => [] as string[]);
+  const recorded = new Set(ledger.map((entry) => entry.startedAt));
+  const floor = Date.now() - ROUTE_SPEND_KEEP_MS;
+  const found: ShotSpend[] = [];
+  for (const plan of plans) {
+    if (plan === path.basename(routeSpendPath())) continue;
+    for (const entry of await unrecordedShotSpend(path.join(root, plan, "session.ndjson"), recorded)) {
+      if (Date.parse(entry.startedAt) >= floor) found.push(entry);
+    }
+  }
+  return found;
 }
 
 async function appendRouteSpend(entries: readonly ShotSpend[]): Promise<void> {

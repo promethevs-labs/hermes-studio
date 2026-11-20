@@ -632,6 +632,8 @@ export interface PlannerOptions {
   onInit?: (init: PlannerInit) => void;
   /** The whole turn's limit; absent is `STUDIO_PLANNER_TURN_MS`. The art director passes its own. */
   turnMs?: number;
+  /** Silence on stdout before the turn is stopped; absent is `STUDIO_PLANNER_IDLE_MS`. */
+  idleMs?: number;
 }
 
 /**
@@ -653,7 +655,7 @@ export class PlannerRun {
 
   private touch(): void {
     if (this.idle !== null) clearTimeout(this.idle);
-    this.idle = setTimeout(() => void this.stop("idle-timeout"), PLANNER_IDLE_MS);
+    this.idle = setTimeout(() => void this.stop("idle-timeout"), this.options.idleMs ?? PLANNER_IDLE_MS);
   }
 
   private watch(): Promise<PlannerOutcome> {

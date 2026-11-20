@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { appendFile, mkdir, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import type { VideoShot } from "@hermes/schema/shared";
 
-import { agentAuth, artDirectorMs } from "../config";
-import { JobCostMeter, type CostSource, type SpendEntry } from "../cost";
+import { agentAuth, artDirectorMs, PLANNER_IDLE_MS } from "../config";
+import { costFromLog, JobCostMeter, type CostSource, type SpendEntry } from "../cost";
 import { BriefError } from "../diagram/brief";
 import { checkShotPlan, validateShot, type VideoBrief } from "../video/brief";
 import { briefTool } from "../video/tools";
@@ -60,6 +60,14 @@ export interface DirectInput {
   model: string;
   /** The limit on each spawn; absent is `STUDIO_ART_DIRECTOR_MS`. */
   timeoutMs?: number;
+  /** Silence on a spawn's stdout before it is stopped; absent is `STUDIO_PLANNER_IDLE_MS`. */
+  idleMs?: number;
+  /**
+   * Told of each spawn's spend the moment it ends, before the next one
+   * starts, so a caller can write it down then: a crash during the
+   * follow-up must not lose the first call's cost.
+   */
+  onSpend?: (entry: ShotSpend) => Promise<void>;
   /** Told of each spawn as it starts, and of null when it ends, so the caller can stop it. */
   track?: (run: PlannerRun | null) => void;
   /** Asked before each spawn: true stops before paying for another. */
@@ -103,18 +111,59 @@ export function readShots(text: string, brief: Pick<VideoBrief, "scenes">): { sh
 }
 
 /** Why a spawn gave no reply worth reading, or null when it did. */
-function noReply(run: PlannerOutcome, timeoutMs: number): string | null {
+function noReply(run: PlannerOutcome, timeoutMs: number, idleMs: number): string | null {
   if (run.spawnFailed) return `the art director never started: ${run.stderr}`;
   if (run.sealBroken !== null) return `${run.sealBroken.replace(/^the planner/, "the art director")}, so it was stopped before its reply`;
-  if (run.stopReason === "turn-timeout" || run.stopReason === "idle-timeout") {
-    return `the art director took longer than ${Math.round(timeoutMs / 1000)} seconds`;
-  }
+  // Two limits, named apart: the whole call's, and the silence one.
+  if (run.stopReason === "turn-timeout") return `the art director took longer than ${seconds(timeoutMs)}`;
+  if (run.stopReason === "idle-timeout") return `the art director went quiet for ${seconds(idleMs)}, so it was stopped`;
   if (run.stopReason !== null) return "the art director was stopped before it answered";
   if (run.isError || run.exitCode !== 0) {
     return `the art director's session failed: ${run.result ?? (run.stderr || run.subtype || `exit ${run.exitCode ?? run.signal}`)}`;
   }
   if (run.text === "") return "the art director ended with no reply";
   return null;
+}
+
+function seconds(ms: number): string {
+  const whole = Math.round(ms / 1000);
+  return `${whole} ${whole === 1 ? "second" : "seconds"}`;
+}
+
+/** The line that opens each spawn in a plan's `session.ndjson`: what a recovery finds a spawn by. */
+export const SHOT_MARKER = "studio-shots";
+
+/**
+ * The spend of every spawn in a plan's session log that `recorded` does not
+ * already hold, by its start: what a studio that stopped mid-plan never
+ * wrote down. Each spawn is priced from its own lines, as an interrupted
+ * planner turn is (`costFromLog`), and dated `now`, since it stopped
+ * spending no later than the restart that found it.
+ */
+export async function unrecordedShotSpend(logFile: string, recorded: ReadonlySet<string>, now = new Date().toISOString()): Promise<ShotSpend[]> {
+  const body = await readFile(logFile, "utf8").catch(() => "");
+  const spawns: { at: string; model: string | null; lines: string[] }[] = [];
+  for (const line of body.split("\n")) {
+    if (line.trim() === "") continue;
+    let marker: Record<string, unknown> | null = null;
+    try {
+      const parsed: unknown = JSON.parse(line);
+      if (typeof parsed === "object" && parsed !== null && (parsed as { type?: unknown }).type === SHOT_MARKER) marker = parsed as Record<string, unknown>;
+    } catch {
+      // A line cut off by the crash: part of the spawn before it, unpriceable.
+    }
+    if (marker !== null && typeof marker.at === "string") {
+      spawns.push({ at: marker.at, model: typeof marker.model === "string" ? marker.model : null, lines: [] });
+    } else {
+      spawns.at(-1)?.lines.push(line);
+    }
+  }
+  return spawns
+    .filter((spawn) => !recorded.has(spawn.at) && spawn.lines.length > 0)
+    .map((spawn) => {
+      const reading = costFromLog(spawn.lines.join("\n"), spawn.model);
+      return { startedAt: spawn.at, finishedAt: now, costUsd: reading.usd, costSource: reading.source };
+    });
 }
 
 /**
@@ -126,6 +175,7 @@ function noReply(run: PlannerOutcome, timeoutMs: number): string | null {
  */
 export async function directShots(input: DirectInput): Promise<DirectorResult> {
   const timeoutMs = input.timeoutMs ?? artDirectorMs();
+  const idleMs = input.idleMs ?? PLANNER_IDLE_MS;
   await mkdir(path.join(input.dir, "tmp"), { recursive: true });
   const systemPromptFile = path.join(input.dir, "system.md");
   const settingsFile = path.join(input.dir, "settings.json");
@@ -146,7 +196,9 @@ export async function directShots(input: DirectInput): Promise<DirectorResult> {
     if (input.stopped?.() === true) return result("failed", null, "the studio stopped before the art director answered");
     const startedAt = new Date().toISOString();
     const meter = new JobCostMeter(input.model);
-    let log: Promise<void> = appendFile(logFile, `${JSON.stringify({ type: "studio-shots", attempt: attempt + 1, at: startedAt, model: input.model })}\n`, "utf8");
+    // Written before the spawn, so a restart that finds the log can price it.
+    await appendFile(logFile, `${JSON.stringify({ type: SHOT_MARKER, attempt: attempt + 1, at: startedAt, model: input.model })}\n`, "utf8");
+    let log: Promise<void> = Promise.resolve();
     const run = startPlanner({
       argv: plannerArgv({ systemPromptFile, settingsFile, sessionId, resume: attempt > 0, model: input.model }),
       prompt,
@@ -154,6 +206,7 @@ export async function directShots(input: DirectInput): Promise<DirectorResult> {
       auth: agentAuth(),
       tmp: path.join(input.dir, "tmp"),
       turnMs: timeoutMs,
+      idleMs,
       onLine: (line) => {
         meter.observe(line);
         log = log.then(() => appendFile(logFile, `${line}\n`, "utf8")).catch(() => undefined);
@@ -168,9 +221,11 @@ export async function directShots(input: DirectInput): Promise<DirectorResult> {
     }
     await log.catch(() => undefined);
     const reading = meter.read();
-    spend.push({ startedAt, finishedAt: new Date().toISOString(), costUsd: reading.usd, costSource: reading.source });
+    const entry: ShotSpend = { startedAt, finishedAt: new Date().toISOString(), costUsd: reading.usd, costSource: reading.source };
+    spend.push(entry);
+    await input.onSpend?.(entry).catch(() => undefined);
 
-    const failed = noReply(outcome, timeoutMs);
+    const failed = noReply(outcome, timeoutMs, idleMs);
     if (failed !== null) return result("failed", null, failed);
     const read = readShots(outcome.text, input.brief);
     if ("shots" in read) return result("planned", read.shots, null);

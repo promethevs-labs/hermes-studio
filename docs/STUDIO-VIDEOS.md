@@ -647,9 +647,15 @@ spawn, 120 seconds by default, and a spawn that runs past it is a failure.
 Every spawn's cost is metered as a planner turn's is and dated at its own end:
 a draft's spawns go on the draft's `spend` beside its turns (marked `what:
 "shots"`), so they count in the conversation's cost and in the rolling window
-behind `STUDIO_DAILY_USD`. When the cap is already reached the step is
-skipped and the brief lands without shots. A failure never fails the
-planner's turn and never blocks the press.
+behind `STUDIO_DAILY_USD`. Each spawn's spend is written down the moment it
+ends, before a follow-up starts, and a spawn cut off by a restart is priced
+from its `session.ndjson` at the next start (`unrecordedShotSpend`), once.
+When the cap is already reached the step is skipped and the brief lands
+without shots. Art director calls share `STUDIO_PLANNER_CONCURRENCY` with
+planner turns, and count in the draft service's `busy`. A failure never fails
+the planner's turn and never blocks the press. A person's saved brief
+replaces the cached plan with the shots it carries, so a later planner brief
+with the same scenes brings those back, not older ones.
 
 **For tools: `POST /api/video/shots`.** The body is `{ brief }`, a whole video
 brief, validated against the runner's vocabulary as `POST /api/jobs`
@@ -658,8 +664,8 @@ validates one. The answer is `{ brief, shotPlan, costUsd, reason? }`, where
 brief already had a whole plan, and no call was made), `failed` (with the
 reason) or `off`. It sits behind the same guard and owner check as every
 other route. Over the daily cap it is refused with the job cap's 429, and its
-spend goes to `$STUDIO_HOME/shots/spend.ndjson`, read back at start, so the
-cap counts it. The benchmark harness calls it.
+spend goes to `$STUDIO_HOME/shots/spend.ndjson` as each spawn ends, read back
+at start with any spawn a restart cut off, so the cap counts it. The benchmark harness calls it.
 
 **What the video agent is told.** `videoPromptFacing` carries each scene's
 `shot` in the brief it hands the agent. When the brief has shots, each tool's
