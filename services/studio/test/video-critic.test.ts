@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readFile, rm, symlink, truncate, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -67,7 +67,7 @@ if (argv.includes("--tools")) {
   out({ type: "system", subtype: "init", session_id: session, tools: ["Bash"], mcp_servers: [], model: "claude-sonnet-5", apiKeySource: "none", claude_code_version: "2.1.300" });
   out({ type: "assistant", message: { id: "msg_" + n, model: "claude-sonnet-5", role: "assistant", content: [{ type: "text", text: "working" }], usage } });
   const finish = () => {
-    out({ type: "result", subtype: "success", is_error: false, result: "done", num_turns: 2, total_cost_usd: 0.01, usage });
+    out({ type: "result", subtype: step.refused ? "error_during_execution" : "success", is_error: !!step.refused, result: step.refused || "done", num_turns: step.turns === undefined ? 2 : step.turns, total_cost_usd: 0.01, usage });
     process.exit(0);
   };
   if (step.hangMs) setTimeout(finish, step.hangMs);
@@ -97,7 +97,8 @@ const catalogMock = vi.hoisted(() => ({
 }));
 vi.mock("../src/data/catalog", async (importOriginal) => ({ ...(await importOriginal<typeof import("../src/data/catalog")>()), ...catalogMock }));
 
-const gateMock = vi.hoisted(() => ({ verdicts: [] as boolean[], runVideoGate: vi.fn() }));
+/** The gate's verdicts in order; `throwOn` makes the nth gate call throw, as a runner fault would. */
+const gateMock = vi.hoisted(() => ({ verdicts: [] as boolean[], runVideoGate: vi.fn(), calls: 0, throwOn: 0 }));
 vi.mock("../src/video/gate", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/video/gate")>()),
   runVideoGate: gateMock.runVideoGate,
@@ -144,7 +145,7 @@ vi.mock("../src/video/backend", async (importOriginal) => {
 
 const { CLAUDE_BIN } = await import("../src/config");
 if (CLAUDE_BIN !== path.join(fakeDir, "claude")) throw new Error(`the runner would spawn ${CLAUDE_BIN}, not the stand-in`);
-const { VideoRunner } = await import("../src/video/runner");
+const { VideoRunner, FALLBACK_WARNING } = await import("../src/video/runner");
 const { RecordStore } = await import("../src/data/store");
 const { videoJobRoutes, videoView } = await import("../src/video/routes");
 const critic = await import("../src/video/critic");
@@ -159,13 +160,32 @@ type SpendEntryT = import("../src/cost").SpendEntry;
 
 const ok = (json: unknown = {}) => ({ ok: true, json, error: null, offline: false });
 
-function verdict(pass: boolean): unknown {
+/** What the gate's step 5 leaves in `candidate/` for gate call `n`: every file names its call. */
+const candidateFiles = (n: number): Record<string, string> => ({
+  "two-boxes.mp4": `the video of gate call ${n}`,
+  "two-boxes.vtt": `the captions of gate call ${n}`,
+  "poster.jpg": `the poster of gate call ${n}`,
+  "copies.json": JSON.stringify({ call: n }),
+  "source/scenes.py": `# the source of gate call ${n}\n`,
+  "source/topic.yml": `topic: networks # ${n}\n`,
+  "source/brief.json": "{}\n",
+});
+
+/** Step 5's way: `candidate/` deleted and rebuilt, whole on a pass and partial on a fail. */
+async function writeCandidate(candidate: string, n: number, pass: boolean): Promise<void> {
+  await rm(candidate, { recursive: true, force: true });
+  await mkdir(path.join(candidate, "source"), { recursive: true });
+  if (!pass) return void (await writeFile(path.join(candidate, "partial.mp4"), `half a video from gate call ${n}`));
+  for (const [name, body] of Object.entries(candidateFiles(n))) await writeFile(path.join(candidate, name), body);
+}
+
+function verdict(pass: boolean, n?: number): unknown {
   return {
     ok: pass,
     steps: [{ name: "length", ok: pass, detail: pass ? "60 s" : "scene two runs long" }],
     findings: pass ? [] : ["scene two runs long"],
     warnings: [],
-    script: null,
+    script: pass && n !== undefined ? { classes: CLASSES, changes: [{ scene: CLASSES[0], kind: "reworded", brief: "A request starts.", voiced: [`as voiced on gate call ${n}`] }] } : null,
     sync: null,
     length: null,
     looked: null,
@@ -189,7 +209,7 @@ let store: InstanceType<typeof RecordStore<VideoJobRecordT>>;
 let runner: InstanceType<typeof VideoRunner>;
 let extraSpend: SpendEntryT[];
 const saved = Object.fromEntries(
-  ["STUDIO_HOME", "STUDIO_DAILY_USD", "STUDIO_VIDEO_CRITIC", "STUDIO_VIDEO_CRITIC_TIMEOUT_MS", "STUDIO_VIDEO_CRITIC_MODEL", "ANTHROPIC_API_KEY"].map((key) => [key, process.env[key]]),
+  ["STUDIO_HOME", "STUDIO_DAILY_USD", "STUDIO_VIDEO_CRITIC", "STUDIO_VIDEO_CRITIC_TIMEOUT_MS", "STUDIO_VIDEO_CRITIC_MODEL", "STUDIO_VIDEO_HANG_MS", "ANTHROPIC_API_KEY"].map((key) => [key, process.env[key]]),
 );
 
 function doctor(): VideoDoctorT {
@@ -240,7 +260,16 @@ beforeEach(async () => {
   catalogMock.preferenceGet.mockResolvedValue(ok({ value: null }));
   gateMock.verdicts = [];
   gateMock.runVideoGate.mockReset();
-  gateMock.runVideoGate.mockImplementation(async () => verdict(gateMock.verdicts.shift() ?? true));
+  gateMock.calls = 0;
+  gateMock.throwOn = 0;
+  gateMock.runVideoGate.mockImplementation(async (input: { paths: { candidate: string } }) => {
+    gateMock.calls += 1;
+    const n = gateMock.calls;
+    if (gateMock.throwOn === n) throw new Error("the gate fell over");
+    const pass = gateMock.verdicts.shift() ?? true;
+    await writeCandidate(input.paths.candidate, n, pass);
+    return verdict(pass, n);
+  });
   backendMock.prompts = [];
   backendMock.sheets = async (dir) => {
     for (const scene of CLASSES) await writeFile(path.join(dir, `${scene}.sheet.png`), PNG);
@@ -477,6 +506,116 @@ describe("the picture check in the job loop", () => {
     expect(done.state).toBe("cancelled");
     expect(done.critic![0]).toMatchObject({ scores: null, error: expect.stringContaining("cancelled") });
     expect(await agentSpawns()).toBe(1);
+  });
+});
+
+describe("falling back to the build that passed", () => {
+  const job = (id: string, ...parts: string[]) => path.join(home, "jobs", id, ...parts);
+
+  /** The fallback's promise: attempt 1's build in review, said so, and the retry's own ending kept. */
+  async function expectFellBack(done: VideoJobRecordT, retry: { kind: string; error?: string }): Promise<void> {
+    expect(done.state).toBe("awaiting_review");
+    expect(done.error).toBeNull();
+    expect(done.errorKind).toBeNull();
+    expect(done.fallback).toMatchObject({ attempt: 1, retryErrorKind: retry.kind });
+    if (retry.error !== undefined) expect(done.fallback!.retryError).toContain(retry.error);
+    // candidate/ is attempt 1's, byte for byte, and nothing of the retry's is left in it.
+    for (const [name, body] of Object.entries(candidateFiles(1))) expect(await readFile(job(done.id, "candidate", name), "utf8")).toBe(body);
+    expect(existsSync(job(done.id, "candidate", "partial.mp4"))).toBe(false);
+    expect(existsSync(job(done.id, "candidate.passed"))).toBe(false);
+    expect(done.passedBuild ?? null).toBeNull();
+    // Its gate and lines, with a warning the card shows.
+    expect(done.gate!.ok).toBe(true);
+    expect(done.gate!.warnings).toContain(FALLBACK_WARNING);
+    expect(done.lineChanges[0]!.voiced).toEqual(["as voiced on gate call 1"]);
+    // Its defects are open, not sent back.
+    expect(videoView(done).critic).toMatchObject({ attempt: 1, defects: [DEFECT], sentBack: [] });
+    expect(videoView(done).fallback).toMatchObject({ attempt: 1 });
+    // The run record keeps every attempt as it was, and passes its check.
+    expect(done.attempts![0]).toMatchObject({ n: 1, gate: { ok: true }, critic: { defects: 1 } });
+    expect(checkJobRun(JSON.parse(await readFile(lastRunFile(done.id)!, "utf8"))).ok).toBe(true);
+    const finishes = catalogMock.jobFinish.mock.calls.map((call) => (call as unknown[])[0] as { jobId: string; state: string });
+    expect(finishes.filter((input) => input.jobId === done.id).map((input) => input.state)).toEqual(["awaiting_review"]);
+    const events = await readFile(job(done.id, "session.ndjson"), "utf8");
+    expect(events).toContain("so attempt 1's build goes to review");
+  }
+
+  it("goes to review with the earlier build when the retry fails the gate on every attempt left, its source and sheets kept from that build", async () => {
+    await plans([{}, {}, {}], [{ reply: reply({ defects: [DEFECT] }) }]);
+    gateMock.verdicts = [true, false, false];
+    const done = await runToEnd();
+
+    expect(await agentSpawns()).toBe(3);
+    expect(done.attempts!.map((attempt) => attempt.gate?.ok)).toEqual([true, false, false]);
+    await expectFellBack(done, { kind: "gate", error: "scene two runs long" });
+
+    // Accept's cleanup keeps the restored build's source and the critic's copies of its sheets.
+    await rm(job(done.id, "render", "sheets", `${CLASSES[0]}.sheet.png`), { force: true });
+    await writeFile(job(done.id, "render", "sheets", `${CLASSES[1]}.sheet.png`), Buffer.concat([PNG, Buffer.from(" of the retry")]));
+    await runner.cleanup(done, { candidate: false });
+    expect(await readFile(job(done.id, "source", "scenes.py"), "utf8")).toBe("# the source of gate call 1\n");
+    expect(existsSync(job(done.id, "source", "brief.json"))).toBe(false);
+    for (const scene of CLASSES) expect(await readFile(job(done.id, "sheets", `${scene}.sheet.png`))).toEqual(PNG);
+  });
+
+  it("goes to review with the earlier build when the retry's first request is refused", async () => {
+    await plans([{}, { refused: "API Error: 529 Overloaded", turns: 1 }], [{ reply: reply({ defects: [DEFECT] }) }]);
+    const done = await runToEnd();
+
+    expect(await agentSpawns()).toBe(2);
+    await expectFellBack(done, { kind: "agent", error: "API Error: 529" });
+  });
+
+  it("goes to review with the earlier build when the runner throws during the retry", async () => {
+    await plans([{}, {}], [{ reply: reply({ defects: [DEFECT] }) }]);
+    gateMock.throwOn = 2;
+    const done = await runToEnd();
+
+    await expectFellBack(done, { kind: "internal", error: "the gate fell over" });
+  });
+
+  it("goes to review with the earlier build when the retry hangs", async () => {
+    process.env.STUDIO_VIDEO_HANG_MS = "30000";
+    await plans([{}, { hangMs: 120_000 }], [{ reply: reply({ defects: [DEFECT] }) }]);
+    const id = await enqueue();
+    await until(() => store.get(id)?.state === "awaiting_review" || store.get(id)?.state === "failed", () => `the job is still ${store.get(id)?.state}`, 60_000);
+    await runner.settled(id);
+
+    await expectFellBack(store.get(id)!, { kind: "timeout", error: "ran no command" });
+  }, 90_000);
+
+  it("never falls back on a cancel during the retry", async () => {
+    await plans([{}, { hangMs: 30_000 }], [{ reply: reply({ defects: [DEFECT] }) }]);
+    const id = await enqueue();
+    await until(() => existsSync(path.join(fakeDir, "agent-count")) && readFileSync(path.join(fakeDir, "agent-count"), "utf8") === "2", "the retry never started", 20_000);
+    await runner.cancel(id);
+    const done = await toEnd(id);
+
+    expect(done.state).toBe("cancelled");
+    expect(done.fallback ?? null).toBeNull();
+    expect(done.errorKind).toBe("cancelled");
+  });
+
+  it("drops the kept build when the retry passes", async () => {
+    await plans([{}, {}], [{ reply: reply({ defects: [DEFECT] }) }, { reply: reply() }]);
+    const done = await runToEnd();
+
+    expect(done.state).toBe("awaiting_review");
+    expect(done.fallback ?? null).toBeNull();
+    expect(done.passedBuild ?? null).toBeNull();
+    expect(existsSync(job(done.id, "candidate.passed"))).toBe(false);
+    expect(await readFile(job(done.id, "candidate", "two-boxes.mp4"), "utf8")).toBe("the video of gate call 2");
+    expect(done.gate!.warnings).not.toContain(FALLBACK_WARNING);
+    expect(videoView(done).critic).toMatchObject({ attempt: 2, sentBack: [DEFECT], defects: [] });
+  });
+
+  it("changes nothing for a job whose critic sent nothing back", async () => {
+    await plans([{}], [{ reply: reply() }]);
+    const done = await runToEnd();
+
+    expect(existsSync(job(done.id, "candidate.passed"))).toBe(false);
+    expect(done.passedBuild).toBeUndefined();
+    expect(done.fallback).toBeUndefined();
   });
 });
 

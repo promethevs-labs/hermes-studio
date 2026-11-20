@@ -108,6 +108,14 @@ describe("PictureCheck", () => {
     ]);
   });
 
+  it("after a fallback shows the earlier attempt's defects as open, none sent back", async () => {
+    // What the runner sends when the retry did not pass: attempt 1's run, its defect never fixed.
+    const host = await mount(job({ critic: { ...CRITIC, attempt: 1, defects: CRITIC.sentBack, sentBack: [], notes: [] } }));
+    expect(host.textContent).toContain("Attempt 1 of 3");
+    const lines = [...host.querySelectorAll("ul")[1]!.querySelectorAll("li")].map((line) => line.textContent);
+    expect(lines).toEqual(["OpenWhy it matters: The title overlaps the axis label."]);
+  });
+
   it("leaves out the line list when the critic found nothing", async () => {
     const host = await mount(job({ critic: { ...CRITIC, defects: [], notes: [], sentBack: [] } }));
     expect(host.querySelectorAll("ul")).toHaveLength(1);

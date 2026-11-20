@@ -8,7 +8,7 @@ import { BriefError, loadVocabulary } from "../diagram/brief";
 import { JobRefused } from "../diagram/runner";
 import { validateVideoBrief } from "./brief";
 import { backendFor, type SheetEntry } from "./backend";
-import { criticRunView, criticView } from "./critic";
+import { criticRunView, criticView, fallbackSheet } from "./critic";
 import { isLook, readCalls } from "./calls";
 import { candidateNames, type VideoPaths } from "./paths";
 import { briefTool } from "./tools";
@@ -104,6 +104,8 @@ export function videoView(record: VideoJobRecord): Record<string, unknown> {
     // The picture check (`critic.ts`): the latest scored run, its defects and
     // notes, and the defects an earlier attempt sent back. Null when none scored.
     critic: criticView(record),
+    // Set when the critic's retry did not pass and the earlier build is the one in review.
+    fallback: record.fallback ?? null,
     note: videoNote(record),
   };
 }
@@ -261,7 +263,10 @@ async function jobSheets(record: VideoJobRecord): Promise<{ paths: VideoPaths; s
 }
 
 /** Where a sheet's latest copy is: the render's, or the copy kept after a verdict. */
-async function sheetFile(paths: VideoPaths, sheet: SheetEntry): Promise<string | null> {
+async function sheetFile(paths: VideoPaths, sheet: SheetEntry, record?: VideoJobRecord): Promise<string | null> {
+  // After a fallback the render's sheets are the failed retry's; the critic's copy is the build in review.
+  const restored = record === undefined ? undefined : fallbackSheet(record, sheet.id);
+  if (restored !== undefined && (await stat(restored).catch(() => null)) !== null) return restored;
   for (const file of [sheet.file, path.join(paths.job, "sheets", sheet.kept)]) {
     const facts = await stat(file).catch(() => null);
     if (facts !== null) return file;
@@ -282,7 +287,7 @@ async function sheetList(response: ServerResponse, record: VideoJobRecord): Prom
   const calls = await readCalls(paths.calls);
   const sheets = [];
   for (const entry of entries) {
-    const file = await sheetFile(paths, entry);
+    const file = await sheetFile(paths, entry, record);
     if (file === null) continue;
     const facts = await stat(file).catch(() => null);
     // The build's sheet is rewritten by a build, every other by a look call.
@@ -364,7 +369,7 @@ async function sheetBytes(response: ServerResponse, record: VideoJobRecord, name
   // Matched against the backend's own list, never used as a path.
   const sheet = sheets.find((entry) => entry.id === scene);
   if (sheet === undefined) return fail(response, 404, "no such scene in this job's brief");
-  const file = await sheetFile(paths, sheet);
+  const file = await sheetFile(paths, sheet, record);
   const opened = file === null ? null : await openServable(file);
   if (opened === null) return fail(response, 404, `${scene} has no sheet yet`);
   response.writeHead(200, {

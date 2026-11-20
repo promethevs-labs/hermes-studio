@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { lstat, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -50,6 +50,7 @@ import {
   criticSpend,
   criticSummary,
   defectFinding,
+  fallbackSheet,
   runCritic,
   skippedRun,
   type CriticCall,
@@ -104,6 +105,8 @@ interface Running {
   criticRunning: boolean;
   /** Set once a critic's defects went back to the agent: once per job. */
   criticRetrySpent: boolean;
+  /** The passing build kept while the critic's retry runs, which a retry that does not pass falls back to. */
+  keptBuild: { attempt: number; dir: string } | null;
   /** How many wrapper calls the narration log has said something about. */
   callsNarrated: number;
   /** The calls log's size when the backend last kept previewed sources, and how many calls it had seen. */
@@ -571,6 +574,7 @@ export class VideoRunner {
         critic: null,
         criticRunning: false,
         criticRetrySpent: false,
+        keptBuild: null,
         callsNarrated: 0,
         callsKeptSize: -1,
         callsKept: 0,
@@ -584,6 +588,15 @@ export class VideoRunner {
       this.settledJobs.set(next.id, new Promise<void>((resolve) => (settle = resolve)));
       void this.execute(entry)
         .catch(async (error: unknown) => {
+          // A throw during the critic's retry still falls back to the build
+          // that passed, through `finish`; only when that throws too does the
+          // job fail as an internal error.
+          if (entry.keptBuild !== null && !entry.cancelled && entry.mayFinish) {
+            const thrown = { errorKind: "internal", error: `the video runner threw: ${(error as Error).message}` };
+            const restored = await this.fallBack(entry, thrown).catch(() => false);
+            const finished = restored && (await this.finish(entry, "awaiting_review", { outcome: null, cost: entry.meter.read() }).then(() => true, () => false));
+            if (finished) return;
+          }
           await this.store.update(next.id, {
             state: "failed",
             finishedAt: new Date().toISOString(),
@@ -914,6 +927,8 @@ export class VideoRunner {
       await this.refreshSteps(entry);
       findings = gate.findings;
       if (!gate.ok) continue;
+      // A later attempt that passes replaces the build kept for a fallback.
+      if (entry.keptBuild !== null) await this.dropKeptBuild(entry);
       // The picture check, after the gate passed (D116): its defects go back
       // to the agent as the next attempt's findings at most once per job, and
       // only with two attempts left after this one, so a gate failure the
@@ -1125,6 +1140,12 @@ export class VideoRunner {
     patch: { errorKind?: string; error?: string; outcome: AgentOutcome | null; cost: CostReading },
   ): Promise<void> {
     const id = entry.record.id;
+    // The critic's retry did not pass: the job goes to review with the build
+    // that did, never to failed (D116). A cancel is the person's, and never does.
+    if (state === "failed" && entry.keptBuild !== null && !entry.cancelled && (await this.fallBack(entry, patch))) {
+      state = "awaiting_review";
+      patch = { outcome: patch.outcome, cost: patch.cost };
+    }
     const record = await this.store.update(id, {
       state,
       phase: state === "awaiting_review" ? "ready" : (this.store.get(id)?.phase ?? null),
@@ -1139,7 +1160,7 @@ export class VideoRunner {
     });
     await this.refreshSteps(entry);
     // The source is kept at every verdict: it is what a revise or a change starts from.
-    if (entry.paths !== null) await saveSource(backendFor(briefTool(record.brief)), entry.paths);
+    if (entry.paths !== null) await keepSource(record, backendFor(briefTool(record.brief)), entry.paths);
     await this.store.emit(id, {
       type: state === "awaiting_review" ? "done" : "error",
       state,
@@ -1276,11 +1297,15 @@ export class VideoRunner {
   async cleanup(record: VideoJobRecord, options: { candidate: boolean }): Promise<void> {
     const backend = backendFor(briefTool(record.brief));
     const paths = await backend.paths(record.id, record.slug);
-    await saveSource(backend, paths);
+    await keepSource(record, backend, paths);
     const sheets = path.join(paths.job, "sheets");
     await mkdir(sheets, { recursive: true });
+    // After a fallback the render's sheets are the failed retry's: the
+    // critic's own copies of the restored attempt are kept instead.
+    const fallenBack = (record.fallback ?? null) !== null;
     for (const sheet of backend.sheets(paths, record.classes)) {
-      await safeCopy(sheet.file, path.join(sheets, sheet.kept)).catch(() => undefined);
+      const from = fallenBack ? fallbackSheet(record, sheet.id) : sheet.file;
+      if (from !== undefined) await safeCopy(from, path.join(sheets, sheet.kept)).catch(() => undefined);
     }
     if (isNarrated(record.brief) && (await lstat(paths.renderProfile).catch(() => null)) !== null) {
       const tools = await this.tools(backend).catch(() => null);
@@ -1395,7 +1420,10 @@ export class VideoRunner {
       entry.critic = null;
       entry.criticRunning = false;
     }
-    const sendBack = entry.criticMode === "retry" && input.mayRetry && !entry.cancelled && run.scores !== null && run.defects.length > 0;
+    let sendBack = entry.criticMode === "retry" && input.mayRetry && !entry.cancelled && run.scores !== null && run.defects.length > 0;
+    // Nothing goes back unless this passing build is kept first: a retry
+    // that does not pass falls back to it, so the scores never block (D116).
+    if (sendBack) sendBack = await this.keepPassedBuild(entry, input.attempt, input.paths);
     run.sentBack = sendBack;
     await this.keepCriticRun(id, run);
     await this.refreshSteps(entry);
@@ -1403,6 +1431,73 @@ export class VideoRunner {
     if (!sendBack) return [];
     entry.criticRetrySpent = true;
     return run.defects.map(defectFinding);
+  }
+
+  /**
+   * Keep this attempt's passing build before its defects go back: the gate's
+   * copies (`candidate/`, the video, sidecars, poster, `copies.json` and
+   * `source/`) renamed whole to `candidate.passed/` inside the job, which the
+   * next gate's step 5 would otherwise delete, and the gate result and line
+   * changes on the record. False, and nothing is sent back, when it cannot.
+   */
+  private async keepPassedBuild(entry: Running, attempt: number, paths: VideoPaths): Promise<boolean> {
+    const id = entry.record.id;
+    const dir = path.join(paths.job, "candidate.passed");
+    const record = this.store.get(id);
+    if (record === undefined || record.gate === null || !record.gate.ok) return false;
+    try {
+      await rm(dir, { recursive: true, force: true });
+      await rename(paths.candidate, dir);
+    } catch (error) {
+      await this.store.emit(id, { type: "step", state: "running", note: `picture check: the passing build could not be kept (${(error as Error).message}), so nothing was sent back` });
+      return false;
+    }
+    entry.keptBuild = { attempt, dir };
+    await this.store.update(id, { passedBuild: { attempt, gate: record.gate, lineChanges: record.lineChanges, at: new Date().toISOString() } });
+    return true;
+  }
+
+  /** A later attempt passed the gate: the kept build is not needed. */
+  private async dropKeptBuild(entry: Running): Promise<void> {
+    const kept = entry.keptBuild;
+    entry.keptBuild = null;
+    if (kept !== null) await rm(kept.dir, { recursive: true, force: true });
+    await this.store.update(entry.record.id, { passedBuild: null });
+  }
+
+  /**
+   * The critic's retry ended without passing the gate: the kept build goes
+   * back as `candidate/`, the record's gate and line changes become that
+   * attempt's (with a warning saying what happened), and the retry's own
+   * error is kept under `fallback`. False when the build cannot be restored,
+   * and the job then fails as it would have.
+   */
+  private async fallBack(entry: Running, patch: { errorKind?: string; error?: string }): Promise<boolean> {
+    const kept = entry.keptBuild;
+    const paths = entry.paths;
+    const id = entry.record.id;
+    const passed = this.store.get(id)?.passedBuild ?? null;
+    if (kept === null || paths === null || passed === null) return false;
+    try {
+      await rm(paths.candidate, { recursive: true, force: true });
+      await rename(kept.dir, paths.candidate);
+    } catch (error) {
+      await this.store.emit(id, { type: "step", state: "running", note: `the earlier build could not be restored (${(error as Error).message})` });
+      return false;
+    }
+    entry.keptBuild = null;
+    await this.store.update(id, {
+      gate: { ...passed.gate, warnings: [...passed.gate.warnings, FALLBACK_WARNING] },
+      lineChanges: passed.lineChanges,
+      passedBuild: null,
+      fallback: { attempt: kept.attempt, retryErrorKind: patch.errorKind ?? null, retryError: patch.error ?? null, at: new Date().toISOString() },
+    });
+    await this.store.emit(id, {
+      type: "step",
+      state: "running",
+      note: `the retry after the picture check did not pass (${patch.error ?? patch.errorKind ?? "no reason recorded"}), so attempt ${kept.attempt}'s build goes to review`,
+    });
+    return true;
   }
 
   /** Whether a standalone critic is running on this job now. */
@@ -1475,12 +1570,32 @@ export class VideoRunner {
   }
 }
 
+/** The warning a fallback adds to the restored gate result, which the card and the job view show. */
+export const FALLBACK_WARNING = "The retry after the picture check did not pass, so this is the earlier build; its open defects are listed under Picture check";
+
 /** What the job view's picture check step says about a run. */
 function criticStepNote(run: CriticRun | undefined): string | null {
   if (run === undefined) return null;
   if (run.scores === null) return `no scores: ${run.error ?? "the critic gave none"}`;
   const found = [`${run.defects.length} defect${run.defects.length === 1 ? "" : "s"}`, `${run.notes.length} note${run.notes.length === 1 ? "" : "s"}`].join(", ");
   return `${found}${run.sentBack ? ", sent back to the agent" : ""}`;
+}
+
+/**
+ * The source kept in `source/` at a verdict: the render checkout's, or, after
+ * a fallback, the restored build's own copy in `candidate/source/` (all but
+ * the gate's `brief.json`), so a revise starts from the video in review.
+ */
+async function keepSource(record: Pick<VideoJobRecord, "fallback">, backend: VideoBackend, paths: VideoPaths): Promise<void> {
+  if ((record.fallback ?? null) === null) return saveSource(backend, paths);
+  const names = await readdir(paths.candidateSource).catch(() => null);
+  if (names === null) return saveSource(backend, paths);
+  await rm(paths.source, { recursive: true, force: true });
+  await mkdir(paths.source, { recursive: true });
+  for (const name of names) {
+    if (name === "brief.json") continue;
+    await safeCopy(path.join(paths.candidateSource, name), path.join(paths.source, name)).catch(() => undefined);
+  }
 }
 
 /** The final source into `source/`, the gate's careful way: the files the job's backend names. */

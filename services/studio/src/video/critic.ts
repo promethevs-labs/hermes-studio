@@ -728,11 +728,14 @@ export interface CriticView {
  * scores (a standalone run judges the job's last attempt), and the defects
  * an earlier attempt sent back. Null when no critic has scored this job.
  */
-export function criticView(record: Pick<VideoJobRecord, "critic" | "attempt">): CriticView | null {
+export function criticView(record: Pick<VideoJobRecord, "critic" | "attempt" | "fallback">): CriticView | null {
   const runs = record.critic ?? [];
+  // After a fallback the build in review is the earlier attempt's, so its
+  // run is the one shown, and its defects are open: none was fixed.
+  const fallback = record.fallback ?? null;
   let latestAt = -1;
   runs.forEach((run, at) => {
-    if (run.scores !== null) latestAt = at;
+    if (run.scores !== null && (fallback === null || run.standalone || run.attempt === fallback.attempt)) latestAt = at;
   });
   const latest = runs[latestAt];
   if (latest === undefined || latest.scores === null) return null;
@@ -749,6 +752,18 @@ export function criticView(record: Pick<VideoJobRecord, "critic" | "attempt">): 
     notes: [...latest.notes],
     sentBack,
   };
+}
+
+/**
+ * After a fallback, the critic's own copy of a sheet of the restored
+ * attempt: the build in review, where the render's sheet is the failed
+ * retry's. Undefined for a job that never fell back, or a sheet it had none of.
+ */
+export function fallbackSheet(record: Pick<VideoJobRecord, "critic" | "fallback">, id: string): string | undefined {
+  const fallback = record.fallback ?? null;
+  if (fallback === null) return undefined;
+  const run = (record.critic ?? []).filter((entry) => !entry.standalone && entry.attempt === fallback.attempt).at(-1);
+  return run?.sheets.find((sheet) => sheet.id === id)?.file;
 }
 
 /** One run as the standalone route answers it: what it read and what it found. */

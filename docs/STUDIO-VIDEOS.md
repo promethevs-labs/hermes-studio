@@ -1133,6 +1133,25 @@ be fixed. The next attempt is gated and checked as usual and can never send
 anything back. A job whose last attempt still has defects goes to review as
 before. Scores never block anything.
 
+**The fallback.** Before any defect goes back, the runner keeps the build
+that passed. It renames the gate's `candidate/` (the video, sidecars,
+poster, `copies.json` and `source/`) to `candidate.passed/` inside the job,
+since the next gate's step 5 deletes and rebuilds `candidate/`. It records
+that attempt's gate result and line changes as `passedBuild`. When nothing
+can be kept, nothing is sent back. A later attempt that passes the gate
+deletes the kept build. When the job ends without one, for any reason but a
+cancel (the gate failing on the last attempt, a refused request, a hang, a
+`toolchain` stop, the runner throwing), the runner renames the kept build
+back to `candidate/` and goes to review instead of failing. The gate result
+and line changes become that attempt's, with a warning that says so. The
+log says so too, and `fallback` on the record keeps how the retry ended
+(`retryErrorKind`, `retryError`). That attempt's defects show as open, not
+sent back. At the verdict, `source/` comes from the restored
+`candidate/source/`, and the kept sheets from the critic's own copies of
+that attempt, which the sheet route serves as well. Accept reads only
+`candidate/`, so it stores the restored build. The run record still lists
+every attempt with its own gate and critic. A cancel never falls back.
+
 **Where it is kept.** The attempt's entry in the run record carries the
 scores, the model, the cost and the counts (`withAttemptCritic`). The job's
 `job.json` keeps every run in `critic`: each defect's scene, problem and

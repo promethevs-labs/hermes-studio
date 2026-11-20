@@ -160,4 +160,17 @@ export interface VideoJobRecord {
    * The attempt's scores alone go on `attempts[n].critic` for the run record.
    */
   critic?: CriticRun[];
+  /**
+   * The build kept when a picture check sent defects back (`keepPassedBuild`
+   * in runner.ts): that attempt's gate result and line changes, its gate's
+   * copies renamed to `candidate.passed/`. Cleared when a later attempt passes
+   * the gate or the job falls back to it. Absent on every other job.
+   */
+  passedBuild?: { attempt: number; gate: VideoGateResult; lineChanges: LineChange[]; at: string } | null;
+  /**
+   * Set when the retry after a picture check did not pass and the job went to
+   * review with the earlier build instead: which attempt it is, and how the
+   * retry ended, kept here because `error` is the verdict's and is null.
+   */
+  fallback?: { attempt: number; retryErrorKind: string | null; retryError: string | null; at: string } | null;
 }
