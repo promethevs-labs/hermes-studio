@@ -267,9 +267,15 @@ run as `critic: { source, attempt, current, scores, mean, defects, notes,
 sentBack, passed, error }`. `source` is `job` for the runner's own check and
 `standalone` for one the bench asked for. `current` says whether the scores
 are of the build in review. `mean` is the mean of the five scores. `passed`
-is D116 of docs/STUDIO-LOOK.md: the critic's read of the last attempt names
-no defect; the scores never block. It is null when the build in review was
-not scored, and `error` then says why.
+is D121 of docs/STUDIO-LOOK.md, `passesCritic` in
+`packages/schema/src/shared.ts`: no score below 3 and a mean of at least 3.5.
+The mark is provisional, picked after seeing the 2026-11-20 benchmark, and
+defects play no part in it. It is null when the build in review was not
+scored, and `error` then says why. A run file written before D121 holds
+`passed` by the old rule (no defect on the last attempt); `compare`
+recomputes the pass from the stored scores, so both kinds read alike. The
+runner's own critic is `report` by default, so a run no longer includes the
+critic's retry unless `STUDIO_VIDEO_CRITIC=retry` is set for it.
 
 With `run --critic`, a landed video whose job has no critic of its build in
 review (the runner's critic is off, or its check gave no answer) gets a
@@ -363,8 +369,8 @@ A brief only one run has is listed below the tables and left out of all of them.
 `--json` prints the same comparison as data.
 
 When either run carries critic scores or shot plans, two more tables follow.
-The first has the critic's mean, the pass or fail (D116, counted on the last
-line), the distinct shot types per video and the art director's cost. The
+The first has the critic's mean, the pass or fail (D121's score mark, counted
+on the last line), the distinct shot types per video and the art director's cost. The
 second has each of the five critic dimensions. Every mean and its difference
 cover only the briefs measured on both sides, with the pairs shown, so a
 baseline with no shots and a run with them shows each side's figures per

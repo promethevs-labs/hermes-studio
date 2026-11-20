@@ -186,6 +186,39 @@ describe("the art director's spawn", () => {
     }
   });
 
+  it("takes a plan whose layout line is three characters over the limit, cut to fit, with no follow-up and a logged note", async () => {
+    const layout = "alpha beta gamma delta epsilon zeta eta theta iota kappa ".repeat(5).slice(0, 203);
+    expect(layout).toHaveLength(203);
+    const reply = `\`\`\`shots\n${JSON.stringify({
+      scenes: brief.scenes.map((scene, i) => ({ name: scene.name, shot: { ...shot(["title", "recap-map"][i]!), layout } })),
+    })}\n\`\`\``;
+    await fake.script([{ text: reply }]);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const result = await directShots({ brief, dir: dir(), model: "sonnet" });
+      expect(result).toMatchObject({ status: "planned", reason: null, attempts: 1 });
+      for (const planned of result.shots!) {
+        expect(planned.layout.length).toBeLessThanOrEqual(200);
+        expect(layout.startsWith(planned.layout)).toBe(true);
+      }
+      expect(await fake.argvs()).toHaveLength(1);
+      expect(warn).toHaveBeenCalledWith(expect.stringMatching(/shortened to fit: scenes\[0\]\.shot\.layout 203 to \d+ characters; scenes\[1\]\.shot\.layout 203 to \d+ characters/));
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("still sends the follow-up for a layout line more than twice the limit", async () => {
+    const wild = "word ".repeat(90).trim();
+    const reply = (layout: string) =>
+      `\`\`\`shots\n${JSON.stringify({ scenes: brief.scenes.map((scene, i) => ({ name: scene.name, shot: { ...shot(["title", "recap-map"][i]!), layout } })) })}\n\`\`\``;
+    await fake.script([{ text: reply(wild) }, { text: shotsReply(["title", "recap-map"]) }]);
+    const result = await directShots({ brief, dir: dir(), model: "sonnet" });
+    expect(result).toMatchObject({ status: "planned", attempts: 2 });
+    const prompts = await fake.prompts();
+    expect(prompts[1]).toMatch(/Your shot plan was refused\. scenes\[0\]\.shot\.layout: .*is 449 characters; it must be 1 to 200/);
+  });
+
   it("sends one follow-up naming what was wrong, resumes the same session, and takes the fixed plan", async () => {
     await fake.script([{ text: shotsReply(["title", "title"]) }, { text: shotsReply(["title", "recap-map"]) }]);
     const result = await directShots({ brief, dir: dir(), model: "sonnet" });

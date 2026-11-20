@@ -1,7 +1,7 @@
 // `bench:video compare`: two run files side by side, per brief and in total.
 // Pure: it takes the two parsed runs and returns a comparison, which the CLI
 // prints as text (under 100 columns) or as JSON.
-import { CRITIC_DIMENSIONS } from '@hermes/schema/shared';
+import { CRITIC_DIMENSIONS, passesCritic } from '@hermes/schema/shared';
 
 import { knownCostOf } from './cost.mjs';
 import { distinctShotTypes } from './shots.mjs';
@@ -156,9 +156,10 @@ export function compareRuns(a, b) {
     row.a.gateOk = typeof ra.gateOk === 'boolean' ? ra.gateOk : null;
     row.b.gateOk = typeof rb.gateOk === 'boolean' ? rb.gateOk : null;
     if (critics) {
-      // D116: a video passes when the critic's read of its last attempt names no defect.
-      row.a.criticPassed = typeof criticOf(ra)?.passed === 'boolean' ? ra.critic.passed : null;
-      row.b.criticPassed = typeof criticOf(rb)?.passed === 'boolean' ? rb.critic.passed : null;
+      // D121: a video passes by `passesCritic` on its scores, read again here
+      // so a run file written under the old no-defect rule is judged by the new one.
+      row.a.criticPassed = criticOf(ra) === null ? null : passesCritic(criticOf(ra).scores);
+      row.b.criticPassed = criticOf(rb) === null ? null : passesCritic(criticOf(rb).scores);
     }
     return row;
   });
@@ -316,7 +317,7 @@ export function formatCompare(comparison) {
     extraGroups.push(...extraLook.filter((column) => column !== criticMean).map(meanGroup), ...extraRun.map(sumGroup));
     lines.push(
       '',
-      'Critic and shots (means over the briefs measured on both sides; pass counts no-defect videos)',
+      'Critic and shots (means over the briefs measured on both sides; pass is the score mark, D121)',
       ...table(extraGroups, [...tableRows, pairsRow]),
     );
   }

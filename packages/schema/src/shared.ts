@@ -947,6 +947,39 @@ export type CriticDimension = (typeof CRITIC_DIMENSIONS)[number];
 export const CRITIC_SCORE_RANGE = { min: 1, max: 5 } as const;
 
 /**
+ * The pass mark for a critic's scores (D121 of docs/STUDIO-LOOK.md). It is
+ * provisional: the numbers were picked after seeing the 2026-11-20 benchmark,
+ * and they stand until the owner's own thumbs ratings can calibrate them.
+ * A video passes when no score is below `CRITIC_PASS_MIN_SCORE` and the mean
+ * of the five is at least `CRITIC_PASS_MIN_MEAN`.
+ */
+export const CRITIC_PASS_MIN_SCORE = 3;
+export const CRITIC_PASS_MIN_MEAN = 3.5;
+
+/**
+ * Whether a critic's scores pass the mark above. The one place the rule
+ * lives: the bench's compare and anything that reports a pass call this.
+ * It reads scores only; a defect never decides it, and a retry in `retry`
+ * mode keys on defects, not on this. Fails closed: anything that is not an
+ * object with a finite score from `CRITIC_SCORE_RANGE.min` to
+ * `CRITIC_SCORE_RANGE.max` for each of `CRITIC_DIMENSIONS` does not pass.
+ * The mean is compared as a sum, so a mean of exactly 3.5 passes with no
+ * rounding in the way.
+ */
+export function passesCritic(scores: unknown): boolean {
+  if (scores === null || typeof scores !== "object" || Array.isArray(scores)) return false;
+  let sum = 0;
+  for (const dimension of CRITIC_DIMENSIONS) {
+    const score = (scores as Record<string, unknown>)[dimension];
+    if (typeof score !== "number" || !Number.isFinite(score)) return false;
+    if (score < CRITIC_SCORE_RANGE.min || score > CRITIC_SCORE_RANGE.max) return false;
+    if (score < CRITIC_PASS_MIN_SCORE) return false;
+    sum += score;
+  }
+  return sum >= CRITIC_PASS_MIN_MEAN * CRITIC_DIMENSIONS.length;
+}
+
+/**
  * A critic's read of one attempt's contact sheets: whole scores from 1
  * (poor) to 5 (good) on each of `CRITIC_DIMENSIONS`, all five required.
  */

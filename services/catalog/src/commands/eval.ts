@@ -68,6 +68,11 @@ function wallSeconds(row: JobRow): number | null {
   return seconds >= 0 ? seconds : null;
 }
 
+/** How many of a job's recorded attempts reached the gate. Null with no run record. */
+function gatedAttempts(row: JobRow): number | null {
+  return row.run?.attempts.filter((a) => a.gate !== null).length ?? null;
+}
+
 function reportJob(row: JobRow): NonNullable<ReportVideo["job"]> {
   const run = row.run;
   return {
@@ -79,6 +84,8 @@ function reportJob(row: JobRow): NonNullable<ReportVideo["job"]> {
     wallSeconds: wallSeconds(row),
     attempts: run === null || run === undefined ? (row.attempt > 0 ? row.attempt : null) : run.attempts.length,
     state: row.state,
+    errorKind: row.errorKind,
+    gatedAttempts: gatedAttempts(row),
     critic: reportCritic(run?.attempts),
   };
 }
@@ -196,6 +203,8 @@ export async function readReportInputs(
       turns: row.turns,
       wallSeconds: wallSeconds(row),
       reviewTags: [...(row.review?.tags ?? [])],
+      errorKind: row.errorKind,
+      gatedAttempts: gatedAttempts(row),
       critic: reportCritic(row.run?.attempts),
     }));
   return { videos, extraJobs };

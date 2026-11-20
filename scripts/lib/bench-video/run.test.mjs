@@ -565,7 +565,8 @@ describe('the critic on a run', () => {
 
   it('reads the job\'s own critic after the accept, counts what it spent, and never calls the standalone route for it', async () => {
     const defect = { scene: 'A2_Split', problem: 'the labels overlap', fix: 'move the right label down' };
-    stand = await standIn({ studioHome, scripts: { 'a-one': { critic: view(), criticCost: 0.15 }, 'b-two': { critic: view({ defects: [defect] }) } } });
+    const low = { ...SCORES, layout: 2 };
+    stand = await standIn({ studioHome, scripts: { 'a-one': { critic: view(), criticCost: 0.15 }, 'b-two': { critic: view({ scores: low, defects: [defect] }) } } });
     const run = await runBench(options(['a-one', 'b-two'].map(brief), { critic: true }), deps().deps);
     expect(stand.seen.critics).toEqual([]);
     expect(run.criticAsked).toBe(true);
