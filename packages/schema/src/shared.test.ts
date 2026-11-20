@@ -125,3 +125,49 @@ describe("isNarratedVoice and silentSeconds", () => {
     expect(silentSeconds([])).toBe(0);
   });
 });
+
+describe("passesCritic", () => {
+  // The five dimensions in order: accuracy, layout, relevance, variety, pacing.
+  const dims = (...values: number[]) => ({ accuracy: values[0], layout: values[1], relevance: values[2], variety: values[3], pacing: values[4] });
+
+  it("names its thresholds", async () => {
+    const { CRITIC_PASS_MIN_MEAN, CRITIC_PASS_MIN_SCORE } = await import("./shared");
+    expect([CRITIC_PASS_MIN_SCORE, CRITIC_PASS_MIN_MEAN]).toEqual([3, 3.5]);
+  });
+
+  it("fails a score below 3 however high the mean", async () => {
+    const { passesCritic } = await import("./shared");
+    expect(passesCritic(dims(5, 5, 5, 5, 2))).toBe(false);
+    expect(passesCritic(dims(1, 5, 5, 5, 5))).toBe(false);
+  });
+
+  it("fails all 3s on the mean, and passes 3, 3, 4, 4, 4 at 3.6", async () => {
+    const { passesCritic } = await import("./shared");
+    expect(passesCritic(dims(3, 3, 3, 3, 3))).toBe(false);
+    expect(passesCritic(dims(3, 3, 4, 4, 4))).toBe(true);
+    expect(passesCritic(dims(3, 3, 3, 4, 4))).toBe(false);
+  });
+
+  it("passes a mean of exactly 3.5, and fails just under it", async () => {
+    const { passesCritic } = await import("./shared");
+    expect(passesCritic(dims(3.5, 3.5, 3.5, 3.5, 3.5))).toBe(true);
+    expect(passesCritic(dims(3, 3, 3.5, 4, 4))).toBe(true);
+    expect(passesCritic(dims(3, 3, 3.4, 4, 4))).toBe(false);
+  });
+
+  it("fails closed on a missing, malformed or out of range score", async () => {
+    const { passesCritic } = await import("./shared");
+    expect(passesCritic(null)).toBe(false);
+    expect(passesCritic(undefined)).toBe(false);
+    expect(passesCritic("4")).toBe(false);
+    expect(passesCritic([5, 5, 5, 5, 5])).toBe(false);
+    expect(passesCritic({})).toBe(false);
+    expect(passesCritic({ accuracy: 5, layout: 5, relevance: 5, variety: 5 })).toBe(false);
+    expect(passesCritic({ ...dims(5, 5, 5, 5, 5), pacing: "5" })).toBe(false);
+    expect(passesCritic({ ...dims(5, 5, 5, 5, 5), pacing: Number.NaN })).toBe(false);
+    expect(passesCritic({ ...dims(5, 5, 5, 5, 5), pacing: Number.POSITIVE_INFINITY })).toBe(false);
+    expect(passesCritic(dims(5, 5, 5, 5, 6))).toBe(false);
+    expect(passesCritic(dims(5, 5, 5, 5, 0))).toBe(false);
+    expect(passesCritic({ ...dims(5, 5, 5, 5, 5), extra: 1 })).toBe(true);
+  });
+});

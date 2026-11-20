@@ -2,6 +2,8 @@
 // briefs only one run has, and a critic score joining the look table.
 import { describe, expect, it } from 'vitest';
 
+import { passesCritic } from '@hermes/schema/shared';
+
 import { compareRuns, formatCompare, lookColumns } from './compare.mjs';
 
 const result = (id, metrics, extra = {}) => ({ id, jobId: `j-${id}`, state: 'accepted', gateOk: true, attempts: 1, turns: 30, costUsd: 2.4, wallSeconds: 720, renderSeconds: 90, metrics, error: null, ...extra });
@@ -138,7 +140,7 @@ const critic = (scores, defects = 0, extra = {}) => {
     defects: Array.from({ length: defects }, (_, i) => ({ scene: `S${i}`, problem: 'overlap', fix: 'move it' })),
     notes: [],
     sentBack: [],
-    passed: defects === 0,
+    passed: passesCritic(scores),
     error: null,
     ...extra,
   };
@@ -174,7 +176,7 @@ binary-search-halving    pass pass  1 1    0   30  41  +11  2.40 3.50 +1.10  12.
 tcp-three-way-handshake  fail pass  3 2   -1   88  60  -28  3.60 3.50 -0.10  25.0 20.0 -5.0
 mean or total               1    2  4 3   -1  118 101  -17  6.00 7.00 +1.00  37.0 34.0 -3.0
 
-Critic and shots (means over the briefs measured on both sides; pass counts no-defect videos)
+Critic and shots (means over the briefs measured on both sides; pass is the score mark, D121)
                          critic mean  pass    shot types  shots USD
 brief                    A    B diff  A    B  A B   diff  A    B diff
 binary-search-halving    - 4.00    -  - pass  - 3      -  - 0.35    -
@@ -244,6 +246,17 @@ describe('compare with the critic and shot plans', () => {
     const json = JSON.parse(JSON.stringify(comparison));
     expect(json.look.find((column) => column.key === 'critic.pacing')).toEqual({ key: 'critic.pacing', label: 'pacing', digits: 1, rowDigits: 0, table: 'scores' });
     expect(json.run.at(-1)).toEqual({ key: 'shotsUsd', label: 'shots USD', digits: 2, table: 'extra' });
+  });
+
+  it('judges by the scores it finds, so a run file written under the old no-defect rule is read by D121', () => {
+    const old = structuredClone(SCORED_B);
+    // Old rule: no defect passed, a defect failed. Now: the scores decide.
+    old.results[0].critic = critic(dims(4, 4, 5, 3, 4), 3, { passed: false });
+    old.results[1].critic = critic(dims(5, 2, 5, 5, 5), 0, { passed: true });
+    const comparison = compareRuns(A, old);
+    expect(comparison.rows[0].b.criticPassed).toBe(true);
+    expect(comparison.rows[1].b.criticPassed).toBe(false);
+    expect(comparison.totals.b).toMatchObject({ criticPassed: 1, criticFailed: 1 });
   });
 
   it('leaves out a critic of an earlier build, and one on a video that did not land', () => {

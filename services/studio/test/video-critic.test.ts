@@ -252,6 +252,8 @@ beforeEach(async () => {
   home = await mkdtemp(path.join(tmpdir(), "studio-critic-"));
   process.env.STUDIO_HOME = home;
   for (const key of Object.keys(saved)) if (key !== "STUDIO_HOME") delete process.env[key];
+  // The default is `report` (D121); most of this suite is about the retry, so it asks for it.
+  process.env.STUDIO_VIDEO_CRITIC = "retry";
   await mkdir(path.join(home, "jobs"), { recursive: true });
   for (const mock of Object.values(catalogMock)) mock.mockReset();
   catalogMock.jobEnqueue.mockResolvedValue(ok({ job: {} }));
@@ -400,6 +402,37 @@ describe("the picture check in the job loop", () => {
     expect(await agentSpawns()).toBe(1);
     expect(done.state).toBe("awaiting_review");
     expect(done.critic).toMatchObject([{ attempt: 1, sentBack: false, defects: [DEFECT] }]);
+  });
+
+  it("reads as report when STUDIO_VIDEO_CRITIC is unset, empty or not a mode, and keeps retry and off as asked", async () => {
+    const { videoCriticMode } = await import("../src/video/config");
+    delete process.env.STUDIO_VIDEO_CRITIC;
+    expect(videoCriticMode()).toBe("report");
+    for (const value of ["", "  ", "on", "yes", "retries"]) {
+      process.env.STUDIO_VIDEO_CRITIC = value;
+      expect(videoCriticMode()).toBe("report");
+    }
+    for (const [value, mode] of [["retry", "retry"], [" RETRY ", "retry"], ["off", "off"], ["report", "report"]] as const) {
+      process.env.STUDIO_VIDEO_CRITIC = value;
+      expect(videoCriticMode()).toBe(mode);
+    }
+  });
+
+  it("by default records the read and its defects, makes one attempt for the critic's sake, and sends nothing back", async () => {
+    delete process.env.STUDIO_VIDEO_CRITIC;
+    await plans([{}, {}], [{ reply: reply({ defects: [DEFECT] }) }, { reply: reply() }]);
+    const done = await runToEnd();
+
+    expect(done.state).toBe("awaiting_review");
+    // One agent spawn, one critic call, and no retry prompt.
+    expect(await agentSpawns()).toBe(1);
+    expect(await criticCalls()).toHaveLength(1);
+    expect(backendMock.prompts).toHaveLength(1);
+    expect(done.attempts).toHaveLength(1);
+    expect(done.critic).toMatchObject([{ attempt: 1, sentBack: false, scores: SCORES, defects: [DEFECT], error: null }]);
+    expect(done.attempts![0]!.critic).toEqual({ model: "claude-sonnet-5", costUsd: 0.004, scores: SCORES, defects: 1, notes: 1 });
+    expect(videoView(done).critic).toMatchObject({ attempt: 1, current: true, scores: SCORES, defects: [DEFECT], sentBack: [] });
+    expect(done.steps.find((step) => step.name === "critic")).toMatchObject({ state: "done", rounds: 1 });
   });
 
   it("off, never spawns, and the job view has no such step", async () => {
