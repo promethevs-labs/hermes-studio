@@ -39,6 +39,9 @@ undoes an earlier one.
    folders under each tool show which tool made what.
 4. **Name the main visual** in one sentence: what is on screen for most of
    the video. Find it in the table, top row first. Roughly:
+   - a silent video (a caption per beat, no voice), whatever it shows:
+     **manimkc**, the only tool with a silent mode; remotionkc's and
+     revideokc's builds refuse a video with no sound
    - a physical object shown photoreal (a chip package, a die stack, a
      board), with real materials, depth of field and lighting: **blenderkc**
    - continuous maths, plots, equation morphs, 3D maths objects:

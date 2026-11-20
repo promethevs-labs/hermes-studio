@@ -95,6 +95,11 @@ export const VIDEO_TOOL_ROUTES: readonly VideoToolRoute[] = [
     why: "The series' palette, typeface, heading position and voice stay the same from week to week (D111 of STUDIO-LOOK.md); its layouts, shot types and motion must not repeat week after week",
   },
   {
+    need: "A silent video: a caption on screen for each beat, no voice",
+    tool: "manimkc",
+    why: "It is the only tool here with a silent mode (a caption per beat); remotionkc's and revideokc's builds refuse a video with no sound, and the studio refuses such a brief",
+  },
+  {
     need: "Continuous maths: function plots, areas, Riemann sums, geometric proofs, linear maps, vector fields",
     tool: "manimkc",
     why: "`Axes`, `get_graph`, `NumberPlane` with `ApplyMatrix`, `VectorField` and `StreamLines` exist and are exact; nothing else here has them",
@@ -212,6 +217,7 @@ export const VIDEO_TOOL_CAPABILITIES: readonly VideoToolCapability[] = [
   { capability: "Boolean shape ops (Venn, overlaps)", manimkc: "built", remotionkc: "via SVG paths", revideokc: "no" },
   { capability: "Data charts from real data", manimkc: "built (`BarChart`, `Axes`)", remotionkc: "yes", revideokc: "possible, untested" },
   { capability: "Word-level captions", manimkc: "no", remotionkc: "yes", revideokc: "no" },
+  { capability: "Silent video (captions, no voice)", manimkc: "yes (silent cuts; `CaptionBar` in the studio)", remotionkc: "no (its build refuses a video with no sound)", revideokc: "no (its build refuses a video with no sound)" },
   { capability: "Code panel with syntax highlighting", manimkc: "built (`Code`, Pango)", remotionkc: "yes", revideokc: "yes (Lezer)" },
   { capability: "Code edited in place with reflow", manimkc: "no", remotionkc: "by hand", revideokc: "yes" },
   { capability: "Terminal and UI mock-ups", manimkc: "by hand", remotionkc: "yes", revideokc: "by hand" },

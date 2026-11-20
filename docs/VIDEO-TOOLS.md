@@ -50,6 +50,7 @@ higher up wins.
 | The video mainly needs | Tool | Why | Proven in |
 | --- | --- | --- | --- |
 | A new week of a series that already exists (CS3230, CS4223, CS4225 lecture videos) | the series' tool, usually manimkc | The series' palette, typeface, heading position and voice stay the same from week to week (D111 of STUDIO-LOOK.md); its layouts, shot types and motion must not repeat week after week | the week folders under `tools/manimkc/topics/` |
+| A silent video: a caption on screen for each beat, no voice | manimkc | It is the only tool here with a silent mode (a caption per beat); remotionkc's and revideokc's builds refuse a video with no sound, and the studio refuses such a brief | manimkc's silent cuts (`tools/manimkc/topics/examples/hello-manimkc/`), and `validateVideoBrief` in `services/studio/src/video/brief.ts` |
 | A physical object shown photoreal (a chip package, a die stack, a board), with real materials, depth of field and lighting | blenderkc | Cycles path-traces it, so it looks like a camera filmed it; labels and equations are 2D on top. At a terminal only: the studio has no blenderkc backend, so a studio job takes the next row that fits | `computer-architecture/gpu-architecture/hbm-how-it-is-built` (written, not yet rendered) |
 | Continuous maths: function plots, areas, Riemann sums, geometric proofs, linear maps, vector fields | manimkc | `Axes`, `get_graph`, `NumberPlane` with `ApplyMatrix`, `VectorField` and `StreamLines` exist and are exact; nothing else here has them | manimkc CAPABILITIES.md, "Graphs and plots" (built; no topic yet) |
 | An equation whose symbols slide into their new places (a derivation, a recurrence being unrolled) | manimkc | `TransformMatchingTex` moves glyphs; Revideo's `Latex` is an image that only cross-fades, and remotionkc's label-to-label morph is weaker than manim's glyph transforms | manimkc CAPABILITIES.md (built; not yet rendered in a topic) |
@@ -111,6 +112,7 @@ missing or poor.
 | Boolean shape ops (Venn, overlaps) | built | via SVG paths | no | no |
 | Data charts from real data | built (`BarChart`, `Axes`) | yes | possible, untested | no |
 | Word-level captions | no | yes | no | no |
+| Silent video (captions, no voice) | yes (silent cuts; `CaptionBar` in the studio) | no (its build refuses a video with no sound) | no (its build refuses a video with no sound) | not documented |
 | Code panel with syntax highlighting | built (`Code`, Pango) | yes | yes (Lezer) | no |
 | Code edited in place with reflow | no | by hand | yes | no |
 | Terminal and UI mock-ups | by hand | yes | by hand | no |
@@ -176,8 +178,11 @@ come before preferences, so a later step can never undo an earlier one.
    series' tool, and stop. The tool carries the series' palette, typeface,
    heading position and voice (D111); the new week still picks its own shot
    types and layouts, and repeats none of last week's.
-4. **Name the main visual.** Write one sentence: what is on screen for most
-   of the video? Find it in "Pick by what the video needs", top row first.
+4. **Name the main visual.** A silent video (a caption per beat, no voice)
+   is manimkc's, the second row, whatever it shows: remotionkc's and
+   revideokc's builds refuse a video with no sound. Otherwise write one
+   sentence: what is on screen for most of the video? Find it in "Pick by
+   what the video needs", top row first.
    When no row above the last fits, a studio job goes to remotionkc (the
    last row, D112) and a video made at a terminal goes to manimkc, as
    before.
@@ -196,7 +201,9 @@ flowchart TD
   N -- yes --> T[That tool]
   N -- no --> B{Part of an existing series?}
   B -- yes --> S[That series' tool, keeping its palette and type, with new shots]
-  B -- no --> C{Main visual}
+  B -- no --> Z{Silent, a caption per beat and no voice?}
+  Z -- yes --> M
+  Z -- no --> C{Main visual}
   C -- a physical object, photoreal --> K[blenderkc]
   C -- plots, equation morphs, 3D maths --> M[manimkc]
   C -- real data, captions, editor and terminal, footage --> R[remotionkc]
