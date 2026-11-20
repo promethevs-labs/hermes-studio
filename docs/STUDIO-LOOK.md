@@ -115,6 +115,12 @@ the existing three attempts. The scores never block: they are stored on the
 attempt in the job's run record (`critic` on `JobRunAttempt`), shown on the
 job panel, and reported by `catalog eval report`.
 
+A video **passes the critic** when the critic's read of its last attempt
+names no defect: `defects` is 0 on that attempt's `critic`. The scores play
+no part in passing. A job whose one critic retry is spent and whose last
+attempt still has a defect does not pass, and it still reaches review, where
+the person sees the defect on the job panel.
+
 Why not block on a score: nobody has compared these scores with the owner's
 own ratings yet. Once enough videos carry both a thumbs rating and critic
 scores, the report can show whether they agree, and this decision can change.
@@ -168,8 +174,10 @@ The same twelve run before and after, with the same model.
 
 The milestone is done when a video made from the same brief scores higher
 variety and a lower top five share after the changes than before, passes the
-critic, and the manuals no longer rank anything by past use. What a paid run
-did not verify is said plainly in the final report.
+critic as D116 defines it (no defect on its last attempt), and the manuals no
+longer rank anything by past use. The final report gives the five scores for
+both runs beside that pass or fail, and says plainly what a paid run did not
+verify.
 
 ## What this does not do
 
