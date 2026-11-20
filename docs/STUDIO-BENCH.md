@@ -140,13 +140,15 @@ startedAt, endedAt, manualHashes, results, stopReason? }`, each result `{ id,
 jobId, state, gateOk, attempts, turns, costUsd, wallSeconds, renderSeconds,
 metrics: { variety, helperTop5Share, fadeShare, uses3d } | null, error }`,
 plus `slug`, `tries`, `errorKind` and `earlierCostUsd`. `wallSeconds` is the
-job record's start to finish, else the bench's own clock. A label whose run
+job record's start to finish, else the bench's own clock. `turns` is the sum
+over `run.json`'s attempts when every attempt has a count, since the job
+record's own `turns` is the last attempt's alone, and that figure otherwise. A label whose run
 file exists is refused unless `--resume`, which must use the same tool and
 model. A resume skips every brief recorded as accepted, failed or cancelled,
 accepts one still waiting for review, reposts one whose post got no answer
-under the same key (the runner answers with the job it already has rather
-than queueing a second), and posts the rest as a new attempt, which is paid
-again. What an earlier attempt cost stays in `earlierCostUsd` and counts
+(recorded as `unanswered`) under the same key, so the runner answers with
+the job it already has rather than queueing a second, and posts the rest as
+a new attempt, which is paid again. What an earlier attempt cost stays in `earlierCostUsd` and counts
 toward the cap.
 
 The look metrics come from the job's kept scene source, `jobs/<id>/source/`
@@ -191,9 +193,10 @@ already running, so a run can end up to one job's cost over the cap.
 ## Comparing runs
 
 `compare --home DIR base art` prints two tables under 100 columns: the look
-numbers (variety, top-five helper share, fade share, 3D) with the mean over
-the briefs both runs have, and the run numbers (gate pass, attempts, turns,
-cost, wall minutes) with their totals. Each shows A, B and the difference.
+numbers (variety, top-five helper share, fade share, 3D) with each mean and
+difference taken over the briefs measured on both sides, and a line saying
+how many pairs that was; and the run numbers (gate pass, attempts, turns,
+cost with earlier attempts included, wall minutes) with their totals. Each shows A, B and the difference.
 A brief only one run has is listed below the tables and left out of both.
 `--json` prints the same comparison as data.
 

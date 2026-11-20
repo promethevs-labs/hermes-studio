@@ -1,6 +1,7 @@
 // `bench:video compare`: two run files side by side, per brief and in total.
 // Pure: it takes the two parsed runs and returns a comparison, which the CLI
 // prints as text (under 100 columns) or as JSON.
+import { knownCostOf } from './cost.mjs';
 
 /** The look numbers, per result. Each is `{ key, label, get, digits }`. */
 const BASE_LOOK = [
@@ -32,7 +33,8 @@ export function lookColumns(...runs) {
 const RUN_COLUMNS = [
   { key: 'attempts', label: 'attempts', get: (r) => r.attempts ?? null, digits: 0 },
   { key: 'turns', label: 'turns', get: (r) => r.turns ?? null, digits: 0 },
-  { key: 'costUsd', label: 'cost USD', get: (r) => r.costUsd ?? null, digits: 2 },
+  // Every attempt's cost, a resumed brief's earlier ones included.
+  { key: 'costUsd', label: 'cost USD', get: (r) => knownCostOf(r), digits: 2 },
   { key: 'wallMinutes', label: 'wall min', get: (r) => (typeof r.wallSeconds === 'number' ? r.wallSeconds / 60 : null), digits: 1 },
 ];
 
@@ -56,8 +58,9 @@ function describe(run) {
  * Compare run `a` with run `b`. Briefs in only one run are listed, never
  * averaged in. Returns `{ a, b, look, run, rows, totals, onlyInA, onlyInB }`,
  * where each row is `{ id, a, b, diff }` keyed by column, plus `uses3d` and
- * `gateOk` for each side, and totals are the means of the look columns and
- * the sums of the run columns over the shared briefs.
+ * `gateOk` for each side, and totals are the means of the look columns over
+ * the briefs measured on both sides (`totals.pairs` says how many) and the
+ * sums of the run columns over the shared briefs.
  */
 export function compareRuns(a, b) {
   const look = lookColumns(a, b);
@@ -81,11 +84,15 @@ export function compareRuns(a, b) {
     row.b.gateOk = typeof rb.gateOk === 'boolean' ? rb.gateOk : null;
     return row;
   });
-  const totals = { a: {}, b: {}, diff: {} };
+  const totals = { a: {}, b: {}, diff: {}, pairs: {} };
   for (const column of look) {
-    totals.a[column.key] = mean(rows.map((row) => row.a[column.key]));
-    totals.b[column.key] = mean(rows.map((row) => row.b[column.key]));
+    // Over the briefs measured on both sides only, so the two means and their
+    // difference cover the same briefs.
+    const paired = rows.filter((row) => row.a[column.key] !== null && row.b[column.key] !== null);
+    totals.a[column.key] = mean(paired.map((row) => row.a[column.key]));
+    totals.b[column.key] = mean(paired.map((row) => row.b[column.key]));
     totals.diff[column.key] = diffOf(totals.a[column.key], totals.b[column.key]);
+    totals.pairs[column.key] = paired.length;
   }
   for (const column of RUN_COLUMNS) {
     totals.a[column.key] = sum(rows.map((row) => row.a[column.key]));
@@ -163,20 +170,24 @@ export function formatCompare(comparison) {
     ...rows.map((row) => ({ name: shortId(row.id), ...row })),
     { name: 'mean or total', a: totals.a, b: totals.b, diff: totals.diff, total: true },
   ];
+  const pairsRow = { name: 'pairs in the mean', pairs: totals.pairs };
 
   const lookGroups = [
     ...look.map((column) => ({
       label: column.label,
       heads: ['A', 'B', 'diff'],
-      cells: (row) => [fixed(row.a[column.key], column.digits), fixed(row.b[column.key], column.digits), signed(row.diff[column.key], column.digits)],
+      cells: (row) =>
+        row.pairs !== undefined
+          ? ['', '', String(row.pairs[column.key])]
+          : [fixed(row.a[column.key], column.digits), fixed(row.b[column.key], column.digits), signed(row.diff[column.key], column.digits)],
     })),
     {
       label: '3D',
       heads: ['A', 'B'],
-      cells: (row) => (row.total === true ? [String(row.a.uses3d), String(row.b.uses3d)] : [yesNo(row.a.uses3d), yesNo(row.b.uses3d)]),
+      cells: (row) => (row.pairs !== undefined ? ['', ''] : row.total === true ? [String(row.a.uses3d), String(row.b.uses3d)] : [yesNo(row.a.uses3d), yesNo(row.b.uses3d)]),
     },
   ];
-  lines.push('Look (the mean over the shared briefs on the last line; 3D counts videos)', ...table(lookGroups, tableRows), '');
+  lines.push('Look (means over the briefs measured on both sides; 3D counts videos)', ...table(lookGroups, [...tableRows, pairsRow]), '');
 
   const runGroups = [
     {

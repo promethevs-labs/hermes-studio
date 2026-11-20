@@ -55,6 +55,24 @@ export function sourceMetrics(studioHome, jobId, tool, libraryNames = undefined)
   };
 }
 
+/**
+ * The turns a job took over all its attempts. `job.turns` is only the last
+ * attempt's: the video runner's `finish` writes the last agent session's own
+ * `num_turns` there, while `run.attempts[].turns` holds each attempt's own
+ * (`endAttempt` in services/studio/src/data/run-record.ts). So the attempt
+ * history is summed when it is complete: every attempt has a count, and there
+ * are as many entries as the job's attempt number says. Otherwise `job.turns`,
+ * which undercounts a retried job but is the best figure left.
+ */
+export function turnsOf(job, attempts) {
+  const complete =
+    attempts.length > 0 &&
+    attempts.every((attempt) => typeof attempt?.turns === 'number') &&
+    (typeof job?.attempt !== 'number' || attempts.length >= job.attempt);
+  if (complete) return attempts.reduce((sum, attempt) => sum + attempt.turns, 0);
+  return typeof job?.turns === 'number' ? job.turns : null;
+}
+
 const seconds = (from, to) => {
   const start = Date.parse(from ?? '');
   const end = Date.parse(to ?? '');
@@ -70,11 +88,10 @@ export function recordFields({ job, run }, measuredSeconds = null) {
   const attempts = Array.isArray(run?.attempts) ? run.attempts : [];
   const lastGate = [...attempts].reverse().find((attempt) => attempt?.gate !== null && attempt?.gate !== undefined)?.gate ?? null;
   const gateOk = typeof job?.gate?.ok === 'boolean' ? job.gate.ok : typeof lastGate?.ok === 'boolean' ? lastGate.ok : null;
-  const summedTurns = attempts.reduce((sum, attempt) => (typeof attempt?.turns === 'number' ? sum + attempt.turns : sum), 0);
   return {
     gateOk,
     attempts: attempts.length > 0 ? attempts.length : typeof job?.attempt === 'number' ? job.attempt : null,
-    turns: typeof job?.turns === 'number' ? job.turns : attempts.length > 0 ? summedTurns : null,
+    turns: turnsOf(job, attempts),
     costUsd: typeof job?.costUsd === 'number' ? job.costUsd : null,
     wallSeconds: seconds(job?.startedAt, job?.finishedAt) ?? measuredSeconds,
     renderSeconds: typeof run?.renderSeconds === 'number' ? run.renderSeconds : null,

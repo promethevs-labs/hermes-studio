@@ -12,6 +12,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 
 import { jobBody, runSlug } from './briefs.mjs';
+import { costOf } from './cost.mjs';
 import { recordFields } from './metrics.mjs';
 import { writeJsonAtomic } from './home.mjs';
 
@@ -35,7 +36,11 @@ const NOT_YET = /has not finished its first check/;
 export function planFor(previous) {
   if (previous === undefined) return { action: 'post', attempt: 1 };
   const tries = typeof previous.tries === 'number' && previous.tries > 0 ? previous.tries : 1;
-  if (previous.state === 'posting') return { action: 'post', attempt: tries };
+  // A post that never got an answer may still have reached the runner, which
+  // may have queued it, paid for it, or put it in review. Reposting with the
+  // same attempt sends the same idempotency key, so the runner answers with
+  // that job instead of queueing a second one under the same slug.
+  if (previous.state === 'posting' || previous.state === 'unanswered') return { action: 'post', attempt: tries };
   if (DONE.has(previous.state) && previous.stopped !== true) return { action: 'skip' };
   if (typeof previous.jobId === 'string' && previous.jobId !== '') return { action: 'check', attempt: tries };
   return { action: 'post', attempt: tries + 1 };
@@ -80,10 +85,7 @@ export function toolReadiness(health, tool) {
 
 class Stop extends Error {}
 
-/** What a result has cost so far: its job's cost and every earlier attempt's. */
-export function costOf(result) {
-  return (typeof result?.costUsd === 'number' ? result.costUsd : 0) + (typeof result?.earlierCostUsd === 'number' ? result.earlierCostUsd : 0);
-}
+export { costOf };
 
 /**
  * Run the selected briefs. `options`: `{ home, label, tool, model, cap, port,
@@ -224,7 +226,7 @@ export async function runBench(options, deps) {
         try {
           answer = await call(base, 'POST', '/api/jobs', jobBody(entry, { label, tool, model, attempt }), { timeoutMs: 120_000 });
         } catch (error) {
-          put({ ...results.get(entry.id), state: 'refused', error: `the post did not get an answer: ${error.message}` });
+          put({ ...results.get(entry.id), state: 'unanswered', error: `the post did not get an answer: ${error.message}` });
           throw new Stop(`${entry.id}: the runner did not answer the post`);
         }
         if (answer.status !== 200 && answer.status !== 201) {
@@ -307,10 +309,16 @@ export async function runBench(options, deps) {
   } finally {
     run.endedAt = new Date(now()).toISOString();
     if (stopReason !== null) run.stopReason = stopReason;
-    if (begun) save();
-    if (runner !== null) {
-      const clean = await runner.stop();
-      if (clean === false) log(`bench: the runner's process group survived SIGKILL; check for leftover processes`);
+    try {
+      if (begun) save();
+    } finally {
+      // Stopped even when the save throws (a full disk), so a detached
+      // runner is never left running paid work; the save's error still
+      // reaches the caller once the runner is down.
+      if (runner !== null) {
+        const clean = await runner.stop();
+        if (clean === false) log(`bench: the runner's process group survived SIGKILL; check for leftover processes`);
+      }
     }
   }
   return run;

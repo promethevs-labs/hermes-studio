@@ -4,14 +4,14 @@
 // real runner leaves under STUDIO_HOME. The child-runner start is injected, so
 // no runner, no agent and no model is ever started here, and every file goes
 // under the OS temp directory.
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { readJobFiles, sourceMetrics } from './metrics.mjs';
+import { readJobFiles, recordFields, sourceMetrics, turnsOf } from './metrics.mjs';
 import { planFor, runBench, toolReadiness } from './run.mjs';
 import { call, portFree } from './runner.mjs';
 
@@ -138,6 +138,8 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  // The unwritable-run-file test takes the write bit away; give it back so the directory can go.
+  if (existsSync(join(dir, 'runs'))) chmodSync(join(dir, 'runs'), 0o755);
   if (stand !== undefined) await new Promise((resolve) => stand.server.close(resolve));
   stand = undefined;
   rmSync(dir, { recursive: true, force: true });
@@ -305,10 +307,64 @@ describe('runBench', () => {
   });
 });
 
+describe('a post whose answer is lost', () => {
+  it('is recorded as unanswered, and a resume reposts it under the same key and collects the job the runner already has', async () => {
+    stand = await standIn({ studioHome, scripts: {} });
+    let lost = false;
+    const losing = deps({
+      call: async (base, method, path, body, opts) => {
+        const answer = await call(base, method, path, body, opts);
+        if (method === 'POST' && path === '/api/jobs' && !lost) {
+          // The runner took the post; its reply never arrives.
+          lost = true;
+          throw new Error('socket hang up');
+        }
+        return answer;
+      },
+    });
+    const first = await runBench(options(['a-one'].map(brief)), losing.deps);
+    expect(first.results).toEqual([expect.objectContaining({ id: 'a-one', state: 'unanswered', jobId: null, tries: 1, error: expect.stringMatching(/socket hang up/) })]);
+    expect(planFor(first.results[0])).toEqual({ action: 'post', attempt: 1 });
+
+    const resumed = await runBench(options(['a-one'].map(brief), { resume: true }), deps().deps);
+    expect(stand.seen.posts.map((post) => post.idempotencyKey)).toEqual(['bench-video:base:a-one:1', 'bench-video:base:a-one:1']);
+    expect(resumed.results).toEqual([expect.objectContaining({ id: 'a-one', jobId: 'job-1', state: 'accepted', tries: 1, earlierCostUsd: 0 })]);
+    expect(stand.seen.accepts).toEqual(['job-1']);
+  });
+});
+
+describe('a run file that cannot be written', () => {
+  it('still stops the runner, and the write error reaches the caller', async () => {
+    stand = await standIn({ studioHome, scripts: { 'a-one': { polls: 3 } } });
+    let gets = 0;
+    const failing = deps({
+      call: async (base, method, path, body, opts) => {
+        if (method === 'GET' && path.startsWith('/api/jobs/') && (gets += 1) === 1) chmodSync(join(dir, 'runs'), 0o500);
+        return call(base, method, path, body, opts);
+      },
+    });
+    await expect(runBench(options(['a-one'].map(brief)), failing.deps)).rejects.toThrow(/EACCES/);
+    expect(failing.started.stopped).toBe(1);
+  });
+});
+
+describe('turnsOf', () => {
+  it('sums a complete attempt history, and falls back to the last attempt otherwise', () => {
+    const job = { attempt: 3, turns: 9 };
+    expect(turnsOf(job, [{ turns: 20 }, { turns: 14 }, { turns: 9 }])).toBe(43);
+    expect(turnsOf(job, [{ turns: 20 }, { turns: null }, { turns: 9 }])).toBe(9);
+    expect(turnsOf(job, [{ turns: 14 }, { turns: 9 }])).toBe(9);
+    expect(turnsOf(job, [])).toBe(9);
+    expect(turnsOf({}, [])).toBeNull();
+    expect(recordFields({ job, run: { attempts: [{ turns: 20 }, { turns: 14 }, { turns: 9 }] } }).turns).toBe(43);
+  });
+});
+
 describe('planFor', () => {
-  it('posts a new brief, reuses the key of an unanswered post, skips what is settled and checks the rest', () => {
+  it('posts a new brief, reuses the key of a post with no answer, skips what is settled and checks the rest', () => {
     expect(planFor(undefined)).toEqual({ action: 'post', attempt: 1 });
     expect(planFor({ state: 'posting', tries: 2 })).toEqual({ action: 'post', attempt: 2 });
+    expect(planFor({ state: 'unanswered', tries: 2, jobId: null })).toEqual({ action: 'post', attempt: 2 });
     for (const state of ['accepted', 'failed', 'cancelled']) expect(planFor({ state, tries: 1, jobId: 'j' })).toEqual({ action: 'skip' });
     expect(planFor({ state: 'cancelled', stopped: true, tries: 1, jobId: 'j' })).toEqual({ action: 'check', attempt: 1 });
     expect(planFor({ state: 'awaiting_review', tries: 1, jobId: 'j' })).toEqual({ action: 'check', attempt: 1 });

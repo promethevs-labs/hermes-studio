@@ -34,12 +34,13 @@ const EXPECTED = `Video bench: base against art, 2 briefs in both
   A is base: manimkc, model sonnet, 3 results, manual 0123456789ab
   B is art: manimkc, model sonnet, 3 results, manual fedcba987654
 
-Look (the mean over the shared briefs on the last line; 3D counts videos)
+Look (means over the briefs measured on both sides; 3D counts videos)
                          variety          top-five share   fade share       3D
 brief                       A    B  diff     A    B  diff     A    B  diff   A   B
 binary-search-halving    0.61 0.72 +0.11  0.80 0.55 -0.25  0.45 0.20 -0.25  no yes
 tcp-three-way-handshake  0.50 0.66 +0.16  0.90 0.70 -0.20  0.60 0.30 -0.30  no  no
 mean or total            0.55 0.69 +0.14  0.85 0.63 -0.23  0.53 0.25 -0.28   0   1
+pairs in the mean                      2                2                2
 
 Run (totals over the shared briefs on the last line; gate counts passes)
                          gate       attempts  turns         cost USD         wall min
@@ -74,6 +75,32 @@ describe('compare', () => {
     expect(comparison.totals.a.gatePassed).toBe(1);
     expect(comparison.totals.b.uses3d).toBe(1);
     expect(comparison.rows[0].diff.turns).toBe(11);
+  });
+
+  it('counts what earlier attempts cost in rows, totals and differences', () => {
+    const resumed = structuredClone(B);
+    resumed.results[0].earlierCostUsd = 0.5;
+    const comparison = compareRuns(A, resumed);
+    expect(comparison.rows[0].b.costUsd).toBeCloseTo(3.45);
+    expect(comparison.rows[0].diff.costUsd).toBeCloseTo(1.05);
+    expect(comparison.totals.b.costUsd).toBeCloseTo(6.55);
+    expect(comparison.totals.diff.costUsd).toBeCloseTo(0.55);
+    const unpriced = structuredClone(B);
+    unpriced.results[0].costUsd = null;
+    expect(compareRuns(A, unpriced).rows[0].b.costUsd).toBeNull();
+  });
+
+  it('takes each look mean and difference over the briefs measured on both sides only, and says how many', () => {
+    const missing = structuredClone(B);
+    missing.results[1].metrics.variety = null;
+    const comparison = compareRuns(A, missing);
+    expect(comparison.totals.pairs.variety).toBe(1);
+    expect(comparison.totals.pairs.fadeShare).toBe(2);
+    // binary-search-halving alone: 0.61 against 0.72, not 0.555 against 0.72.
+    expect(comparison.totals.a.variety).toBeCloseTo(0.61);
+    expect(comparison.totals.b.variety).toBeCloseTo(0.72);
+    expect(comparison.totals.diff.variety).toBeCloseTo(0.11);
+    expect(formatCompare(comparison)).toMatch(/pairs in the mean\s+1\s+2\s+2\n/);
   });
 
   it('adds a column for each critic score a result carries', () => {
