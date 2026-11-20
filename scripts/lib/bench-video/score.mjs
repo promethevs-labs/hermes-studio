@@ -96,6 +96,10 @@ export async function scoreRun(options, deps) {
         log(`${result.id}: the job's own critic ${verdictLine(own)}`);
         continue;
       }
+      // The stop and the cap again, after the GET above, the last await
+      // before the paid call; a stop leaves this video's record as it is.
+      if (stopped()) throw new Stop('stopped');
+      if (scoring.spentUsd >= cap) throw new Stop(`this scoring's cost, $${scoring.spentUsd.toFixed(2)}, has reached the $${cap.toFixed(2)} cap`);
       const checked = await standaloneCritic(call, base, result.jobId, shown.json);
       const paid = typeof checked.critic.costUsd === 'number' ? checked.critic.costUsd : null;
       scoring.spentUsd += paid ?? 0;

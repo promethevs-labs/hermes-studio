@@ -287,7 +287,21 @@ export async function runBench(options, deps) {
         // A plan already recorded stands: a resume never pays for a second one.
         let shots = askShots ? (previous?.shots ?? null) : null;
         const fresh = { ...emptyResult(entry.id), id: entry.id, slug, tries: attempt, stopped: false, earlierCostUsd };
+        // Every paid call is preceded, after the last await before it, by a
+        // stop check and a cap check. A record whose post may already have
+        // reached the runner is left as it is, so a resume reposts it under
+        // the same idempotency key rather than queueing a second job.
+        const hold = (why, reason) => {
+          const now = results.get(entry.id);
+          if (!(now?.state === 'posting' || now?.state === 'unanswered') || now.tries !== attempt) {
+            put({ ...fresh, state: 'not-posted', shots, error: `not posted: ${why}` });
+          }
+          throw new Stop(reason);
+        };
+        const capReason = () => `this run's recorded cost, $${spent().toFixed(2)}, has reached the $${cap.toFixed(2)} cap`;
         if (askShots && !shotsKept(shots)) {
+          if (stopped()) hold('the bench was stopped before its shot plan was asked for', 'stopped');
+          if (spent() >= cap) hold('the run reached its cap before its shot plan', capReason());
           put({ ...fresh, state: 'planning', shots: null });
           let planned;
           try {
@@ -313,18 +327,13 @@ export async function runBench(options, deps) {
             put({ ...results.get(entry.id), state: 'not-posted', error: `the run asked for shots and the runner cannot plan them: ${shots.reason ?? 'the art director is off'}` });
             throw new Stop(`${entry.id}: the runner's art director is off; pass --keep-going to post the briefs without shots`);
           }
-          if (spent() >= cap) {
-            put({ ...results.get(entry.id), state: 'not-posted', error: 'not posted: the run reached its cap with this shot plan' });
-            throw new Stop(`this run's recorded cost, $${spent().toFixed(2)}, has reached the $${cap.toFixed(2)} cap`);
-          }
         }
-        // A stop that arrived while the plan was being made is honoured before
-        // any paid video work is queued. The plan is already in the run file,
-        // so a resume posts it without paying for it again.
-        if (stopped()) {
-          put({ ...(results.get(entry.id) ?? fresh), state: 'not-posted', shots, error: 'not posted: the bench was stopped before the job was queued' });
-          throw new Stop('stopped');
-        }
+        // A stop that arrived while the plan was being made (or while a
+        // resume asked about an old job) is honoured before any paid video
+        // work is queued. A plan is already in the run file, so a resume posts
+        // it without paying for it again; the cap counts the plan just paid for.
+        if (stopped()) hold('the bench was stopped before the job was queued', 'stopped');
+        if (spent() >= cap) hold(shots?.costUsd > 0 ? 'the run reached its cap with this shot plan' : 'the run reached its cap before the job was queued', capReason());
         put({ ...fresh, state: 'posting', shots });
         let answer;
         try {
@@ -404,7 +413,13 @@ export async function runBench(options, deps) {
         const jobView = after?.status === 200 ? after.json : view;
         critic = criticFromView(jobView?.critic ?? null);
         if (!criticCurrent(critic) && askCritic) {
-          if (spent() >= cap) log(`${entry.id}: no standalone critic, the run's recorded cost has reached the cap`);
+          // Checked after the GET above, the last await before the paid call.
+          // A stop keeps the landed video's record as it is (accepted, its
+          // costs, its job's own critic) and ends the run; `score` checks it later.
+          if (stopped()) {
+            log(`${entry.id}: no standalone critic, the bench was stopped`);
+            criticStop = 'stopped';
+          } else if (spent() >= cap) log(`${entry.id}: no standalone critic, the run's recorded cost has reached the cap`);
           else {
             const checked = await standaloneCritic(call, base, jobId, jobView);
             critic = checked.critic;

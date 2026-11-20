@@ -575,6 +575,31 @@ describe('the critic on a run', () => {
     expect(stand.seen.critics).toEqual([]);
   });
 
+  it('pays for no standalone check when stopped during the GET before it, and keeps the landed video', async () => {
+    stand = await standIn({ studioHome, scripts: { 'a-one': { critic: null }, 'b-two': { critic: null } } });
+    let accepted = false;
+    let stop = false;
+    const stopping = deps({
+      call: async (base, method, path, body, opts) => {
+        if (method === 'POST' && path.endsWith('/accept')) accepted = true;
+        const answer = await call(base, method, path, body, opts);
+        // The signal lands while the bench reads the accepted job's critic.
+        if (accepted && method === 'GET' && path === '/api/jobs/job-1') stop = true;
+        return answer;
+      },
+      stopped: () => stop,
+    });
+    const run = await runBench(options(['a-one', 'b-two'].map(brief), { critic: true }), stopping.deps);
+    expect(stand.seen.critics).toEqual([]);
+    expect(stand.seen.posts).toHaveLength(1);
+    expect(run.stopReason).toBe('stopped');
+    expect(run.results).toEqual([
+      expect.objectContaining({ id: 'a-one', jobId: 'job-1', state: 'accepted', costUsd: 1.25, checkCostUsd: null, critic: expect.objectContaining({ source: 'job', current: false }) }),
+    ]);
+    expect(run.results[0].metrics).not.toBeNull();
+    expect(stopping.started.stopped).toBe(1);
+  });
+
   it('stops after the video when the runner cannot run the critic, unless --keep-going', async () => {
     stand = await standIn({ studioHome, scripts: { 'a-one': { critic: null, standalone: { status: 503 } }, 'b-two': { critic: null, standalone: { status: 503 } } } });
     const run = await runBench(options(['a-one', 'b-two'].map(brief), { critic: true }), deps().deps);
@@ -627,6 +652,25 @@ describe('scoreRun', () => {
     // --again asks once more, for each result a standalone check answered.
     await scoreRun(scoreOptions({ again: true }), deps().deps);
     expect(stand.seen.critics).toEqual(['job-1', 'job-2', 'job-1', 'job-2']);
+  });
+
+  it('pays for no check when stopped during the GET before it, and leaves the record as it was', async () => {
+    await baseline({});
+    const kept = JSON.parse(readFileSync(runFile, 'utf8')).results;
+    let stop = false;
+    const stopping = deps({
+      call: async (base, method, path, body, opts) => {
+        const answer = await call(base, method, path, body, opts);
+        if (method === 'GET' && path === '/api/jobs/job-1') stop = true;
+        return answer;
+      },
+      stopped: () => stop,
+    });
+    const run = await scoreRun(scoreOptions(), stopping.deps);
+    expect(stand.seen.critics).toEqual([]);
+    expect(run.scoring.stopReason).toBe('stopped');
+    expect(JSON.parse(readFileSync(runFile, 'utf8')).results).toEqual(kept);
+    expect(stopping.started.stopped).toBe(1);
   });
 
   it('stops cleanly at a 429 and stops the runner', async () => {
