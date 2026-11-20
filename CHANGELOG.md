@@ -238,6 +238,31 @@ This project is continuously deployed and not versioned; entries are grouped by 
 
 ### Fixed
 
+- **A studio job's row no longer stays `running` after its record has
+  finished.** On 2026-11-20 the app restarted while a video job ran: its
+  `job.json` said `cancelled`, its catalog row still said `running`, and the
+  row's lease refused the next job for that video with a 409 until someone
+  ran `catalog job finish` by hand. Each runner now reconciles at start with
+  one `catalog job ls --active` (new: every row in a leasing state, no
+  limit): a live row whose record has reached a terminal state is moved to
+  that state with the same `job finish` the live path sends, claimed first
+  when the catalog missed the claim, and taken through review to `discarded`
+  for a discarded record. A row another runner claimed, a refused claim's
+  row, a job still running here and a row no record names are left alone,
+  the last reported as `orphans` in `/api/health` (`catalogRows`, and
+  `video.catalogRows`). With the catalog down the reconcile is owed, and the
+  next health check that sees the catalog answer runs it; a `job finish`
+  that fails at any time owes one too. An enqueue refused by the lease of a
+  job this runner already finished moves that row and tries once more, so
+  nobody sees that 409. Shutdown now waits, up to 15 seconds, for both
+  runners' stopped jobs to write their verdicts before it exits, where it
+  used to exit as soon as the agents were signalled, and every catalog call
+  runs in a process group of its own, so the terminal's Ctrl-C no longer
+  kills the `job finish` the drain waits on. The diagram runner's own crash
+  handler now finishes the row as well as the record. See
+  [docs/STUDIO-VIDEOS.md](docs/STUDIO-VIDEOS.md), "The catalog's rows at
+  start".
+
 - **A blob store that cannot open no longer breaks reads that only need the
   catalog.** `seams()` in `apps/web/src/lib/asset-files.ts` resolves
   `assetBlobStore()` on first use rather than when the seams are built, so a

@@ -1274,6 +1274,13 @@ export interface ListOptions {
   state?: string;
   kind?: string;
   limit?: number;
+  /**
+   * Every job in a state that holds a lease (`JOB_ACTIVE_STATES`), with no
+   * limit. The studio reads these once per start to find a row its own record
+   * has already finished. There is at most one per committed path, so the
+   * count is bounded by the paths, not by the history.
+   */
+  active?: boolean;
   /** Whose jobs. Default: the CLI's owner. */
   owner?: string;
 }
@@ -1282,11 +1289,16 @@ export async function runList(options: ListOptions = {}): Promise<ListResult> {
   if (options.state !== undefined && !(JOB_STATES as readonly string[]).includes(options.state)) {
     throw new JobError(`unknown job state "${options.state}". Known: ${JOB_STATES.join(", ")}.`);
   }
-  const limit = Math.min(Math.max(options.limit ?? LIST_LIMIT, 1), LIST_LIMIT_MAX);
+  if (options.active === true && options.state !== undefined) {
+    throw new JobError("--active lists every state that holds a lease, so it takes no --state beside it.");
+  }
+  // SQLite reads a negative LIMIT as no limit at all, which is what --active asks for.
+  const limit = options.active === true ? -1 : Math.min(Math.max(options.limit ?? LIST_LIMIT, 1), LIST_LIMIT_MAX);
 
   return withDatabase(async ({ db }) => {
     const filters = [
       options.state === undefined ? undefined : eq(jobTable.state, options.state),
+      options.active === true ? inArray(jobTable.state, [...JOB_ACTIVE_STATES]) : undefined,
       options.kind === undefined ? undefined : eq(jobTable.kind, options.kind),
       await ownedJobs(db, options.owner ?? CLI_OWNER),
     ].filter((f) => f !== undefined);

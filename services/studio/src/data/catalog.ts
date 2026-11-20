@@ -103,6 +103,12 @@ async function npmCli(script: "catalog" | "learn", args: string[], timeoutMs: nu
   try {
     const result = await run(process.execPath, [...CLI_ARGS[script], ...args, "--json"], {
       timeoutMs,
+      // A process group (and session) of its own, so the Ctrl-C that asks the
+      // runner to drain does not also kill the `job finish` the drain is
+      // waiting on. Ctrl-C in a terminal, and `npm run dev:down`'s, signals
+      // the whole foreground group, which held every catalog call the runner
+      // had in flight. A timeout still stops the whole group (`stopChild`).
+      group: true,
     });
     if (result.code === 0) return { ok: true, json: result.json, error: null, offline: false };
     const detail = (result.stderr.trim() || result.stdout.trim() || "").split("\n").slice(-4).join(" ");
@@ -186,8 +192,21 @@ export function jobEnqueue(briefFile: string, options: { discardParent?: string 
   ]);
 }
 
-export function jobClaim(jobId: string, runner: string, sessionId: string): Promise<CatalogResult> {
-  return catalog(["job", "claim", "--job", jobId, "--runner", runner, "--session", sessionId, ...owned()]);
+/**
+ * `job claim --job <id>`. The session is left out by the reconcile, which
+ * replays a claim the catalog missed and cannot know the session row exists.
+ */
+export function jobClaim(jobId: string, runner: string, sessionId?: string): Promise<CatalogResult> {
+  return catalog(["job", "claim", "--job", jobId, "--runner", runner, ...(sessionId === undefined ? [] : ["--session", sessionId]), ...owned()]);
+}
+
+/**
+ * `job ls --active --kind <kind>`: every row of this owner's that holds a
+ * lease (queued, running, awaiting_review), in one read. The runners'
+ * reconcile compares these with their own records (`data/catalog-rows.ts`).
+ */
+export function jobListActive(kind: string): Promise<CatalogResult> {
+  return catalog(["job", "ls", "--active", "--kind", kind, ...owned()], 60_000);
 }
 
 export interface JobFinishInput {

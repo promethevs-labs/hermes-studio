@@ -1541,6 +1541,17 @@ not have to be worked out again.
   12 runs in 100 under load (0 in 100 after). Something new that `Drafts`
   starts without awaiting goes through `tracked`, or `drain` stops
   covering it.
+- **A finished `job.json` does not mean the catalog row heard.** The record
+  is written first, so a stop between the two left a `cancelled` record over
+  a `running` row whose lease refused every later job on that path with a
+  409 (2026-11-20). `CatalogRows` in `services/studio/src/data/catalog-rows.ts`
+  reconciles them at start, from a health check once the catalog answers,
+  and on a lease refusal naming a job the runner already finished. A new
+  path that writes a terminal record sends its `job finish` through the
+  runner's `finishInput` and reports a failure with `finishMissed`, or the
+  reconcile never learns it is owed; and a catalog call stays in its own
+  process group (`group: true` in `data/catalog.ts`), or the terminal's
+  Ctrl-C kills it alongside the runner it is draining.
 - **Remove a fake clock with `removeFakeClock()`, not a bare
   `vi.useRealTimers()`, in a jsdom suite.** jsdom 31 runs
   `requestAnimationFrame` and its focus fix-up from one 16ms interval, started

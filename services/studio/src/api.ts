@@ -2098,6 +2098,14 @@ async function health(
   const tldrawkc = checked !== null && checked.code === 0;
   const claude = claudeVersion !== null && claudeVersion.code === 0;
   const postgres = catalog !== null && catalog.ok;
+  // A reconcile of the job rows the catalog could not take at the time (it
+  // was down at start, or a `job finish` failed since): retried now that the
+  // catalog answers, not awaited, so this answer reports the last pass and
+  // the next one the new pass. Optional, since a test's stand-in runner has none.
+  if (postgres) {
+    void runner.rows?.retry();
+    void video?.runner.rows?.retry();
+  }
   // U4 replaces the screen on a `fail` and U5 shows a banner on a `warn`, so the
   // two are reported apart. A stale bundle still works, which is `doctor`'s own
   // verdict and the reason it is a warning there too.
@@ -2144,6 +2152,11 @@ async function health(
     vocabulary,
     queueDepth,
     running: runner.busy,
+    // The catalog's job rows against the records (`data/catalog-rows.ts`):
+    // `pending` while a reconcile is owed, the rows the last pass moved or
+    // left, and `orphans`, live rows no record here names, which are never
+    // written to. The video kind's are under `video.catalogRows`.
+    catalogRows: runner.rows?.status() ?? null,
     costLast24h: cap.totalUsd,
     // The planner's share of that figure: its turns are spend entries in the
     // same window (D36 of docs/STUDIO-CHAT-FIRST.md).
@@ -2158,7 +2171,7 @@ async function health(
         ? { ok: false, sandbox: false, metal: false, kokoro: false, checks: [], note: "this studio was started without the video runner", tools: toolsHealth(), narration: narrationHealth() }
         : videoReport === null
           ? { ok: false, sandbox: false, metal: false, kokoro: false, checks: [], note: "the video doctor has not finished its first check", tools: toolsHealth(toolVerdicts), narration: narrationHealth() }
-          : { ...videoReport, running: video.runner.busy, queueDepth: video.store.list({ state: "queued" }).length, tools: toolsHealth(toolVerdicts), narration: narrationHealth() },
+          : { ...videoReport, running: video.runner.busy, queueDepth: video.store.list({ state: "queued" }).length, catalogRows: video.runner.rows?.status() ?? null, tools: toolsHealth(toolVerdicts), narration: narrationHealth() },
     agent,
     diagramAgent: { ok: diagramAgentProblem === null, problem: diagramAgentProblem },
     // Whether the BYOK harness can open the provider keys saved in Settings
