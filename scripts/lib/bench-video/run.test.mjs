@@ -441,6 +441,32 @@ describe('run --shots', () => {
     expect(resumed.results[1]).toMatchObject({ state: 'accepted', shots: { state: 'planned', costUsd: 0.3 } });
   });
 
+  it('posts no job when stopped during the shot plan, keeps the plan, and a resume posts it without paying again', async () => {
+    stand = await standIn({ studioHome, scripts: {} });
+    let stop = false;
+    const stopping = deps({
+      call: async (base, method, path, body, opts) => {
+        const answer = await call(base, method, path, body, opts);
+        // The signal lands while the art director's call is out.
+        if (method === 'POST' && path === '/api/video/shots') stop = true;
+        return answer;
+      },
+      stopped: () => stop,
+    });
+    const run = await runBench(options(['a-one', 'b-two'].map(brief), { shots: true }), stopping.deps);
+    expect(stand.seen.shots).toHaveLength(1);
+    expect(stand.seen.posts).toEqual([]);
+    expect(run.stopReason).toBe('stopped');
+    expect(run.results).toEqual([expect.objectContaining({ id: 'a-one', jobId: null, state: 'not-posted', shots: expect.objectContaining({ state: 'planned', costUsd: 0.3 }) })]);
+    expect(JSON.parse(readFileSync(runFile, 'utf8')).results[0].shots.brief.scenes[0].shot.type).toBe('title');
+    expect(stopping.started.stopped).toBe(1);
+
+    const resumed = await runBench(options(['a-one'].map(brief), { shots: true, resume: true }), deps().deps);
+    expect(stand.seen.shots).toHaveLength(1);
+    expect(stand.seen.posts.map((post) => post.scenes.map((scene) => scene.shot.type))).toEqual([['title', 'array-or-memory', 'recap-map']]);
+    expect(resumed.results[0]).toMatchObject({ state: 'accepted', shots: { state: 'planned', costUsd: 0.3 } });
+  });
+
   it('posts the brief without shots when the plan failed, and records why', async () => {
     stand = await standIn({ studioHome, scripts: { 'a-one': { shots: { shotPlan: 'failed', cost: 0.1, reason: 'the reply had no shots block' } } } });
     const run = await runBench(options(['a-one'].map(brief), { shots: true }), deps().deps);

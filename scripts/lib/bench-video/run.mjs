@@ -318,6 +318,13 @@ export async function runBench(options, deps) {
             throw new Stop(`this run's recorded cost, $${spent().toFixed(2)}, has reached the $${cap.toFixed(2)} cap`);
           }
         }
+        // A stop that arrived while the plan was being made is honoured before
+        // any paid video work is queued. The plan is already in the run file,
+        // so a resume posts it without paying for it again.
+        if (stopped()) {
+          put({ ...(results.get(entry.id) ?? fresh), state: 'not-posted', shots, error: 'not posted: the bench was stopped before the job was queued' });
+          throw new Stop('stopped');
+        }
         put({ ...fresh, state: 'posting', shots });
         let answer;
         try {
