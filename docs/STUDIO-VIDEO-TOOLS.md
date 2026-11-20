@@ -115,8 +115,9 @@ the series row keeps its route (a new week takes the series' tool) and its
 reason is now D111's, that a series fixes its palette, typeface, heading
 position and voice while its layouts, shot types and motion vary. The
 table's last row, which sent a video of boxes, tables and arrows to
-manimkc, now sends a video no other row claims to remotionkc, and so does
-the TOOLS block's line under the rows. The rest of this decision stands:
+manimkc, now sends a studio video no other row claims to remotionkc, and so
+does the TOOLS block's line under the rows. At a terminal the default is
+still manimkc: D112 covers studio videos only. The rest of this decision stands:
 the rows still reach the planner from `tools.ts`, held equal to the page by
 the test, and the prompt's prose procedure did not change.
 

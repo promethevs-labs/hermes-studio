@@ -64,9 +64,13 @@ higher up wins.
 | Hand-choreographed diagram motion: things that spring into place, masks and reveals, light that adds over a diagram | revideokc | Springs, `compositeOperation`, `cache` masks, radial gradients, flexbox layout, signals binding one node to another | the showcase topic |
 | Nothing above: boxes, tables, arrows, a diagram that builds up, text | remotionkc | It lays out with CSS and has charts, code, a terminal, KaTeX and three.js to vary the shots with, and the studio can make it (D112 of STUDIO-LOOK.md) | `growth-rates-on-a-chart`, the one remotionkc video a studio job has made |
 
-When no row above the last fits, use remotionkc. D112 of
-[STUDIO-LOOK.md](STUDIO-LOOK.md) moved this default from manimkc on
-2026-11-20, after an audit found the videos look alike and the old default
+The last row is the studio's. When no row above it fits, a studio job goes
+to remotionkc (D112), and a video made at a terminal goes to manimkc, as
+before. The planner's TOOLS block carries the row exactly as written here,
+so the terminal default lives in this paragraph instead.
+
+D112 of [STUDIO-LOOK.md](STUDIO-LOOK.md) moved the studio's default from
+manimkc on 2026-11-20, after an audit found the videos look alike and the old default
 sending every plain diagram video to manimkc was one cause. On the owner's
 catalog that day, manimkc's 153 videos scored 0.69 for variety, its top five
 helpers made 94% of its helper calls, fades were 81% of its animation calls,
@@ -76,10 +80,13 @@ used a line chart, a bar comparison, a formula with a share bar and a
 crossing plot. That is one job, so the benchmark in STUDIO-LOOK.md is what
 tests the decision.
 
-manimkc keeps the series it already has, the rows above that only it can
-draw (function plots, glyph-level equation morphs, vector fields, 3D maths
-surfaces), and its place at a terminal. revideokc keeps code edited in place
-and its lit 3D stage; blenderkc is unchanged.
+manimkc keeps the series it already has and the rows above that only it
+can draw (function plots, glyph-level equation morphs, vector fields, 3D
+maths surfaces). revideokc keeps code edited in place and its lit 3D stage;
+blenderkc is unchanged. The terminal default is unchanged too: D112 covers
+videos the studio makes, and the owner has not decided the terminal yet.
+Whichever tool makes a video, "What stays fixed and what must vary" and the
+shot types apply to it.
 
 The studio still reads a brief that names no tool as a manimkc brief (D72 of
 [STUDIO-VIDEO-TOOLS.md](STUDIO-VIDEO-TOOLS.md)). That default is unchanged
@@ -171,7 +178,9 @@ come before preferences, so a later step can never undo an earlier one.
    types and layouts, and repeats none of last week's.
 4. **Name the main visual.** Write one sentence: what is on screen for most
    of the video? Find it in "Pick by what the video needs", top row first.
-   When no row above the last fits, the last row's remotionkc makes it.
+   When no row above the last fits, a studio job goes to remotionkc (the
+   last row, D112) and a video made at a terminal goes to manimkc, as
+   before.
 5. **Check the second visual.** If a second beat needs something the chosen
    tool cannot do (the capability matrix says "no"), prefer the tool that can
    do both; if none can, keep the main visual's tool and simplify that beat.
@@ -192,7 +201,9 @@ flowchart TD
   C -- plots, equation morphs, 3D maths --> M[manimkc]
   C -- real data, captions, editor and terminal, footage --> R[remotionkc]
   C -- depth and light, code edited in place, choreographed motion --> V[revideokc]
-  C -- none of the above, such as boxes, tables, arrows, text --> R
+  C -- none of the above, such as boxes, tables, arrows, text --> W{Made by the studio, unattended?}
+  W -- yes, a studio job --> R
+  W -- no, at a terminal --> M
   M --> D{Does a second beat need what it lacks?}
   R --> D
   V --> D

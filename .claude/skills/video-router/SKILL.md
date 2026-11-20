@@ -49,8 +49,8 @@ undoes an earlier one.
    - depth and light (layers in perspective, a spotlight, shadows), code
      edited in place, springy choreographed diagram motion: **revideokc**
    - none of the above (boxes, tables, arrows, a diagram that builds up,
-     text): **remotionkc**, the default since D112 of `docs/STUDIO-LOOK.md`,
-     because it gives the shots more room to vary
+     text): **manimkc**, as before at a terminal (the studio's default for
+     the same video is remotionkc, D112 of `docs/STUDIO-LOOK.md`)
 5. **Check the second visual.** If another beat needs something the chosen
    tool's column in the capability matrix marks "no", prefer the tool that
    does both; if none does, keep the choice and simplify that beat.
