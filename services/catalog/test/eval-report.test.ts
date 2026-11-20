@@ -263,6 +263,29 @@ describe.skipIf(!reachable.ok)("catalog eval report", () => {
     expect(other.report.totals.accepted).toBe(0);
   });
 
+  it("groups two jobs with different manual hashes and one manual version together, and an old record apart", async () => {
+    const E = "manimkc:out/demo/mv1/mv1.mp4";
+    const F = "manimkc:out/demo/mv2/mv2.mp4";
+    const G = "manimkc:out/demo/mv3/mv3.mp4";
+    const VERSION = "ee11ee11ee11ee11";
+    for (const id of [E, F, G]) await video(id);
+    const jobE = await ready("e-job", { run: { ...RUN, manualHash: "e0e0e0e0e0e0e0e0", manualVersion: VERSION } });
+    const jobF = await ready("f-job", { run: { ...RUN, manualHash: "f0f0f0f0f0f0f0f0", manualVersion: VERSION } });
+    // Recorded before versions: a hash and no version.
+    const jobG = await ready("g-job", { run: { ...RUN, manualHash: "a0a0a0a0a0a0a0a0" } });
+    await link(E, jobE);
+    await link(F, jobF);
+    await link(G, jobG);
+    const { report } = await runEvalReport({});
+    const version = report.byManual.find((g) => g.key === VERSION)!;
+    expect([version.videos, version.keyedOn]).toEqual([2, "version"]);
+    expect(report.byManual.some((g) => g.key === "e0e0e0e0e0e0e0e0" || g.key === "f0f0f0f0f0f0f0f0")).toBe(false);
+    const old = report.byManual.find((g) => g.key === "a0a0a0a0a0a0a0a0")!;
+    expect([old.videos, old.keyedOn]).toEqual([1, "hash"]);
+    // The stored record keeps the field, and the --json report carries it.
+    expect(JSON.parse(JSON.stringify(report)).byManual.find((g: { key: string }) => g.key === VERSION).keyedOn).toBe("version");
+  });
+
   describe("a video re-rendered by a newer job", () => {
     const D = "manimkc:out/demo/d/d.mp4";
     const MODEL_A: JobRun = { ...RUN, model: { passed: "a", resolved: "model-a" }, manualHash: "aaaaaaaa00000000" };

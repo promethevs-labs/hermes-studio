@@ -248,6 +248,16 @@ these fields and no others:
 
 Adding `critic` needed no migration, since `job.run` is a JSON column.
 
+A run may also carry `manualVersion`, the hash of the manual's text with the
+job's own paths normalised out, beside `manualHash`. A video job's manual
+holds the job's wrapper path, so its `manualHash` (the name of the file the
+agent read) is different for every job; the version is what two jobs under
+one manual share. It is the one run key that may be left out (a run stored
+before it existed is read and stored as it was; the other nine are required),
+and it is null or text like `manualHash`. A diagram job's manual has no
+per-job content, so it records none and its `manualHash` is already its
+version. No migration, again because the column is JSON.
+
 They are columns rather than tables because each is one record per job, read
 with the job and never joined on. A run's attempts and a review's tags live
 inside the JSON, since nothing queries across jobs by them yet; a report that
@@ -317,7 +327,7 @@ the member, an engine namespace keeps its qualifier (`THREE.Mesh`), and a
 default import uses its local name.
 
 **The report** is read-only. It groups the owner's videos by tool, by model and
-by prompt version (the first eight characters of the run's `manualHash`), and
+by prompt version (the first eight characters of the run's `manualVersion`, or of its `manualHash` when it has no version), and
 adds every other finished job (failed, discarded, cancelled, diagram jobs,
 and jobs a newer job replaced) so each finished job is counted once in the
 accept rate and the discard tags. A video's own columns (model, cost, turns)
@@ -329,7 +339,10 @@ rating with no job goes with the video's own row, and by tool a rating always
 counts under the video's tool. The `older` column, and the total on the Rated
 line, count ratings of an older version: the rated job is not the video's
 current one, or the rated hash differs from the asset's content hash now
-(when both are known). The model is the run record's
+(when both are known). In `--json`, each `byManual` row has a `keyedOn` of
+`version` or `hash` (null for the `(none)` and `(no job)` groups), saying which
+the key is; the text marks a hash-keyed group with `*` when both kinds are in
+the report. The model is the run record's
 resolved one, else the one the job passed; a job with no run record has none
 and is grouped as `unknown`.
 

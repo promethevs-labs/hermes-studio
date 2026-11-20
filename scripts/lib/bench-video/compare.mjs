@@ -112,7 +112,7 @@ const sum = (values) => {
 
 /** One side of a run, as the comparison describes it. */
 function describe(run) {
-  return { label: run.label, tool: run.tool, model: run.model ?? null, results: (run.results ?? []).length, manualHashes: run.manualHashes ?? [] };
+  return { label: run.label, tool: run.tool, model: run.model ?? null, results: (run.results ?? []).length, manualHashes: run.manualHashes ?? [], manualVersions: run.manualVersions ?? [] };
 }
 
 /** A column as the comparison lists it; `table` only for one printed outside the look and run tables. */
@@ -271,7 +271,7 @@ function sumGroup(column) {
 /** The comparison as plain text: a look table, a run table, the critic and shots when either run has them, and the briefs only one run has. */
 export function formatCompare(comparison) {
   const { a, b, look, run, rows, totals } = comparison;
-  const side = (label, info) => `  ${label} is ${info.label}: ${info.tool}, model ${info.model ?? 'default'}, ${info.results} result${info.results === 1 ? '' : 's'}${info.manualHashes.length > 0 ? `, manual ${info.manualHashes.map((hash) => hash.slice(0, 12)).join(' ')}` : ''}`;
+  const side = (label, info) => `  ${label} is ${info.label}: ${info.tool}, model ${info.model ?? 'default'}, ${info.results} result${info.results === 1 ? '' : 's'}${info.manualHashes.length > 0 ? `, manual ${info.manualHashes.map((hash) => hash.slice(0, 12)).join(' ')}` : ''}${info.manualVersions.length > 0 ? `, ${info.manualVersions.length} manual version${info.manualVersions.length === 1 ? '' : 's'}` : ''}`;
   const lines = [`Video bench: ${a.label} against ${b.label}, ${rows.length} brief${rows.length === 1 ? '' : 's'} in both`, side('A', a), side('B', b), ''];
   const shortId = (id) => (id.length > 24 ? `${id.slice(0, 23)}~` : id);
   const tableRows = [

@@ -272,6 +272,7 @@ function view(record: JobRecord): Record<string, unknown> {
     apiKeySource: record.apiKeySource ?? null,
     // The tldraw manual the agent ran with, by the hash that names its file.
     manualHash: record.manualHash ?? null,
+    manualVersion: record.manualVersion ?? null,
     // The model and effort it was started with, each `{ requested, passed,
     // source }`, and the model its session said it was (D53). Null on a job
     // that has not started, or one recorded before the settings panel.

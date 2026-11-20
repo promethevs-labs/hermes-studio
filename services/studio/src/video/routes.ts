@@ -80,6 +80,7 @@ export function videoView(record: VideoJobRecord): Record<string, unknown> {
     agentAuth: record.agentAuth ?? null,
     apiKeySource: record.apiKeySource ?? null,
     manualHash: record.manualHash ?? null,
+    manualVersion: record.manualVersion ?? null,
     agentModel: record.agentModel ?? null,
     agentEffort: record.agentEffort ?? null,
     resolvedModel: record.resolvedModel ?? null,

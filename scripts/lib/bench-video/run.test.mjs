@@ -102,12 +102,13 @@ function standIn({ studioHome, scripts, capUsd = undefined, ledger = [], doctorA
         finishedAt: '2026-11-20T10:12:30.000Z',
         gate: { ok: job.state !== 'failed' },
         manualHash: 'abc123def456aaaa',
+        manualVersion: 'feed0000feed0000',
         ...(critic.length === 0 ? {} : { critic, criticSpend }),
       }),
     );
     writeFileSync(
       join(dir, 'run.json'),
-      JSON.stringify({ model: { passed: 'sonnet', resolved: 'claude-sonnet-5' }, manualHash: 'abc123def456aaaa', renderSeconds: 95.5, attempts: [{ n: 1, turns: 20, gate: { ok: false } }, { n: 2, turns: 11, gate: { ok: job.state !== 'failed' } }] }),
+      JSON.stringify({ model: { passed: 'sonnet', resolved: 'claude-sonnet-5' }, manualHash: 'abc123def456aaaa', manualVersion: 'feed0000feed0000', renderSeconds: 95.5, attempts: [{ n: 1, turns: 20, gate: { ok: false } }, { n: 2, turns: 11, gate: { ok: job.state !== 'failed' } }] }),
     );
   };
   const server = createServer((req, res) => {
@@ -298,7 +299,7 @@ describe('runBench', () => {
 
     const written = JSON.parse(readFileSync(runFile, 'utf8'));
     expect(written).toEqual(run);
-    expect(written).toMatchObject({ label: 'base', tool: 'manimkc', model: 'sonnet', manualHashes: ['abc123def456aaaa'] });
+    expect(written).toMatchObject({ label: 'base', tool: 'manimkc', model: 'sonnet', manualHashes: ['abc123def456aaaa'], manualVersions: ['feed0000feed0000'] });
     expect(written.stopReason).toMatch(/c-three: the runner refused it at the daily cap/);
     expect(typeof written.startedAt).toBe('string');
     expect(typeof written.endedAt).toBe('string');

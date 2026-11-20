@@ -123,6 +123,7 @@ export function recordFields({ job, run }, measuredSeconds = null) {
     wallSeconds: seconds(job?.startedAt, job?.finishedAt) ?? measuredSeconds,
     renderSeconds: typeof run?.renderSeconds === 'number' ? run.renderSeconds : null,
     manualHash: run?.manualHash ?? job?.manualHash ?? null,
+    manualVersion: run?.manualVersion ?? job?.manualVersion ?? null,
     resolvedModel: run?.model?.resolved ?? job?.resolvedModel ?? null,
   };
 }

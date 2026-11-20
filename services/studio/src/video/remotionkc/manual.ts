@@ -5,6 +5,7 @@ import { run } from "../../proc";
 import { DATA_FENCE, DATA_FENCE_END } from "../../diagram/prompt";
 import { HELD_TAIL_SECONDS } from "../gate";
 import { numberedSteps, videoPromptFacing } from "../prompt";
+import { manualVersionOf } from "../manual";
 import { shotTypesSection } from "../shots";
 import type { VideoPromptRequest } from "../backend";
 import type { VideoPaths } from "../paths";
@@ -50,10 +51,10 @@ function hasRemotionGuides(dir: string): boolean {
   }
 }
 
-function sections(wrapper: string, listing: string, paths: VideoPaths): string {
+function sections(wrapper: string, listing: string, paths: VideoPaths, hasGuides: boolean): string {
   const own = remotionkcPaths(paths);
   const patterns = shotPatternsOfListing(listing);
-  const guides = hasRemotionGuides(own.remotionGuides)
+  const guides = hasGuides
     ? `\n- \`${own.remotionGuides}/\`: Remotion's own guides to writing compositions, one file per subject (\`REFERENCE.md\` lists them). Where a guide and this manual disagree (fonts, assets, network, transitions), this manual is right, because your render has no network and your cues must hold.`
     : "";
   return `# Making a video in the studio
@@ -188,7 +189,18 @@ export async function remotionkcApiListing(tools: RemotionkcToolchain): Promise<
 
 /** The manual's text for a job's wrapper and paths, and a listing. */
 export function remotionkcManualText(wrapper: string, listing: string, paths: VideoPaths): string {
-  return sections(wrapper, listing, paths);
+  return sections(wrapper, listing, paths, hasRemotionGuides(remotionkcPaths(paths).remotionGuides));
+}
+
+/**
+ * The version of the manual for a listing (`manualVersionOf`). Whether the
+ * job's checkout holds Remotion's guides changes the text, and the fixed
+ * paths it is rendered against name no checkout, so that one fact is read
+ * from the job's real paths.
+ */
+export function remotionkcManualVersion(listing: string, paths: VideoPaths): string {
+  const hasGuides = hasRemotionGuides(remotionkcPaths(paths).remotionGuides);
+  return manualVersionOf((wrapper, fixed) => sections(wrapper, listing, fixed, hasGuides));
 }
 
 const AUDIENCE: Record<"new" | "familiar" | "expert", string> = {

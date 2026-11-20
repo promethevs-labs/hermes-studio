@@ -790,9 +790,13 @@ export class VideoRunner {
 
     /* The manual and the settings. */
     let manualHash = this.inheritedManual(record, inherited !== null);
+    // A manual taken from the parent keeps the parent's version, and none when the parent has none.
+    let manualVersion: string | null = manualHash === null ? null : (this.store.get(record.parentJobId ?? "")?.manualVersion ?? null);
     if (manualHash === null || (await manualFile(manualHash)) === null) {
-      const written = await writeManual(backend.manual(paths.wrapper, listing ?? "(the listing could not be read; run the api command)", paths));
+      const manualListing = listing ?? "(the listing could not be read; run the api command)";
+      const written = await writeManual(backend.manual(paths.wrapper, manualListing, paths));
       manualHash = written.hash;
+      manualVersion = backend.manualVersion(manualListing, paths);
     }
     await writeFile(
       paths.settings,
@@ -812,7 +816,7 @@ export class VideoRunner {
       agentEffort = resolved.effort;
     }
     const auth = agentAuth();
-    record = await this.store.update(id, { agentAuth: auth, manualHash, agentModel, agentEffort });
+    record = await this.store.update(id, { agentAuth: auth, manualHash, manualVersion, agentModel, agentEffort });
     // No flag passed runs the CLI's own default under the seal, measured as
     // claude-opus-5 (D53); priced so until the stream names its model.
     entry.meter = new JobCostMeter(agentModel.passed ?? "claude-opus-5");
@@ -914,7 +918,8 @@ export class VideoRunner {
         startedSession = false;
         const written = await writeManual(backend.manual(paths.wrapper, listing ?? "", paths));
         manualHash = written.hash;
-        record = await this.store.update(id, { agentSessionId, manualHash });
+        manualVersion = backend.manualVersion(listing ?? "", paths);
+        record = await this.store.update(id, { agentSessionId, manualHash, manualVersion });
         await this.store.emit(id, {
           type: "phase",
           note: "the earlier session could not be resumed, so the agent starts a fresh one from the source, without the earlier conversation",

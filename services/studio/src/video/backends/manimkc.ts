@@ -9,7 +9,7 @@ import { safeHash, safeRead } from "../copy";
 import { runVideoDoctor } from "../doctor";
 import { prepareBwrap } from "../bwrap";
 import { sandboxedGateTools } from "../gate-tools";
-import { apiListing, manualText } from "../manual";
+import { apiListing, manualText, manualVersionOf } from "../manual";
 import { buildVideoPrompt, buildVideoResumePrompt, buildVideoRetryPrompt, buildVideoRevisePrompt } from "../prompt";
 import { sheetPath } from "../paths";
 import { buildProfile, resolvedStudioHome, type ProfileKind } from "../sandbox";
@@ -91,6 +91,8 @@ export const manimkcBackend: VideoBackend = {
   },
 
   manual: (wrapper, listing, paths) => manualText(wrapper, listing, paths),
+
+  manualVersion: (listing) => manualVersionOf((wrapper, paths) => manualText(wrapper, listing, paths)),
 
   settings(job, input) {
     // The owner's manimkc data root, two levels above its shared TTS cache.

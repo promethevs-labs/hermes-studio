@@ -11,7 +11,7 @@ import { narratedLines, remotionkcClipKeys } from "../remotionkc/clips";
 import { runRemotionkcDoctor } from "../remotionkc/doctor";
 import { REMOTIONKC_GATE } from "../remotionkc/gate";
 import { remotionkcGateTools } from "../remotionkc/gate-tools";
-import { remotionkcApiListing, remotionkcManualText, remotionkcPrompt } from "../remotionkc/manual";
+import { remotionkcApiListing, remotionkcManualText, remotionkcPrompt, remotionkcManualVersion } from "../remotionkc/manual";
 import { remotionkcPaths, remotionkcVideoPaths } from "../remotionkc/paths";
 import { buildRemotionkcProfile } from "../remotionkc/sandbox";
 import { buildRemotionkcSettings } from "../remotionkc/settings";
@@ -92,6 +92,8 @@ export const remotionkcBackend: VideoBackend = {
   },
 
   manual: (wrapper, listing, paths) => remotionkcManualText(wrapper, listing, paths),
+
+  manualVersion: (listing, paths) => remotionkcManualVersion(listing, paths),
 
   settings(job, input) {
     const tools = asRemotionkc(job);

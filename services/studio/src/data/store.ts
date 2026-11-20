@@ -194,6 +194,13 @@ export interface JobRecord {
    */
   manualHash?: string | null;
   /**
+   * The hash of the manual's text with everything job-specific normalised
+   * out, for grouping jobs by manual. A diagram job never sets it: the tldraw
+   * manual's text has no per-job content, so its `manualHash` already is its
+   * version, and the eval report falls back to that.
+   */
+  manualVersion?: string | null;
+  /**
    * The model and effort the agent ran with, each `{ requested, passed,
    * source }` (D53 of docs/STUDIO-VIDEOS.md, `agent-settings.ts`): the
    * brief's model, else the settings panel's Diagrams row, else `sonnet`, and

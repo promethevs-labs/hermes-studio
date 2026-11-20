@@ -122,6 +122,8 @@ export interface VideoJobRecord {
   apiKeySource?: string | null;
   /** The manual the agent's system prompt carried, by its hash (D38). */
   manualHash?: string | null;
+  /** The manual's text with the job's own paths normalised out: what two jobs under one manual share (`manualVersionOf`). */
+  manualVersion?: string | null;
   agentModel?: AgentSetting | null;
   agentEffort?: AgentSetting | null;
   /** The model the session's init event named. */

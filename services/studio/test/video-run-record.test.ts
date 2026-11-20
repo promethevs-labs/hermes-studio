@@ -255,6 +255,7 @@ describe("a video job's run record", () => {
       model: { passed: "sonnet", resolved: "claude-sonnet-5" },
       effort: done.agentEffort?.passed ?? null,
       manualHash: done.manualHash,
+      manualVersion: done.manualVersion,
       auth: done.agentAuth,
       attempts: done.attempts,
       calls: { api: 1, preview: 1, build: 1 },
@@ -263,6 +264,25 @@ describe("a video job's run record", () => {
       transcriptPath: `jobs/${done.id}/session.ndjson`,
     });
     expect(done.runRecordError ?? null).toBeNull();
+  });
+
+  it("records the manual's version beside its hash: two jobs differ in the hash and share the version", async () => {
+    // Each job fails on its first request, so neither holds the video's name against the other.
+    await plan([{ refused: "API Error: 400 stand-in refusal", turns: 1 }]);
+    const first = await runToEnd();
+    const second = await runToEnd();
+
+    expect(first.id).not.toBe(second.id);
+    expect(first.manualHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(second.manualHash).not.toBe(first.manualHash);
+    expect(first.manualVersion).toMatch(/^[0-9a-f]{64}$/);
+    expect(second.manualVersion).toBe(first.manualVersion);
+    expect(first.manualVersion).not.toBe(first.manualHash);
+    // The run record handed to job finish carries it too.
+    for (const done of [first, second]) {
+      const run = JSON.parse(await readFile(finishOf(done.id).runFile!, "utf8")) as { manualHash: string; manualVersion: string };
+      expect(run).toMatchObject({ manualHash: done.manualHash, manualVersion: first.manualVersion });
+    }
   });
 
   it("still writes one for a job that failed on its first request", async () => {
