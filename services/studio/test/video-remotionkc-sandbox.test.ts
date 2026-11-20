@@ -1,5 +1,5 @@
 import { execFile, spawnSync } from "node:child_process";
-import { closeSync, existsSync, openSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, copyFileSync, existsSync, openSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -18,6 +18,11 @@ import { readPorts } from "../src/video/ports";
 import { lanAddress, watchPorts } from "./lan-probe";
 import { remotionkcPaths } from "../src/video/remotionkc/paths";
 import { remotionkcEnv } from "../src/video/remotionkc/sandbox";
+import { cliIn, DOCTOR_PORTS, forgetRemotionkcRender, remotionkcScratchJob, runRemotionkcDoctor } from "../src/video/remotionkc/doctor";
+import { remotionkcGateTools } from "../src/video/remotionkc/gate-tools";
+import { forgetShotPatterns, lastShotPatterns } from "../src/video/remotionkc/shots";
+import { WORKED_COMPOSITION, WORKED_NARRATION, WORKED_TOPIC_YML } from "../src/video/remotionkc/worked";
+import { freePair } from "../src/video/ports";
 import { discoverRemotionkcToolchain, remotionkcProblems, type RemotionkcToolchain } from "../src/video/remotionkc/toolchain";
 
 /**
@@ -53,6 +58,8 @@ let tools: RemotionkcToolchain;
 let root: string;
 let job: BackendJob;
 let classes: string[];
+/** When the job began, before its composition was written: what the gate measures "written during this job" against. */
+let jobStartedAtMs: number;
 /** What the still and build case saw of the render's server from outside: null until it ran, or when there is no LAN address. */
 let lanWatch: { loopbackUp: number; lanReached: number[] } | null = null;
 /** The last scene's extraFrames in the case's composition: half a second at 30 fps. */
@@ -132,6 +139,7 @@ beforeAll(async () => {
   process.env.STUDIO_HOME = path.join(root, "home");
   const backend = backendFor("remotionkc");
   // Not revideokc's suite's job id: the two suites run at once, and the same id would point both jobs at the same port pair.
+  jobStartedAtMs = Date.now() - 1_000;
   const paths = await backend.paths("2e2e2e2e-aaaa-4bbb-8ccc-123456789abc", brief.slug);
   job = { tools, paths, home: realpathSync(process.env.HOME ?? "/"), voice: "af_heart" };
   await backend.prepare(job);
@@ -232,7 +240,10 @@ const tryPort = (port) => new Promise((resolve) => {
     if (skip !== "") return context.skip(skip);
     const { paths } = job;
     const own = remotionkcPaths(paths);
-    const startedAtMs = Date.now() - 1_000;
+    // The job began before the composition was written, in beforeAll; the
+    // cases before this one take longer than the gate's second of slack,
+    // so a start taken here found the composition older than the job.
+    const startedAtMs = jobStartedAtMs;
     const before = snapshot(paths.job);
     const env = { PATH: "/usr/bin:/bin", HOME: job.home, NODE_OPTIONS: "--require /nowhere.js", ANTHROPIC_API_KEY: "sk-not-for-the-job", BROWSERSLIST: "ie 6" };
     const lint = await execFileAsync(paths.wrapper, ["lint"], { env, timeout: 300_000 }).catch((error: { stdout?: string; code?: number }) => error);
@@ -292,6 +303,48 @@ const tryPort = (port) => new Promise((resolve) => {
     // After a verdict the final lines' clips are kept, by their gnosia-audio keys.
     await backendFor("remotionkc").keepClips(job);
     expect((await readdir(paths.clips)).filter((name) => name.endsWith(".wav"))).toHaveLength(2);
+  }, 900_000);
+
+  it("passes the doctor: its fixture of shot patterns voiced, linted, parsed, built and probed inside the profiles, and the shot patterns read", async (context) => {
+    if (skip !== "") return context.skip(skip);
+    forgetRemotionkcRender();
+    forgetShotPatterns();
+    const report = await runRemotionkcDoctor();
+    expect(report.checks.filter((check) => !check.ok), JSON.stringify(report.checks)).toEqual([]);
+    expect(report.checks.map((check) => check.name)).toEqual(expect.arrayContaining(["narration profile", "lint", "gate parse", "render profile", "sidecars", "gate profile"]));
+    expect(report.ok && report.metal && report.kokoro).toBe(true);
+    // The doctor's api read keeps the checkout's patterns for the art director.
+    expect(lastShotPatterns().map((pattern) => pattern.name)).toEqual(expect.arrayContaining(["SequenceDiagram", "Compare", "ArrayView", "EquationFocus", "Stage3D"]));
+    forgetShotPatterns();
+  }, 900_000);
+
+  it("narrates, lints, stills and builds the manual's second worked composition inside the profiles", async (context) => {
+    if (skip !== "") return context.skip(skip);
+    const run = await remotionkcScratchJob(tools, path.join(root, "worked"), await freePair(DOCTOR_PORTS), {
+      slug: "worked-composition",
+      yml: WORKED_TOPIC_YML,
+      narration: WORKED_NARRATION,
+      composition: WORKED_COMPOSITION,
+    });
+    const own = remotionkcPaths(run.paths);
+    const voice = "af_heart";
+    const voiced = await cliIn(run, "narrate", ["narrate", own.topic], voice);
+    expect(voiced.code, voiced.stderr.slice(-1500)).toBe(0);
+    const gate = remotionkcGateTools({ tools, paths: run.paths, home: run.home, voice });
+    const lint = await gate.lint();
+    expect(lint?.errors ?? null).toEqual([]);
+    const still = await cliIn(run, "render", ["still", own.topic, "--no-narrate"], voice);
+    expect(still.code, still.stderr.slice(-1500)).toBe(0);
+    expect(existsSync(own.stillsSheet)).toBe(true);
+    // A build renders every frame, so a pattern that throws part way through a transition fails here.
+    const built = await cliIn(run, "render", ["build", own.topic, "--no-narrate"], voice);
+    expect(built.code, built.stderr.slice(-1500)).toBe(0);
+    // The gate profile reads the candidate folder only, as a job's check does.
+    const copy = path.join(run.paths.candidate, "worked-composition.mp4");
+    copyFileSync(run.paths.deliverable, copy);
+    const probe = await gate.probe(copy);
+    expect(probe?.streams).toEqual(expect.arrayContaining(["video", "audio"]));
+    expect(probe!.duration).toBeGreaterThan(20);
   }, 900_000);
 
   it("never lets the render's server be reached on the machine's LAN address, only on loopback", (context) => {

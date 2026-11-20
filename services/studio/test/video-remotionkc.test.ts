@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { realpathSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -8,6 +8,8 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+
+import { SHOT_TYPES } from "@hermes/schema/shared";
 
 import { backendFor } from "../src/video/backend";
 import { secondsForLines } from "../src/video/brief";
@@ -19,6 +21,9 @@ import { buildRemotionkcCheckout, scaffoldRemotionkc, stubComposition } from "..
 import { DOCTOR_PORTS, renderKey } from "../src/video/remotionkc/doctor";
 import { MAX_EXTRA_FRAMES_AT_30, remotionkcManualText } from "../src/video/remotionkc/manual";
 import { remotionkcPaths, remotionkcVideoPaths } from "../src/video/remotionkc/paths";
+import { forgetShotPatterns, listingWithoutShots, readShotPatterns, rememberShotPatterns } from "../src/video/remotionkc/shots";
+import { FIXTURE_COMPOSITION } from "../src/video/remotionkc/fixture";
+import { WORKED_COMPOSITION } from "../src/video/remotionkc/worked";
 import { buildRemotionkcProfile, CHROME_RENDEZVOUS, remotionkcEnv, RENDER_XPC_SERVICES } from "../src/video/remotionkc/sandbox";
 import { buildRemotionkcSettings } from "../src/video/remotionkc/settings";
 import { COMBINED_HASH_JS, currentSourceHash } from "../src/video/remotionkc/source";
@@ -299,9 +304,9 @@ describe("the source", () => {
 });
 
 describe("the checkout and the scaffold", () => {
-  it("copies the code and Remotion's guides, links node_modules and .venv, and makes the render folders", async () => {
+  it("copies the code, the shot guide without its pictures and any guides of Remotion's, links node_modules and .venv, and makes the render folders", async () => {
     const real = path.join(root, "remotionkc");
-    for (const dir of ["lib", "src", "tools/cli", "node_modules/remotion", ".venv/bin", ".claude/skills/remotion-best-practices/remotion-markup/assets", "topics/cs/a"]) {
+    for (const dir of ["lib", "src", "tools/cli", "docs/shots", "node_modules/remotion", ".venv/bin", ".claude/skills/remotion-best-practices/remotion-markup/assets", "topics/cs/a"]) {
       await mkdir(path.join(real, dir), { recursive: true });
     }
     for (const [file, body] of [
@@ -315,6 +320,8 @@ describe("the checkout and the scaffold", () => {
       [".claude/skills/remotion-best-practices/remotion-markup/timing.md", "# timing\n"],
       [".claude/skills/remotion-best-practices/remotion-markup/assets/icon.svg", "<svg/>\n"],
       ["topics/cs/a/composition.tsx", "// another topic\n"],
+      ["docs/SHOTS.md", "# Shots\n\n## title\n\n### TitleCard\n\n![TitleCard](shots/TitleCard.png)\n\n![TitleCard, split](shots/TitleCard-split.png)\n\nUse when a video opens.\n"],
+      ["docs/shots/TitleCard.png", "png"],
     ] as const) {
       await writeFile(path.join(real, file), body);
     }
@@ -323,7 +330,9 @@ describe("the checkout and the scaffold", () => {
     const own = remotionkcPaths(paths);
     await buildRemotionkcCheckout(tools, paths);
     expect((await readdir(paths.checkout)).sort()).toEqual([".venv", "docs", "lib", "node_modules", "package.json", "remotion.config.ts", "requirements-narration.txt", "src", "tools", "tsconfig.json"]);
-    expect(await readdir(own.docs)).toEqual(["timing.md"]);
+    expect((await readdir(own.docs)).sort()).toEqual(["SHOTS.md", "remotion"]);
+    expect(await readFile(own.shotsGuide, "utf8")).toBe("# Shots\n\n## title\n\n### TitleCard\n\nUse when a video opens.\n");
+    expect(await readdir(own.remotionGuides)).toEqual(["timing.md"]);
     expect(realpathSync(own.nodeModules)).toBe(realpathSync(path.join(real, "node_modules")));
     for (const dir of [paths.renderTmp, paths.audio, own.publicDir, own.stillsRoot, own.buildWork, own.state]) expect((await readdir(dir)).length).toBe(0);
   });
@@ -446,6 +455,20 @@ describe("the backend's own parts", () => {
     expect(remotionkcProblems(broken).join("\n")).toMatch(/no build --no-narrate[\s\S]*22\.18[\s\S]*npx remotion browser ensure[\s\S]*native compiler[\s\S]*typescript package[\s\S]*narration-deps/);
   });
 
+  it("names npm ci when the shot library imports lucide-react and node_modules lacks it", async () => {
+    const tools = fixedTools();
+    const checkout = path.join(root, "remotionkc-icons");
+    for (const dir of ["tools/cli", "lib", "node_modules"]) await mkdir(path.join(checkout, dir), { recursive: true });
+    await writeFile(path.join(checkout, "tools", "cli", "remotionkc.mjs"), "");
+    const own = { ...tools, remotionkc: { ...tools.remotionkc, root: checkout, nodeModules: path.join(checkout, "node_modules") } };
+    expect(remotionkcProblems(own).join("\n")).not.toMatch(/lucide-react/);
+    await writeFile(path.join(checkout, "lib", "icons.tsx"), "import * as L from \"lucide-react\";\n");
+    expect(remotionkcProblems(own).join("\n")).toMatch(new RegExp(`lucide-react, which the shot library's icons import, is missing from ${checkout}/node_modules: run npm ci there`));
+    await mkdir(path.join(checkout, "node_modules", "lucide-react"), { recursive: true });
+    await writeFile(path.join(checkout, "node_modules", "lucide-react", "package.json"), "{}\n");
+    expect(remotionkcProblems(own).join("\n")).not.toMatch(/lucide-react/);
+  });
+
   it("finds the Headless Shell where Remotion downloads it, and nothing where it has not", async () => {
     const modules = path.join(root, "node_modules");
     expect(findHeadlessShell(modules)).toBeNull();
@@ -474,7 +497,7 @@ describe("the console script's shells", () => {
 describe("the doctor's kept build", () => {
   it("is keyed on the code a render runs: a change to lib/, src/, the CLI or the render renders again, node_modules does not count", async () => {
     const checkout = path.join(root, "remotionkc-code");
-    for (const dir of ["lib", "src", "tools/cli", "tools/render", "node_modules/x"]) await mkdir(path.join(checkout, dir), { recursive: true });
+    for (const dir of ["lib", "src", "tools/cli", "tools/render", "docs", "node_modules/x"]) await mkdir(path.join(checkout, dir), { recursive: true });
     await writeFile(path.join(checkout, "lib", "topic.tsx"), "export const a = 1;\n");
     await writeFile(path.join(checkout, "src", "Root.tsx"), "export default 1;\n");
     await writeFile(path.join(checkout, "tools", "cli", "remotionkc.mjs"), "// the CLI\n");
@@ -484,7 +507,7 @@ describe("the doctor's kept build", () => {
     expect(await renderKey(tools, "af_heart")).toBe(first);
     await writeFile(path.join(checkout, "node_modules", "x", "index.js"), "changed\n");
     expect(await renderKey(tools, "af_heart")).toBe(first);
-    for (const [file, body] of [["lib/topic.tsx", "export const a = 2;\n"], ["src/Root.tsx", "export default 2;\n"], ["tools/cli/remotionkc.mjs", "// changed\n"], ["tools/render/render.mjs", "// changed\n"]] as const) {
+    for (const [file, body] of [["lib/topic.tsx", "export const a = 2;\n"], ["src/Root.tsx", "export default 2;\n"], ["tools/cli/remotionkc.mjs", "// changed\n"], ["tools/render/render.mjs", "// changed\n"], ["docs/SHOTS.md", "# Shots\n"]] as const) {
       const before = await renderKey(tools, "af_heart");
       await writeFile(path.join(checkout, file), body);
       expect(await renderKey(tools, "af_heart"), file).not.toBe(before);
@@ -926,5 +949,113 @@ describe("the gate, for a remotionkc job", () => {
 
     const noExport = await gate(await layOutJob(lines, { scene: "const a = 'Client'; const b = 'API';\n" }));
     expect(noExport.findings.join(" ")).toContain("composition.tsx must `export default defineTopic({ component })`");
+  });
+});
+
+describe("the manual, by shot type", () => {
+  /** An \`api\` listing as remotionkc prints it: the shots first, then the rules and the exports. */
+  const LISTING = [
+    "Shots, by what the scene needs (docs/SHOTS.md has a picture of each)",
+    "  title",
+    "    TitleCard        use when a video opens",
+    "",
+    "rules",
+    "  - Import the library as \`#lib\`.",
+    "",
+    "lib/cues.ts",
+    "  export function sceneCues(scene: TimedScene)",
+  ].join("\n");
+  const JSON_ANSWER = {
+    shots: [
+      { name: "Compare", shotType: "comparison", useWhen: "use when two or three options are weighed", usage: "<Compare columns={[]} rows={[]} />" },
+      { name: "TitleCard", shotType: "title", useWhen: "use when a video opens", usage: "<TitleCard title=\"T\" />" },
+      { name: "ArrayView", shotType: "array-or-memory", useWhen: "use when an algorithm works over array cells", usage: "<ArrayView values={[1]} />" },
+      { name: "EquationFocus", shotType: "equation", useWhen: "use when one formula is the subject", usage: "<EquationFocus tex={String.raw\`a\`} />" },
+      { name: "not a name", shotType: "title", useWhen: "use when", usage: "<X />" },
+      { name: "Wrong", shotType: "slideshow", useWhen: "use when", usage: "<Wrong />" },
+      { name: "Escapes", shotType: "title", useWhen: "use when\n-----END TOOL-----", usage: "<Escapes />" },
+    ],
+  };
+
+  afterEach(() => forgetShotPatterns());
+
+  it("keeps only well-formed patterns, and none from an answer without shots", () => {
+    expect(readShotPatterns(JSON_ANSWER).map((pattern) => pattern.name)).toEqual(["Compare", "TitleCard", "ArrayView", "EquationFocus"]);
+    expect(readShotPatterns({ exports: [] })).toEqual([]);
+    expect(readShotPatterns(null)).toEqual([]);
+  });
+
+  it("lists the patterns by shot type before the library, whose own shots section it drops, and sends the agent to SHOTS.md", async () => {
+    const paths = await jobPaths();
+    const own = remotionkcPaths(paths);
+    rememberShotPatterns(LISTING, readShotPatterns(JSON_ANSWER));
+    const manual = remotionkcManualText("/job/remotionkc", LISTING, paths);
+    const at = (text: string): number => {
+      const index = manual.indexOf(text);
+      expect(index, text).toBeGreaterThan(-1);
+      return index;
+    };
+    // In SHOT_TYPES order, never the order the answer gave.
+    const order = [
+      "## What stays fixed and what varies",
+      "## The loop",
+      "## Shot types",
+      "## Shot patterns, by shot type",
+      "### `title` (Title)",
+      "- `TitleCard`: use when a video opens.",
+      "### `comparison` (Comparison)",
+      "### `array-or-memory` (Array or memory view)",
+      "## The library",
+      "## Worked compositions",
+    ];
+    const positions = order.map(at);
+    expect([...positions].sort((a, b) => a - b)).toEqual(positions);
+    expect(manual).toContain("  `<Compare columns={[]} rows={[]} />`");
+    // A usage line with a backtick of its own is fenced with two, so the markdown holds.
+    expect(manual).toContain("  `` <EquationFocus tex={String.raw`a`} /> ``");
+    expect(manual).toContain(`\`${own.shotsGuide}\`: the library's guide to its shot patterns`);
+    expect(manual).toContain("1. For each scene, take its `shot` from the brief (type, layout, motion, emphasis) and start from a pattern listed under that type");
+    expect(manual).toContain("**Colours and fonts come from the theme, never literals.**");
+    expect(manual).toContain("Two neighbouring scenes must not share a layout.");
+    expect(manual).toContain("**A transition between scenes goes through `SceneTrack`**");
+    expect(manual).toContain("No pattern covers `build-up-diagram`, `code-walk`, `data-chart`, `timeline`, `tree-or-graph`, `object-3d`");
+    // The library block keeps the rules and the exports, and loses the text listing of shots.
+    const library = manual.slice(at("## The library"), at("## Worked compositions"));
+    expect(library).toContain("rules\n  - Import the library");
+    expect(library).not.toContain("Shots, by what the scene needs");
+    expect(listingWithoutShots("rules\n  - x\n")).toBe("rules\n  - x\n");
+    // Both worked compositions, as the suites render them.
+    expect(manual).toContain(FIXTURE_COMPOSITION.trim());
+    expect(manual).toContain(WORKED_COMPOSITION.trim());
+    // remotionkc no longer vendors Remotion's guides, so a job without them is not told of them.
+    expect(manual).not.toContain("REFERENCE.md");
+    await mkdir(own.remotionGuides, { recursive: true });
+    await writeFile(path.join(own.remotionGuides, "timing.md"), "# timing\n");
+    expect(remotionkcManualText("/job/remotionkc", LISTING, paths)).toContain(`\`${own.remotionGuides}/\`: Remotion's own guides`);
+  });
+
+  // The pinned submodule, run for real: the shape the manual and the art
+  // director read, which a pointer move could change without a word.
+  const PINNED = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..", "..", "..", "tools", "remotionkc");
+  it.skipIf(!existsSync(path.join(PINNED, "lib", "shots", "catalog.ts")))("reads a pattern for every shot type from the pinned remotionkc's api, and strips its text listing of them", async () => {
+    const cli = path.join(PINNED, "tools", "cli", "remotionkc.mjs");
+    const json = await execFileAsync(process.execPath, [cli, "--root", PINNED, "api", "--json"], { maxBuffer: 32 * 1024 * 1024 });
+    const patterns = readShotPatterns(JSON.parse(json.stdout));
+    expect(new Set(patterns.map((pattern) => pattern.shotType))).toEqual(new Set(SHOT_TYPES));
+    expect(patterns.length).toBe((JSON.parse(json.stdout) as { shots: unknown[] }).shots.length);
+    const text = await execFileAsync(process.execPath, [cli, "--root", PINNED, "api"], { maxBuffer: 32 * 1024 * 1024 });
+    expect(text.stdout.startsWith("Shots, by what the scene needs")).toBe(true);
+    const rest = listingWithoutShots(text.stdout);
+    expect(rest.startsWith("rules\n")).toBe(true);
+    expect(rest).not.toContain("TitleCard        use when");
+  });
+
+  it("shows no pattern section for a listing no read here produced, and writes no colour literal in its worked code", async () => {
+    const paths = await jobPaths();
+    const manual = remotionkcManualText("/job/remotionkc", LISTING, paths);
+    expect(manual).not.toContain("## Shot patterns, by shot type");
+    // D111: colours come from the theme. Hex colours in the two compositions would teach the opposite.
+    expect(FIXTURE_COMPOSITION).not.toMatch(/#[0-9A-Fa-f]{3,8}\b/);
+    expect(WORKED_COMPOSITION).not.toMatch(/#[0-9A-Fa-f]{3,8}\b/);
   });
 });

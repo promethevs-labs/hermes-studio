@@ -87,7 +87,7 @@ least one beat with something the older videos never used:
 | Tool | Read |
 | --- | --- |
 | manimkc | `tools/manimkc/docs/CAPABILITIES.md` |
-| remotionkc | `tools/remotionkc/docs/SHOTS.md` when present, and Remotion's own skills (`tools/remotionkc/.claude/skills/REMOTION-SKILLS.md` says how to install them) |
+| remotionkc | `tools/remotionkc/docs/SHOTS.md` (each shot pattern by shot type, with its props and a thumbnail), and Remotion's own skills (`tools/remotionkc/.claude/skills/REMOTION-SKILLS.md` says how to install them) |
 | revideokc | `tools/revideokc/docs/CAPABILITIES.md` |
 | blenderkc | `tools/blenderkc/docs/KIT.md` |
 
