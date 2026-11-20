@@ -11,6 +11,10 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { DAILY_WINDOW_MS } from '../../../services/studio/src/config.ts';
+import { spendWindow } from '../../../services/studio/src/cost.ts';
+
+import { capEnvValue } from './budget.mjs';
 import { readJobFiles, recordFields, sourceMetrics, turnsOf } from './metrics.mjs';
 import { planFor, runBench, toolReadiness } from './run.mjs';
 import { call, portFree } from './runner.mjs';
@@ -59,8 +63,14 @@ class A1_Start(Scene):
  * and `standalone: { status: 200 | 409 | 429 | 503, scores, defects, cost }` for
  * `POST /api/jobs/{id}/critic`.
  */
-function standIn({ studioHome, scripts, capUsd = 5, doctorAfter = 1, toolAvailable = true }) {
+function standIn({ studioHome, scripts, capUsd = undefined, ledger = [], doctorAfter = 1, toolAvailable = true }) {
   const seen = { posts: [], accepts: [], cancels: [], refusedByGuard: [], health: 0, shots: [], critics: [] };
+  // `runnerCap` is what the runner was started with (the test's `start` sets
+  // it from the env it was given), and `sinceStart` counts health calls
+  // since, so the doctor answers late after every start. `capUsd` overrides
+  // the cap the stand-in reports. `ledger` is what the home spent earlier,
+  // totalled by the studio's own `spendWindow` over its own rolling day.
+  const state = { runnerCap: null, sinceStart: 0, ledger };
   const jobs = new Map();
   let next = 1;
   const send = (res, status, body) => {
@@ -118,10 +128,13 @@ function standIn({ studioHome, scripts, capUsd = 5, doctorAfter = 1, toolAvailab
       const parts = req.url.split('/').filter(Boolean);
       if (req.method === 'GET' && req.url === '/api/health') {
         seen.health += 1;
-        const done = seen.health > doctorAfter;
+        state.sinceStart += 1;
+        const done = state.sinceStart > doctorAfter;
+        const reported = capUsd ?? state.runnerCap;
+        const totalUsd = spendWindow(state.ledger, DAILY_WINDOW_MS, Date.now()).totalUsd;
         return send(res, 200, {
           claude: true,
-          dailyCap: { capUsd, exceeded: false, totalUsd: 0 },
+          dailyCap: { capUsd: reported, exceeded: reported !== null && totalUsd >= reported, totalUsd },
           video: { tools: [{ name: 'manimkc', available: done && toolAvailable, reason: !done ? 'the manimkc doctor has not finished its first check' : toolAvailable ? null : 'this machine cannot make manimkc videos right now: venv: missing' }] },
         });
       }
@@ -206,7 +219,7 @@ function standIn({ studioHome, scripts, capUsd = 5, doctorAfter = 1, toolAvailab
       return send(res, 404, { error: 'no route' });
     });
   });
-  return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve({ server, seen, base: `http://127.0.0.1:${server.address().port}` })));
+  return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve({ server, seen, state, base: `http://127.0.0.1:${server.address().port}` })));
 }
 
 let dir;
@@ -232,15 +245,18 @@ afterEach(async () => {
 /** The deps runBench takes, pointed at the stand-in. `start` is the injected child-runner start. */
 function deps(overrides = {}) {
   const lines = [];
-  const started = { count: 0, stopped: 0, env: null };
+  const started = { count: 0, stopped: 0, env: null, envs: [] };
   return {
     lines,
     started,
     deps: {
-      envFor: (options) => ({ STUDIO_DAILY_USD: String(options.cap), STUDIO_PORT: String(options.port) }),
+      envFor: (options) => ({ STUDIO_DAILY_USD: capEnvValue(options.runnerCapUsd), STUDIO_PORT: String(options.port) }),
       start: async (env) => {
         started.count += 1;
         started.env = env;
+        started.envs.push(env);
+        stand.state.runnerCap = Number(env.STUDIO_DAILY_USD);
+        stand.state.sinceStart = 0;
         return { base: stand.base, stop: async () => (started.stopped += 1, true) };
       },
       call,
@@ -265,16 +281,20 @@ describe('runBench', () => {
     const run = await runBench(options(['a-one', 'b-two', 'c-three', 'd-four'].map(brief)), d);
 
     expect(stand.seen.refusedByGuard).toEqual([]);
-    expect(started).toMatchObject({ count: 1, stopped: 1, env: { STUDIO_DAILY_USD: '5', STUDIO_PORT: '7260' } });
-    // The doctor answered on the second health call; nothing was posted before it.
-    expect(stand.seen.health).toBe(2);
+    // One runner only measures what the home has spent, and is stopped before
+    // the one the run uses starts; on a fresh home both run at the typed cap.
+    expect(started).toMatchObject({ count: 2, stopped: 2, env: { STUDIO_DAILY_USD: '5', STUDIO_PORT: '7260' } });
+    // The measuring runner answered one health call. The run's own doctor
+    // answered on the second one after its start; nothing was posted before it.
+    expect(stand.seen.health).toBe(3);
     expect(stand.seen.posts.map((post) => [post.slug, post.tool, post.model, post.idempotencyKey, post.kind])).toEqual([
       ['a-one-base', 'manimkc', 'sonnet', 'bench-video:base:a-one:1', 'video'],
       ['b-two-base', 'manimkc', 'sonnet', 'bench-video:base:b-two:1', 'video'],
       ['c-three-base', 'manimkc', 'sonnet', 'bench-video:base:c-three:1', 'video'],
     ]);
     expect(stand.seen.accepts).toEqual(['job-1']);
-    expect(lines.filter((line) => line.startsWith('bench: 4 briefs'))).toEqual(['bench: 4 briefs on manimkc, model sonnet, cap $5.00 for this home\'s rolling day']);
+    expect(lines.filter((line) => line.startsWith('bench: 4 briefs'))).toEqual(['bench: 4 briefs on manimkc, model sonnet']);
+    expect(lines).toContain('Home has spent $0.00 in the last 24 hours; this run may spend up to $5.00 more (runner cap $5.00).');
 
     const written = JSON.parse(readFileSync(runFile, 'utf8'));
     expect(written).toEqual(run);
@@ -382,7 +402,7 @@ describe('runBench', () => {
     const run = await runBench(options(['a-one', 'b-two'].map(brief)), stopping.deps);
     expect(stand.seen.cancels).toEqual(['job-1']);
     expect(run.results).toEqual([expect.objectContaining({ id: 'a-one', state: 'stopped', stopped: true, jobId: 'job-1', costUsd: 0.4 })]);
-    expect(stopping.started.stopped).toBe(1);
+    expect(stopping.started.stopped).toBe(2);
 
     stand.seen.posts.length = 0;
     const resumed = await runBench(options(['a-one', 'b-two'].map(brief), { resume: true }), deps().deps);
@@ -430,10 +450,15 @@ describe('run --shots', () => {
     expect(first.results[1]).toMatchObject({ id: 'b-two', jobId: null, state: 'not-posted', shots: { state: 'planned', costUsd: 0.3 } });
 
     await expect(runBench(options(['a-one', 'b-two'].map(brief), { resume: true, cap: 10 }), deps().deps)).rejects.toThrow(/was run with --shots; a resume must ask for shots the same way/);
-    // The owner raises the cap; the runner over the home now reports $10.
+    // The owner raises the cap to $10. The home's rolling day holds the $5.10
+    // the label spent, which counts against the new cap: $4.90 is left, and
+    // the runner's cap is $5.10 + $4.90.
     await new Promise((resolve) => stand.server.close(resolve));
-    stand = await standIn({ studioHome, scripts: { 'b-two': { cost: 1 } }, capUsd: 10 });
-    const resumed = await runBench(options(['a-one', 'b-two'].map(brief), { shots: true, resume: true, cap: 10 }), deps().deps);
+    const now = new Date().toISOString();
+    stand = await standIn({ studioHome, scripts: { 'b-two': { cost: 1 } }, ledger: [{ startedAt: now, finishedAt: now, costUsd: 5.1 }] });
+    const resumeDeps = deps();
+    const resumed = await runBench(options(['a-one', 'b-two'].map(brief), { shots: true, resume: true, cap: 10 }), resumeDeps.deps);
+    expect(resumeDeps.started.envs.map((env) => env.STUDIO_DAILY_USD)).toEqual(['10', '10']);
     expect(stand.seen.shots).toEqual([]);
     const reposted = stand.seen.posts.at(-1);
     expect(reposted.idempotencyKey).toBe('bench-video:base:b-two:2');
@@ -459,7 +484,7 @@ describe('run --shots', () => {
     expect(run.stopReason).toBe('stopped');
     expect(run.results).toEqual([expect.objectContaining({ id: 'a-one', jobId: null, state: 'not-posted', shots: expect.objectContaining({ state: 'planned', costUsd: 0.3 }) })]);
     expect(JSON.parse(readFileSync(runFile, 'utf8')).results[0].shots.brief.scenes[0].shot.type).toBe('title');
-    expect(stopping.started.stopped).toBe(1);
+    expect(stopping.started.stopped).toBe(2);
 
     const resumed = await runBench(options(['a-one'].map(brief), { shots: true, resume: true }), deps().deps);
     expect(stand.seen.shots).toHaveLength(1);
@@ -531,7 +556,7 @@ describe('run --shots', () => {
     expect(stand.seen.posts).toEqual([]);
     expect(run.stopReason).toMatch(/a-one: the runner refused its shot plan at the daily cap/);
     expect(run.results).toEqual([expect.objectContaining({ id: 'a-one', state: 'refused', shots: expect.objectContaining({ state: 'refused' }) })]);
-    expect(d.started.stopped).toBe(1);
+    expect(d.started.stopped).toBe(2);
   });
 });
 
@@ -630,7 +655,7 @@ describe('the critic on a run', () => {
       expect.objectContaining({ id: 'a-one', jobId: 'job-1', state: 'accepted', costUsd: 1.25, checkCostUsd: null, critic: expect.objectContaining({ source: 'job', current: false }) }),
     ]);
     expect(run.results[0].metrics).not.toBeNull();
-    expect(stopping.started.stopped).toBe(1);
+    expect(stopping.started.stopped).toBe(2);
   });
 
   it('stops after the video when the runner cannot run the critic, unless --keep-going', async () => {
@@ -664,7 +689,7 @@ describe('scoreRun', () => {
     const run = await scoreRun(scoreOptions(), d.deps);
     expect(stand.seen.refusedByGuard).toEqual([]);
     expect(stand.seen.critics).toEqual(['job-1', 'job-2']);
-    expect(d.started).toMatchObject({ count: 1, stopped: 1 });
+    expect(d.started).toMatchObject({ count: 2, stopped: 2 });
     const written = JSON.parse(readFileSync(runFile, 'utf8'));
     expect(written).toEqual(run);
     const [one, two, three] = written.results;
@@ -703,7 +728,7 @@ describe('scoreRun', () => {
     expect(stand.seen.critics).toEqual([]);
     expect(run.scoring.stopReason).toBe('stopped');
     expect(JSON.parse(readFileSync(runFile, 'utf8')).results).toEqual(kept);
-    expect(stopping.started.stopped).toBe(1);
+    expect(stopping.started.stopped).toBe(2);
   });
 
   it('stops cleanly at a 429 and stops the runner', async () => {
@@ -714,7 +739,18 @@ describe('scoreRun', () => {
     expect(run.scoring.stopReason).toMatch(/a-one: the runner refused the critic at the daily cap/);
     expect(run.results[0].critic).toMatchObject({ source: 'standalone', passed: null, error: expect.stringMatching(/429 daily-cap/) });
     expect(run.results[1].critic).toBeUndefined();
-    expect(d.started.stopped).toBe(1);
+    expect(d.started.stopped).toBe(2);
+  });
+
+  it('gives a score pass its own cap on top of what the home has spent', async () => {
+    await baseline({});
+    stand.state.ledger = [spentAgo(12.33, 2)];
+    const d = deps();
+    const run = await scoreRun(scoreOptions({ cap: 5 }), d.deps);
+    expect(runnerCaps(d.started)).toEqual(['5', '17.33']);
+    expect(d.lines[0]).toBe('Home has spent $12.33 in the last 24 hours; this scoring may spend up to $5.00 more (runner cap $17.33).');
+    expect(run.scoring).toMatchObject({ capUsd: 5, homeSpentUsd: 12.33, runnerCapUsd: 17.33, spentUsd: 0.24 });
+    expect(JSON.parse(readFileSync(runFile, 'utf8')).scoring).toMatchObject({ capUsd: 5, homeSpentUsd: 12.33, runnerCapUsd: 17.33 });
   });
 
   it('records a job\'s own critic of the build in review without paying for another', async () => {
@@ -738,6 +774,106 @@ describe('scoreRun', () => {
     stand = await standIn({ studioHome, scripts: {}, capUsd: 50 });
     await expect(scoreRun(scoreOptions(), deps().deps)).rejects.toThrow(/daily cap of 50, not the \$5/);
     await expect(scoreRun(scoreOptions({ runFile: join(dir, 'runs', 'none.json') }), deps().deps)).rejects.toThrow(/no run file/);
+  });
+});
+
+/** A ledger entry the home spent `hoursAgo` hours before now, as the runner's own window reads it. */
+const spentAgo = (costUsd, hoursAgo) => {
+  const at = new Date(Date.now() - hoursAgo * 3_600_000).toISOString();
+  return { startedAt: at, finishedAt: at, costUsd };
+};
+
+/** The cap each of a command's two runners was started with: the one that measures, then the one that works. */
+const runnerCaps = (started) => started.envs.map((env) => env.STUDIO_DAILY_USD);
+
+describe('what --cap means for one command', () => {
+  it('on a fresh home, starts the runner at the typed cap', async () => {
+    stand = await standIn({ studioHome, scripts: {} });
+    const d = deps();
+    const run = await runBench(options(['a-one'].map(brief)), d.deps);
+    expect(runnerCaps(d.started)).toEqual(['5', '5']);
+    expect(d.lines[0]).toBe('Home has spent $0.00 in the last 24 hours; this run may spend up to $5.00 more (runner cap $5.00).');
+    expect(run.capUsd).toBe(5);
+    expect(run.capPlan).toEqual({ perCommandUsd: 5, labelSpentUsd: 0, homeSpentUsd: 0, runnerCapUsd: 5 });
+    expect(JSON.parse(readFileSync(runFile, 'utf8')).capPlan).toEqual(run.capPlan);
+    expect(run.results[0].state).toBe('accepted');
+  });
+
+  it('adds what the home spent in its rolling day to the runner cap, so the typed cap is all this run has', async () => {
+    // The 2026-11-20 case: $12.33 already spent, a $50 cap typed.
+    stand = await standIn({ studioHome, scripts: {}, ledger: [spentAgo(10, 3), spentAgo(2.33, 20)] });
+    const d = deps();
+    const run = await runBench(options(['a-one', 'b-two'].map(brief), { cap: 50 }), d.deps);
+    expect(runnerCaps(d.started)).toEqual(['50', '62.33']);
+    expect(d.lines[0]).toBe('Home has spent $12.33 in the last 24 hours; this run may spend up to $50.00 more (runner cap $62.33).');
+    expect(run.capUsd).toBe(50);
+    expect(run.capPlan).toEqual({ perCommandUsd: 50, labelSpentUsd: 0, homeSpentUsd: 12.33, runnerCapUsd: 62.33 });
+    // The runner's room is the typed cap, not the typed cap less the home's spend.
+    expect(stand.state.runnerCap - 12.33).toBeCloseTo(50);
+    expect(run.results.map((result) => result.state)).toEqual(['accepted', 'accepted']);
+  });
+
+  it('does not count spend older than 24 hours', async () => {
+    stand = await standIn({ studioHome, scripts: {}, ledger: [spentAgo(40, 25), spentAgo(7, 24.5), spentAgo(2.5, 1)] });
+    const d = deps();
+    const run = await runBench(options(['a-one'].map(brief), { cap: 5 }), d.deps);
+    expect(runnerCaps(d.started)).toEqual(['5', '7.5']);
+    expect(run.capPlan).toEqual({ perCommandUsd: 5, labelSpentUsd: 0, homeSpentUsd: 2.5, runnerCapUsd: 7.5 });
+  });
+
+  /** A run file of a stopped run that spent `costUsd` on one accepted video. */
+  const stoppedRun = (costUsd) =>
+    JSON.stringify({
+      label: 'base',
+      tool: 'manimkc',
+      model: 'sonnet',
+      capUsd: 5,
+      shotsAsked: false,
+      criticAsked: false,
+      startedAt: '2026-11-19T10:00:00.000Z',
+      endedAt: '2026-11-19T11:00:00.000Z',
+      manualHashes: [],
+      results: [{ id: 'a-old', jobId: 'job-old', state: 'accepted', costUsd, tries: 1 }],
+    });
+
+  it('counts what the label already spent against its cap on a resume, instead of handing it a fresh one', async () => {
+    mkdirSync(join(dir, 'runs'), { recursive: true });
+    writeFileSync(runFile, stoppedRun(4));
+    // The $4 sits in the home's rolling day, with $8.33 from other runs.
+    stand = await standIn({ studioHome, scripts: {}, ledger: [spentAgo(4, 2), spentAgo(8.33, 5)] });
+    const d = deps();
+    const run = await runBench(options(['a-old', 'b-new'].map(brief), { resume: true }), d.deps);
+    // $5 cap less $4 spent is $1 more; the runner holds the home's $12.33 plus that.
+    expect(runnerCaps(d.started)).toEqual(['5', '13.33']);
+    expect(d.lines[0]).toBe('Home has spent $12.33 in the last 24 hours; this run may spend up to $1.00 more (its $5.00 cap less the $4.00 that base already spent) (runner cap $13.33).');
+    expect(run.capPlan).toEqual({ perCommandUsd: 5, labelSpentUsd: 4, homeSpentUsd: 12.33, runnerCapUsd: 13.33 });
+    expect(run.results.map((result) => [result.id, result.state])).toEqual([['a-old', 'accepted'], ['b-new', 'accepted']]);
+  });
+
+  it('subtracts the label spend on a resume even when it has left the rolling day', async () => {
+    mkdirSync(join(dir, 'runs'), { recursive: true });
+    writeFileSync(runFile, stoppedRun(4));
+    stand = await standIn({ studioHome, scripts: {}, ledger: [spentAgo(4, 30)] });
+    const d = deps();
+    const run = await runBench(options(['a-old', 'b-new'].map(brief), { resume: true }), d.deps);
+    expect(runnerCaps(d.started)).toEqual(['5', '1']);
+    expect(run.capPlan).toEqual({ perCommandUsd: 5, labelSpentUsd: 4, homeSpentUsd: 0, runnerCapUsd: 1 });
+  });
+
+  it('starts nothing when a resume finds its label has already reached the cap', async () => {
+    mkdirSync(join(dir, 'runs'), { recursive: true });
+    writeFileSync(runFile, stoppedRun(5.25));
+    stand = await standIn({ studioHome, scripts: {} });
+    const d = deps();
+    const run = await runBench(options(['a-old', 'b-new'].map(brief), { resume: true }), d.deps);
+    expect(d.started.count).toBe(0);
+    expect(stand.seen.posts).toEqual([]);
+    expect(run.stopReason).toBe('base has already spent $5.25, which reaches the $5.00 cap; pass a larger --cap to carry on');
+    // Raising the cap makes room for the rest: $8 less $5.25 is $2.75.
+    const raised = deps();
+    const again = await runBench(options(['a-old', 'b-new'].map(brief), { resume: true, cap: 8 }), raised.deps);
+    expect(runnerCaps(raised.started)).toEqual(['8', '2.75']);
+    expect(again.capPlan).toMatchObject({ perCommandUsd: 8, labelSpentUsd: 5.25, runnerCapUsd: 2.75 });
   });
 });
 
@@ -778,7 +914,7 @@ describe('a run file that cannot be written', () => {
       },
     });
     await expect(runBench(options(['a-one'].map(brief)), failing.deps)).rejects.toThrow(/EACCES/);
-    expect(failing.started.stopped).toBe(1);
+    expect(failing.started.stopped).toBe(2);
   });
 });
 

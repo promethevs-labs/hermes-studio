@@ -3,15 +3,17 @@
 // happens, so a crash or a Ctrl-C leaves a record of what was spent.
 //
 // The order of guards before money moves: the run file and label are checked,
-// the port must be free (so the runner answering is the bench's own), the
-// runner must report the cap it was given and the claude CLI, and the tool's
-// own doctor must pass. Only then is the one line naming the count, tool,
-// model and cap printed, and the first brief posted. During the run the
-// runner's STUDIO_DAILY_USD refuses an enqueue at the cap (429), and the bench
-// also stops before posting once its own recorded costs reach the cap.
+// the port must be free (so the runner answering is the bench's own), what the
+// home has already spent in the runner's rolling day is read (budget.mjs), the
+// runner is started at that spend plus this run's allowance and must report
+// the cap it was given and the claude CLI, and the tool's own doctor must
+// pass. Only then is the first brief posted. During the run the runner's
+// STUDIO_DAILY_USD refuses an enqueue at its cap (429), and the bench also
+// stops before posting once this label's own recorded costs reach `--cap`.
 import { existsSync, readFileSync } from 'node:fs';
 
 import { jobBody, runSlug } from './briefs.mjs';
+import { capLine, capPlan, capRecord, measureHomeSpend, money } from './budget.mjs';
 import { costOf } from './cost.mjs';
 import { criticCurrent, criticFromStandalone, criticFromView, criticRefused, verdictLine } from './critic.mjs';
 import { criticCostOf, recordFields } from './metrics.mjs';
@@ -124,19 +126,20 @@ export { costOf };
 
 /**
  * The spend guards every verb checks on `/api/health` before money moves:
- * the runner reports the cap it was started with and finds the claude CLI
- * (an Error, nothing was posted), and the home's rolling day is under that
- * cap (a Stop). Neither looks at a tool's doctor.
+ * the runner reports the cap it was started with, `runnerCap` (the home's
+ * spend plus this command's allowance, see budget.mjs) and finds the claude
+ * CLI (an Error, nothing was posted), and the home's rolling day is under
+ * that cap (a Stop). Neither looks at a tool's doctor.
  */
-export function checkSpendGuards(health, cap) {
+export function checkSpendGuards(health, runnerCap) {
   if (health.status !== 200) throw new Error(`/api/health answered ${health.status}`);
   const capUsd = health.json?.dailyCap?.capUsd;
-  if (typeof capUsd !== 'number' || Math.abs(capUsd - cap) > 1e-9) {
-    throw new Error(`the runner reports a daily cap of ${capUsd ?? 'none'}, not the $${cap} it was started with; nothing was posted`);
+  if (typeof capUsd !== 'number' || Math.abs(capUsd - runnerCap) > 1e-9) {
+    throw new Error(`the runner reports a daily cap of ${capUsd ?? 'none'}, not the $${runnerCap} it was started with; nothing was posted`);
   }
   if (health.json?.claude === false) throw new Error('the runner cannot find the claude CLI; nothing was posted');
   if (health.json?.dailyCap?.exceeded === true) {
-    throw new Stop(`the scratch home has already spent $${Number(health.json.dailyCap.totalUsd ?? 0).toFixed(2)} of the $${cap} cap in the last 24 hours`);
+    throw new Stop(`the scratch home has already spent ${money(Number(health.json.dailyCap.totalUsd ?? 0))} of the ${money(runnerCap)} runner cap in the last 24 hours`);
   }
 }
 
@@ -181,6 +184,7 @@ export async function runBench(options, deps) {
     tool,
     model,
     capUsd: cap,
+    capPlan: null,
     shotsAsked: askShots,
     criticAsked: askCritic,
     startedAt: existing?.startedAt ?? new Date(now()).toISOString(),
@@ -224,7 +228,21 @@ export async function runBench(options, deps) {
   // before anything is posted leaves no file behind to --resume.
   let begun = existing !== null;
   try {
-    runner = await deps.start(deps.envFor(options));
+    // What this label already spent counts against its cap, so a resume is
+    // never handed a fresh one; nothing is started when none is left.
+    const labelSpentUsd = spent();
+    if (labelSpentUsd >= cap) {
+      throw new Stop(`${label} has already spent ${money(labelSpentUsd)}, which reaches the ${money(cap)} cap; pass a larger --cap to carry on`);
+    }
+    // What the home has spent in the runner's rolling day, asked of a runner
+    // that is stopped again before the one the run uses is started.
+    const homeSpentUsd = await measureHomeSpend(deps, options);
+    if (stopped()) throw new Stop('stopped before the first brief');
+    const plan = capPlan({ cap, homeSpentUsd, labelSpentUsd });
+    run.capPlan = capRecord(plan);
+    log(capLine(plan, 'run', label));
+
+    runner = await deps.start(deps.envFor({ ...options, runnerCapUsd: plan.runnerCapUsd }));
     const base = runner.base;
 
     // Preflight: the cap in force, the CLI, and the tool's doctor.
@@ -233,7 +251,7 @@ export async function runBench(options, deps) {
     for (;;) {
       if (stopped()) throw new Stop('stopped before the first brief');
       const health = await call(base, 'GET', '/api/health', undefined, { timeoutMs: 60_000 });
-      checkSpendGuards(health, cap);
+      checkSpendGuards(health, plan.runnerCapUsd);
       const { ready, reason } = toolReadiness(health.json, tool);
       if (ready === true) break;
       if (ready === false) throw new Error(`${reason}; nothing was posted`);
@@ -245,7 +263,7 @@ export async function runBench(options, deps) {
 
     begun = true;
     save();
-    log(`bench: ${work.length} brief${work.length === 1 ? '' : 's'} on ${tool}, model ${model ?? 'the runner default'}, cap $${cap.toFixed(2)} for this home's rolling day`);
+    log(`bench: ${work.length} brief${work.length === 1 ? '' : 's'} on ${tool}, model ${model ?? 'the runner default'}`);
     if (askShots || askCritic) {
       const asked = [askShots ? "the art director plans each brief's shots first" : null, askCritic ? 'a job with no critic of its build in review gets a standalone check' : null];
       log(`bench: ${asked.filter((line) => line !== null).join('; ')}`);
