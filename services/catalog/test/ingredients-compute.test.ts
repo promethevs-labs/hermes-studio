@@ -7,13 +7,8 @@ import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { assetIngredients } from "../src/index/ingredients";
-import {
-  computeIngredientsForTool,
-  computeStudioIngredients,
-  manimkcLibraryNames,
-  resolveTopicsRoot,
-  storeToolIngredients,
-} from "../src/index/ingredients-scan";
+import { computeStudioIngredients, manimkcLibraryNames, storeToolIngredients } from "../src/index/ingredients-scan";
+import { computeIngredientsForTool, resolveTopicsRoot } from "../src/index/ingredients-tools";
 import { BLENDERKC, MANIMKC, REMOTIONKC, REVIDEOKC, type TopicsReport } from "../src/index/video-tool";
 import { migratedScratchDatabase, probe, type Scratch } from "./scratch-database";
 import { storedBlob } from "./stored-blob";

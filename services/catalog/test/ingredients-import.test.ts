@@ -126,7 +126,7 @@ describe.skipIf(!reachable.ok)("ingredients in catalog import", () => {
 
   it("forwards what makes a scan incomplete, so it does not look whole", async () => {
     // A topic folder past the cut-off for TypeScript tools: the compute half says so in its notes.
-    const { computeIngredientsForTool } = await import("../src/index/ingredients-scan");
+    const { computeIngredientsForTool } = await import("../src/index/ingredients-tools");
     const { BLENDERKC } = await import("../src/index/video-tool");
     const noTopics = await computeIngredientsForTool(
       BLENDERKC,
