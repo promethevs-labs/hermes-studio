@@ -272,6 +272,13 @@ Rules of engagement:
   `topics --json`, which the catalog runs, works without it. It still hands
   gnosia-audio a manimkc checkout (`MANIMKC_ROOT`, or a sibling `../manimkc`),
   because that is where the voice settings live, and so the clip keys.
+- **It has a shot library** (remotionkc #11): a series theme (`seriesTheme`,
+  `ThemeProvider`, `useTheme`), one pattern per shot type in `lib/shots/`,
+  and [docs/SHOTS.md](tools/remotionkc/docs/SHOTS.md), which shows each by
+  shot type. The studio's remotionkc manual lists the patterns by shot type
+  and copies `SHOTS.md` into each job. Its icons import `lucide-react`, so
+  run `npm ci` in `tools/remotionkc` after moving the pointer past it, or
+  every render fails to bundle `#lib` (the studio's doctor says so).
 - The end-to-end process is the `remotionkc-video` skill, which lives in the
   submodule and is symlinked into `.claude/skills/remotionkc-video`.
 

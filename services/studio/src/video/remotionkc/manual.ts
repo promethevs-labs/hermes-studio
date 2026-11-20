@@ -1,3 +1,4 @@
+import { readdirSync } from "node:fs";
 import path from "node:path";
 
 import { run } from "../../proc";
@@ -7,9 +8,11 @@ import { numberedSteps, videoPromptFacing } from "../prompt";
 import { shotTypesSection } from "../shots";
 import type { VideoPromptRequest } from "../backend";
 import type { VideoPaths } from "../paths";
-import { FIXTURE_COMPOSITION } from "./fixture";
+import { FIXTURE_COMPOSITION, FIXTURE_NARRATION } from "./fixture";
 import { remotionkcPaths } from "./paths";
+import { listingWithoutShots, readShotPatterns, rememberShotPatterns, shotPatternsOfListing, shotPatternsSection, type ShotPattern } from "./shots";
 import type { RemotionkcToolchain } from "./toolchain";
+import { WORKED_COMPOSITION, WORKED_NARRATION } from "./worked";
 
 /**
  * The most `extraFrames` a scene can hold at 30 fps and still pass step 7,
@@ -27,16 +30,32 @@ export const MAX_EXTRA_FRAMES_AT_30 = Math.floor((HELD_TAIL_SECONDS - 0.4) * 30 
  * session with one command and no network, as revideokc's manual is its
  * skill's (`../revideokc/manual.ts`).
  *
- * Static sections, plus two read when the job starts: the library listing,
- * from the real checkout's `remotionkc api` (its usage lines come from the
- * checkout's finished topics, which the job's checkout does not have), and
- * the doctor's fixture as the worked composition, which this machine's
- * doctor has rendered inside the same profile. Remotion's own markup guides
- * are copied into the job for the agent to Read rather than pasted here.
+ * Static sections, plus what is read when the job starts: the shot patterns
+ * by shot type, from the real checkout's `remotionkc api --json` (D113 of
+ * docs/STUDIO-LOOK.md), ahead of the rest of its `api` listing (its usage
+ * lines come from the checkout's finished topics, which the job's checkout
+ * does not have); and two worked compositions, the doctor's fixture, which
+ * this machine's doctor has rendered inside the same profile, and
+ * `worked.ts`, which the real-sandbox suite renders. The library's own guide
+ * to its patterns, `docs/SHOTS.md`, is copied into the job for the agent to
+ * Read rather than pasted here.
  */
+
+/** Whether the job's checkout holds Remotion's own guides, which remotionkc no longer vendors. */
+function hasRemotionGuides(dir: string): boolean {
+  try {
+    return readdirSync(dir).some((name) => name.endsWith(".md"));
+  } catch {
+    return false;
+  }
+}
 
 function sections(wrapper: string, listing: string, paths: VideoPaths): string {
   const own = remotionkcPaths(paths);
+  const patterns = shotPatternsOfListing(listing);
+  const guides = hasRemotionGuides(own.remotionGuides)
+    ? `\n- \`${own.remotionGuides}/\`: Remotion's own guides to writing compositions, one file per subject (\`REFERENCE.md\` lists them). Where a guide and this manual disagree (fonts, assets, network, transitions), this manual is right, because your render has no network and your cues must hold.`
+    : "";
   return `# Making a video in the studio
 
 You are the video agent. You make one narrated Remotion explainer (React components rendered frame by frame in headless Chrome) from an approved brief, the way its owner does by hand with the remotionkc-video skill: shape the narration, write the composition, look at the stills, fix, and build. The runner checks your build when you exit.
@@ -58,11 +77,20 @@ A moment is a frame number or a time like \`12.5s\`; with none, \`still\` cuts o
 - \`${paths.sceneFile}\`: the composition, yours. You may add \`.ts\` or \`.tsx\` files beside it and import them (\`./chart\`); data a scene draws goes in a \`.ts\` module there (\`export const SERIES = [...]\`), never a \`.json\` file. Nothing else.
 - \`${own.narration}\`: the narration, the script the person approved, one chapter per scene of the brief: \`[{scene, title, lines}]\`. Yours to adjust as below.
 - \`topic.yml\` beside them is the runner's, and \`lib/\`, \`src/\` and \`tools/\` in the checkout are copies the render reads. Do not edit them.
-- \`${own.docs}/\`: Remotion's own guides to writing compositions, one file per subject (\`REFERENCE.md\` lists them; \`timing.md\`, \`sequencing.md\`, \`transitions.md\`, \`3d.md\`, \`measuring-text.md\` and \`text-highlights.md\` are the ones a teaching video uses most). Read the one you need before writing that part; where a guide and this manual disagree (fonts, assets, network), this manual is right, because your render has no network.
+- \`${own.shotsGuide}\`: the library's guide to its shot patterns: what stays fixed and what varies, how a scene is put together, and each pattern by shot type with its props, defaults and an example. Its pictures are not in the job.${guides}
+
+## What stays fixed and what varies
+
+A series keeps one look, and its scenes differ on purpose:
+
+- **Colours and fonts come from the theme, never literals.** Put one \`seriesTheme()\` in one \`ThemeProvider\` around the whole composition. Read every colour and font with \`useTheme()\` (\`t.color.accent\`, \`t.color.series[1]\`, \`t.color.inkMuted\`, \`t.font.sans\`), or give a pattern a series index (0 to 5) where it takes a colour. No hex string, colour name or font stack in your code.
+- **The heading band is \`SceneFrame\`'s**, at the theme's position in every scene: a kicker, the scene's number and its title. Inside a \`SceneTrack\`, give each scene \`<SceneFrame heading={false}>\` and draw one \`HeadingBand\` above the track, so a transition never blends two titles.
+- **Layout, shot type, motion and transitions vary.** Two neighbouring scenes must not share a layout. When the story puts two scenes of one shot type side by side, change the pattern's \`variant\`, \`orientation\` or \`layout\`, its \`box\`, or its motion.
+- **A transition between scenes goes through \`SceneTrack\`** (\`cut\`, \`fade\`, \`slide\`, \`push\`, \`wipe\`, \`zoom\` or \`iris\`), which keeps every scene at its timeline frame, so every cue still lands. Never Remotion's \`TransitionSeries\`, which starts every later scene early.
 
 ## The loop
 
-1. Plan each scene against the brief: one screen change per line, cued on the word that names it.
+1. For each scene, take its \`shot\` from the brief (type, layout, motion, emphasis) and start from a pattern listed under that type in "Shot patterns, by shot type" below. Read the pattern's entry in \`SHOTS.md\` for its props before you use it. Compose patterns inside \`SceneFrame\` (two side by side each take a \`box\`), and hand-build only what no pattern covers. A brief with no shots: choose each scene's type from what its beats show, the same way. Then plan one screen change per line, cued on the word that names it.
 2. Write the composition. The stub already renders: each scene's title and current line appear on its voice. Replace it scene by scene.
 3. \`lint\`, and fix every error.
 4. \`still\`. It prints one sheet path. **Read the sheet** with the Read tool and look at it. This is the step no tool does.
@@ -80,34 +108,48 @@ You may reword, split or respell a line when the picture or the voice needs it, 
 
 ## Composition code
 
-- \`export default defineTopic({ component, extraFrames? })\` from \`#lib\`; nothing else registers it. The component gets \`{ timeline }\`; draw \`<NarrationTrack timeline={timeline} />\` once at the top, and one \`<Sequence from={s.from} durationInFrames={s.durationInFrames}>\` per scene of \`timeline.scenes\`.
-- Cue each change on the word that names it. Inside a scene: \`const cue = sceneCues(scene)\`, then \`cue.at(line, "word", nth)\`, \`cue.after(line, "phrase")\`, \`cue.end(line)\` (scene-relative frames). Across scenes: \`cues(timeline).word(scene, line, "word")\`. A needle the line does not say throws, naming the line: fix the needle, never the narration's timing.
-- Motion from \`#lib\`: \`ramp\`, \`hold\`, \`hump\`, \`springAt\`, \`track\`, \`keyed\`, easings \`SMOOTH\`, \`OUT\`, \`SOFT\`; Remotion's \`interpolate\` and \`spring\` work too.
-- **Every frame is a pure function of its frame number.** Remotion renders frames out of order on three tabs at once: no \`useFrame()\`, \`Math.random()\` (use Remotion's \`random(seed)\`), \`Date.now()\`, timers, CSS transitions or CSS animations. Set a three.js camera from the frame on every render, as the worked composition does.
-- **Your render has no network.** Fonts are system fonts only (\`"Helvetica Neue", Helvetica, Arial, sans-serif\`, \`Menlo, monospace\`): never \`@remotion/google-fonts\`, which downloads. No image, video or audio from a URL; draw it, or leave it out. Formulas are \`<Tex>\` from \`#lib\` inside one \`<KatexFonts>\`, whose fonts are local.
-- 3D is \`<ThreeCanvas>\` from \`@remotion/three\` with \`@react-three/fiber\` elements, as in the worked composition. It renders on the GPU.
-- Keep content inside 1920x1080 with a margin. Numbers, names and code on screen match what is spoken.
-- Every beat's \`labels\` in the brief must be on screen, and the check looks for each inside a string in your source (a string literal, a template, or JSX text): put the label's text in the node that shows it.
+- \`export default defineTopic({ component, extraFrames? })\` from \`#lib\`; nothing else registers it. The component gets \`{ timeline }\`; draw \`<NarrationTrack timeline={timeline} />\` once at the top, then the scenes: one \`<Sequence from={s.from} durationInFrames={s.durationInFrames}>\` per scene of \`timeline.scenes\`, or one \`SceneTrack\` over them all.
+- Cue each change on the word that names it. Inside a scene: \`const cue = sceneCues(scene)\`, then \`cue.at(line, "word", nth)\`, \`cue.after(line, "phrase")\`, \`cue.end(line)\` (scene-relative frames). Across scenes: \`cues(timeline).word(scene, line, "word")\`. A needle the line does not say throws, naming the line: fix the needle, never the narration's timing. A pattern never reads the narration: hand it these frame numbers (\`at\`, \`steps\`, \`[frame, value]\` keys).
+- Motion from \`#lib\`: entrances \`fadeUp\`, \`fadeSide\`, \`scaleIn\`, \`wipe\`, \`drawOn\` and \`stagger\` (pure functions of the frame that return a style to spread), easings in \`EASE\`, \`Camera\` to pan or zoom within a scene, and \`ramp\`, \`hold\`, \`hump\`, \`springAt\`, \`track\`, \`keyed\`; Remotion's \`interpolate\` and \`spring\` work too.
+- **Every frame is a pure function of its frame number.** Remotion renders frames out of order on three tabs at once: no \`useFrame()\`, \`Math.random()\` (use Remotion's \`random(seed)\`), \`Date.now()\`, timers, CSS transitions or CSS animations. Move a three.js object from the frame on every render, as the worked fixture does.
+- **Your render has no network.** Fonts are the theme's system stacks (\`t.font.sans\`, \`t.font.mono\`): never \`@remotion/google-fonts\`, which downloads. Icons are \`Icon\` from \`#lib\` (a Lucide icon by name, bundled). No image, video or audio from a URL; draw it, or leave it out. A formula is \`EquationFocus\`, which loads KaTeX's local fonts itself, or \`<Tex>\` inside one \`<KatexFonts>\`.
+- 3D is \`Stage3D\` (a \`@remotion/three\` stage with lights, a shadow ground, a camera preset and labels pinned to 3D points) with three.js meshes as its children, as in the worked fixture. It renders on the GPU.
+- Keep content inside the theme's body box, as every pattern does, and inside 1920x1080. Numbers, names and code on screen match what is spoken.
+- Every beat's \`labels\` in the brief must be on screen, and the check looks for each inside a string in your source (a string literal, a template, or JSX text): put the label's text in the prop or node that shows it.
 
-## The library
+${shotTypesSection()}${shotPatternsSection(patterns, path.dirname(own.shotsGuide))}## The library
 
-From the remotionkc checkout. \`api <Name>\` prints one entry again. Its usage lines name the owner's finished topics, which this job cannot open: the line itself is the example.
+From the remotionkc checkout: its rules, then every export. \`api <Name>\` prints one entry again. Its usage lines name the owner's finished topics, which this job cannot open: the line itself is the example.
 
 \`\`\`text
-${listing.trim()}
+${listingWithoutShots(listing).trim()}
 \`\`\`
 
-## A worked composition
+## Worked compositions
 
-This machine's doctor rendered this inside the same sandbox your renders run in: a bar chart from data that springs up on a word, a KaTeX formula, and a lit three.js card whose shadow turns with it.
+Both were rendered on this machine inside the same sandbox your renders run in. The first is the doctor's fixture, rendered again whenever the library changes: an \`EquationFocus\` lit term by term, then a \`Stage3D\` card turning with its shadow, one \`Sequence\` and one \`SceneFrame\` heading per scene. Its narration:
+
+\`\`\`json
+${JSON.stringify(FIXTURE_NARRATION)}
+\`\`\`
 
 \`\`\`tsx
 ${FIXTURE_COMPOSITION.trim()}
 \`\`\`
 
-${shotTypesSection()}## Looking at a sheet
+The second shows three shot types, a \`SequenceDiagram\` (timeline), a \`Compare\` (comparison) and an \`ArrayView\` (array or memory view), in one theme, joined by \`SceneTrack\` transitions under one \`HeadingBand\`, every change cued on its word. Its narration:
 
-In this order: anything cut off at the frame edge; two things overlapping; a label on the wrong row or box; an arrow landing on a neighbour; an object from an earlier beat still on screen; an empty half of the frame. Then the timing: a still at a line's end should show what that line described. If it shows the previous beat, the cue is late; if it shows the next, it is early.
+\`\`\`json
+${JSON.stringify(WORKED_NARRATION)}
+\`\`\`
+
+\`\`\`tsx
+${WORKED_COMPOSITION.trim()}
+\`\`\`
+
+## Looking at a sheet
+
+In this order: anything cut off at the frame edge; two things overlapping; a label on the wrong row or box; an arrow landing on a neighbour; an object from an earlier beat still on screen; an empty half of the frame; two neighbouring scenes with the same layout. Then the timing: a still at a line's end should show what that line described. If it shows the previous beat, the cue is late; if it shows the next, it is early.
 
 The runner checks that you Read the sheet of a \`still\` with no moments, made after your last change to any source file, before any later \`still\` replaced it, and the build's sheet after the last \`build\`. A still of chosen moments is for looking closer; it rewrites the sheet with those moments only, so finish with a \`still\` of every scene.
 
@@ -115,16 +157,19 @@ The runner checks that you Read the sheet of a \`still\` with no moments, made a
 
 - Change the scene names in narration.json, or their order.
 - Reach for other topics, the network, or any file outside the topic folder, \`lib/\`, \`docs/\` and the renders.
-- Read \`lib/\` to find something \`api\` already lists.
+- Read \`lib/\` to find something \`api\` or \`SHOTS.md\` already says.
 `;
 }
 
 /**
  * The library listing from the real checkout's `remotionkc api`, run outside
  * any job with a clean environment: it reads the owner's `lib/` and
- * `topics/` and writes nothing. The names are what `video api` accepts.
+ * `topics/` and writes nothing. The names are what `video api` accepts,
+ * and the shot patterns are `api --json`'s `shots`, kept under the listing
+ * text for the manual and as the latest read for the art director
+ * (`./shots.ts`).
  */
-export async function remotionkcApiListing(tools: RemotionkcToolchain): Promise<{ text: string; names: string[] } | null> {
+export async function remotionkcApiListing(tools: RemotionkcToolchain): Promise<{ text: string; names: string[]; shots: ShotPattern[] } | null> {
   const root = tools.remotionkc.root;
   const cli = path.join(root, "tools", "cli", "remotionkc.mjs");
   const env = { PATH: "/usr/bin:/bin", HOME: process.env.HOME ?? "", LANG: "en_US.UTF-8" };
@@ -136,7 +181,9 @@ export async function remotionkcApiListing(tools: RemotionkcToolchain): Promise<
   const parsed = json.json as { exports?: { name?: unknown }[] } | null;
   const names = new Set<string>();
   for (const entry of parsed?.exports ?? []) if (typeof entry.name === "string") names.add(entry.name);
-  return { text: text.stdout, names: [...names].filter((name) => /^[A-Za-z_][A-Za-z0-9_]{0,60}$/.test(name)).sort() };
+  const shots = readShotPatterns(parsed);
+  rememberShotPatterns(text.stdout, shots);
+  return { text: text.stdout, names: [...names].filter((name) => /^[A-Za-z_][A-Za-z0-9_]{0,60}$/.test(name)).sort(), shots };
 }
 
 /** The manual's text for a job's wrapper and paths, and a listing. */
@@ -165,7 +212,7 @@ export function remotionkcPrompt(request: VideoPromptRequest): string {
         `- The composition, yours: \`${paths.sceneFile}\`. ${request.change ? "It holds the source of the video this change starts from." : "It holds a stub that already renders."} You may add \`.ts\` or \`.tsx\` files beside it.`,
         `- The narration, the script: \`${own.narration}\`. ${request.change ? "It holds the earlier video's lines: bring them to the brief's below." : "It holds the brief's lines, one chapter per scene."}`,
         `- Your one command: \`${paths.wrapper}\` (\`api\`, \`lint\`, \`narrate\`, \`still\`, \`build\`).`,
-        `- Remotion's guides: \`${own.docs}\`; the library: \`${paths.lib}\`.`,
+        `- The shot patterns' guide: \`${own.shotsGuide}\`; the library: \`${paths.lib}\`.`,
         `- The stills and the build's sheet appear under \`${own.stillsDir}\`, the video under \`${paths.outTopic}\`.`,
         ...(request.source === undefined ? [] : [`- Material about the concept, to read and not to copy: \`${request.source}\`.`]),
         ``,

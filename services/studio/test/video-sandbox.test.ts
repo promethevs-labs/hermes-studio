@@ -12,7 +12,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { scratchJob, type DoctorRun } from "../src/video/doctor";
 import { runSandboxed } from "../src/video/exec";
 import { posterArgs } from "../src/video/gate";
-import { WORKED_HEADER, WORKED_NARRATED, WORKED_TABLE } from "../src/video/manual";
+import { WORKED_CHART, WORKED_HEADER, WORKED_NARRATED } from "../src/video/manual";
 import { clipKeys, wordsName } from "../src/video/seed";
 import { discoverToolchain, toolchainProblems, type Toolchain } from "../src/video/toolchain";
 import { wrapperConfig, writeWrapper } from "../src/video/wrapper";
@@ -441,7 +441,7 @@ print(json.dumps(out))
     if (skip !== "") return context.skip(skip);
     const scene = path.join(run.paths.checkout, "topics", "studio", "worked", "worked.py");
     await mkdir(path.dirname(scene), { recursive: true });
-    await writeFile(scene, `${WORKED_HEADER}\n\n${WORKED_NARRATED}\n\n${WORKED_TABLE}`, "utf8");
+    await writeFile(scene, `${WORKED_HEADER}\n\n${WORKED_NARRATED}\n\n${WORKED_CHART}`, "utf8");
     const base = { tools: run.tools, paths: run.paths, home, voice: "af_heart", cwd: run.paths.checkout, timeoutMs: 300_000 };
     const voiced = await runSandboxed({ ...base, kind: "narrate", profile: run.paths.narrateProfile, argv: [path.join(run.paths.checkout, ".venv", "bin", "python"), "lib/narration.py", scene] });
     expect(voiced.code, voiced.stderr.slice(-600)).toBe(0);
@@ -452,7 +452,7 @@ print(json.dumps(out))
       argv: [run.tools.python3!.real, path.join(run.paths.checkout, "tools", "cli", "manimkc"), "--root", run.paths.checkout, "preview", scene, "--no-narration", "--json"],
     });
     const report = JSON.parse(rendered.stdout.slice(rendered.stdout.indexOf("{"))) as { ok: boolean; scenes: { name: string; ok: boolean; sheet: string }[] };
-    expect(report.scenes.map((entry) => [entry.name, entry.ok])).toEqual([["WK1_Pipeline", true], ["WK2_Table", true]]);
+    expect(report.scenes.map((entry) => [entry.name, entry.ok])).toEqual([["WK1_Pipeline", true], ["WK2_Bars", true]]);
     for (const entry of report.scenes) expect(existsSync(entry.sheet)).toBe(true);
   }, 600_000);
 

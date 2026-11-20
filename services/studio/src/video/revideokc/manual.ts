@@ -49,6 +49,13 @@ A moment is a frame number or a time like \`12.5s\`; with none, \`still\` cuts o
 - \`topic.yml\` beside them is the runner's, and \`lib/\`, \`src/\` and \`tools/\` in the checkout are copies the render reads. Do not edit them.
 - \`${own.docs}/CAPABILITIES.md\`: what Revideo can draw, the recipes for the looks this tool exists for, and the traps. **Read it before you write the scene.** \`${own.docs}/REVIDEO-API.md\` is the full API, component by component, for when a signature is not enough.
 
+## What stays fixed and what varies
+
+A series keeps one look, and its chapters differ on purpose:
+
+- **Fixed for the whole video:** one background, one small palette set once as constants at the top of the scene and used everywhere after, the system font stacks, the chapter title at one position and size in every chapter, and the frame's margins.
+- **Varies from chapter to chapter:** the shot type, the layout, the motion and the transition. Two neighbouring chapters must not share a layout: when the story puts two chapters of one shot type side by side, move the picture or change how it arrives.
+
 ## The loop
 
 1. Read CAPABILITIES.md. Plan at least one beat that uses something from its first section (a three.js stage in depth with lights and shadows, filters that push the stage back, additive light, soft shadows, springs, code edited in place); a video of flat boxes belongs to another tool.

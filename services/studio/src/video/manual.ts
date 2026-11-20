@@ -49,22 +49,39 @@ export const WORKED_NARRATED = `class WK1_Pipeline(VoiceScene):
         self.play(FadeOut(VGroup(heading, client, db, api, first, second)))
 `;
 
-/** A narrated worked scene built on `DataTable`. */
-export const WORKED_TABLE = `class WK2_Table(VoiceScene):
-    """Three rows of a table"""
+/**
+ * A narrated worked scene of another shot type, a data chart: bars drawn
+ * from ManimGL's own `Rectangle` and `Text`, each growing from the
+ * baseline on its word, then the tallest marked. No `Tex`, which the studio
+ * does not have.
+ */
+export const WORKED_CHART = `class WK2_Bars(VoiceScene):
+    """Three waits, side by side"""
 
     def construct(self):
-        heading = title_text("Who holds what", size=40)
+        heading = title_text("Cycles per read", size=40)
         heading.to_edge(UP, buff=0.45)
-        table = DataTable(["Key", "Value"], ["1", "2", "3"], cell_w=1.8, title="Cache")
-        table.move_to(DOWN * 0.3)
-        with self.voiceover("The cache starts empty: three rows, nothing in them."):
-            self.play(FadeIn(heading, shift=DOWN * 0.2), FadeIn(table))
-        with self.voiceover("The first write puts the key alpha in row one, with the value seven."):
-            self.play(*table.fill_row(0, ["alpha", "7"]))
-            mark = table.box_row(0)
-            self.play(ShowCreation(mark))
-        self.play(FadeOut(VGroup(heading, table, mark)))
+        base = Line(LEFT * 5, RIGHT * 5, color=GREY_B).move_to(DOWN * 2.4)
+        data = [("Cache", 4, FAR), ("Next level", 12, FORWARD), ("Memory", 40, HAZARD)]
+        bars, names, values = VGroup(), VGroup(), VGroup()
+        for i, (name, cycles, color) in enumerate(data):
+            bar = Rectangle(width=1.8, height=4.4 * cycles / 40, fill_color=color, fill_opacity=0.9, stroke_width=0)
+            bar.move_to(base.get_center() + RIGHT * (i - 1) * 3.2, aligned_edge=DOWN)
+            bars.add(bar)
+            names.add(Text(name, font_size=26, color=GREY_A).next_to(bar, DOWN, buff=0.25))
+            values.add(Text(f"{cycles} cycles", font_size=28).next_to(bar, UP, buff=0.2))
+        with self.voiceover("Reading the cache takes four cycles, the next level twelve, and main memory forty.") as line:
+            self.play(FadeIn(heading, shift=DOWN * 0.2), ShowCreation(base), run_time=0.7)
+            line.wait_until("cache")
+            self.play(GrowFromEdge(bars[0], DOWN), FadeIn(names[0]), FadeIn(values[0], shift=UP * 0.2), run_time=0.6)
+            line.wait_until("level")
+            self.play(GrowFromEdge(bars[1], DOWN), FadeIn(names[1]), FadeIn(values[1], shift=UP * 0.2), run_time=0.6)
+            line.wait_until("memory")
+            self.play(GrowFromEdge(bars[2], DOWN), FadeIn(names[2]), FadeIn(values[2], shift=UP * 0.2), run_time=0.6)
+        with self.voiceover("Memory is ten times slower than the cache."):
+            self.play(bars[0].animate.set_opacity(0.35), bars[1].animate.set_opacity(0.35))
+            self.play(FlashAround(bars[2], color=ACCENT))
+        self.play(FadeOut(VGroup(heading, base, bars, names, values)))
 `;
 
 /** The header every scene file starts with, as `manimkc new` writes it. */
@@ -139,14 +156,21 @@ A scene's chapter title is the first line of its class docstring, else its class
 
 Every beat's \`labels\` must appear on screen, and the check looks for each inside a string literal in that scene's class: put the label's text in the \`Text\`, \`labeled_box\` or \`value_tag\` that shows it.
 
-## The frame and the house style
+## What stays fixed and what varies
+
+A series keeps one look, and its scenes differ on purpose:
+
+- **Fixed for the series:** the palette constants from \`api\` (\`IF_C\`, \`MEM_C\`, \`EX_C\`, \`ACCENT\`, \`HAZARD\` and the rest), never colours of your own; \`Text\` for every word on screen, in the library's fonts; the heading, \`title_text\` at \`to_edge(UP, buff=0.45)\`, in every scene; and the frame bounds below.
+- **Varies from scene to scene:** the shot type, the layout and the motion. Two neighbouring scenes must not share a layout: a row of boxes, then a chart, then a table, then a path, not boxes three times. When the story puts two scenes of one type side by side, move the picture or change how it arrives.
+
+## The frame
 
 - The frame is 14.22 by 8 units. Keep every mobject inside x in [-6.9, 6.9] and y in [-3.8, 3.8].
-- Heading at \`to_edge(UP, buff=0.45)\`; body centred around y = -0.3, so the bottom third is not empty.
+- Body centred around y = -0.3 under the heading, so the bottom third is not empty.
 - Fade the previous beat's objects out before the next beat's come in, unless they are the point of the next beat. A stale caption outliving its beat is the commonest defect.
 - No \`self.wait()\` for pacing in a narrated scene: the voice sets the length.
 - \`Text\` for every word on screen. \`Tex\` is not available in the studio. \`MathTex\`, \`Brace\`, \`Create\` and \`Circumscribe\` do not exist here (ManimGL 1.7.2, not Manim Community): \`ShowCreation\` and \`FlashAround\` are the names.
-- Use the cslib helpers before drawing from primitives: \`labeled_box\`, \`code_text\`, \`code_lines\`, \`DataTable\`, \`CaptionBar\`, \`routed_arrow\`, \`value_tag\`.
+- The cslib helpers are tools for the scenes that need them: \`labeled_box\`, \`code_text\`, \`code_lines\`, \`DataTable\`, \`CaptionBar\`, \`routed_arrow\`, \`value_tag\`. A scene's shot decides what it draws, and a chart, an array or a path built from ManimGL's own shapes (\`Rectangle\`, \`Line\`, \`Arrow\`, \`Dot\`) is as good a scene as a box.
 - Numbers, names and paths on screen match what is spoken.
 
 ## The library
@@ -177,10 +201,10 @@ A narrated scene built from \`labeled_box\` and \`routed_arrow\`, its first line
 ${WORKED_NARRATED.trim()}
 \`\`\`
 
-A narrated scene built on \`DataTable\`:
+A narrated scene of another shot type, a data chart from ManimGL's own shapes, its bars cued on their words:
 
 \`\`\`python
-${WORKED_TABLE.trim()}
+${WORKED_CHART.trim()}
 \`\`\`
 
 ## Known traps

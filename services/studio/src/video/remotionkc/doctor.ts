@@ -15,8 +15,9 @@ import { freePair, writePorts } from "../ports";
 import { resolvedStudioHome, type ProfileKind } from "../sandbox";
 import { VOICES } from "../voices";
 import { buildRemotionkcCheckout, checkoutFingerprint } from "./checkout";
-import { FIXTURE_COMPOSITION, FIXTURE_NARRATION, FIXTURE_TOPIC_YML } from "./fixture";
+import { FIXTURE_COMPOSITION, FIXTURE_LABEL, FIXTURE_NARRATION, FIXTURE_TOPIC_YML } from "./fixture";
 import { remotionkcGateTools } from "./gate-tools";
+import { remotionkcApiListing } from "./manual";
 import { remotionkcPaths, remotionkcVideoPaths } from "./paths";
 import { buildRemotionkcProfile, remotionkcEnv } from "./sandbox";
 import { discoverRemotionkcToolchain, remotionkcProblems, type RemotionkcToolchain } from "./toolchain";
@@ -29,8 +30,8 @@ import { discoverRemotionkcToolchain, remotionkcProblems, type RemotionkcToolcha
  * - The toolchain: remotionkc's half and the parts of manimkc's a job uses.
  * - The hostile probe every Chrome tool runs (`../hostile-probe.ts`), in the
  *   render profile, blocked on every line.
- * - The fixture (`fixture.ts`, a chart with a formula and a lit three.js
- *   card): voiced in the narration profile, checked by `tsc` and parsed by
+ * - The fixture (`fixture.ts`, an `EquationFocus` and a `Stage3D` card in
+ *   the series theme): voiced in the narration profile, checked by `tsc` and parsed by
  *   the gate's parser, built in the render profile (so both ports, the
  *   Headless Shell, WebGL through Metal, the compositor and the system
  *   ffmpeg are proven inside it), its sidecars written in the narration
@@ -80,10 +81,21 @@ export interface RemotionkcScratch {
   base: number;
 }
 
-/** A scratch job with the checkout, the three profiles and the fixture topic, for the doctor and the tests. */
-export async function remotionkcScratchJob(tools: RemotionkcToolchain, directory: string, base: number): Promise<RemotionkcScratch> {
+/** One topic a scratch job holds: its slug, its topic.yml, its narration and its composition. */
+export interface ScratchTopic {
+  slug: string;
+  yml: string;
+  narration: readonly unknown[];
+  composition: string;
+}
+
+/** The doctor's own topic, the fixture. */
+export const FIXTURE_TOPIC: ScratchTopic = { slug: "doctor-fixture", yml: FIXTURE_TOPIC_YML, narration: FIXTURE_NARRATION, composition: FIXTURE_COMPOSITION };
+
+/** A scratch job with the checkout, the three profiles and one topic (the fixture unless told), for the doctor and the tests. */
+export async function remotionkcScratchJob(tools: RemotionkcToolchain, directory: string, base: number, topic: ScratchTopic = FIXTURE_TOPIC): Promise<RemotionkcScratch> {
   await rm(directory, { recursive: true, force: true });
-  const paths = await remotionkcVideoPaths("doctor", "doctor-fixture", directory);
+  const paths = await remotionkcVideoPaths("doctor", topic.slug, directory);
   const home = realpathSync(process.env.HOME ?? "/");
   await buildRemotionkcCheckout(tools, paths);
   await writePorts(paths, base);
@@ -94,9 +106,9 @@ export async function remotionkcScratchJob(tools: RemotionkcToolchain, directory
   for (const each of written) await writeFile(each.file, each.text, "utf8");
   if (tools.sandboxKind === "bwrap") await prepareBwrap(paths, written.map((each) => each.text));
   await mkdir(paths.topicDir, { recursive: true });
-  await writeFile(paths.topicYml, FIXTURE_TOPIC_YML, "utf8");
-  await writeFile(remotionkcPaths(paths).narration, `${JSON.stringify(FIXTURE_NARRATION, null, 1)}\n`, "utf8");
-  await writeFile(paths.sceneFile, FIXTURE_COMPOSITION, "utf8");
+  await writeFile(paths.topicYml, topic.yml, "utf8");
+  await writeFile(remotionkcPaths(paths).narration, `${JSON.stringify(topic.narration, null, 1)}\n`, "utf8");
+  await writeFile(paths.sceneFile, topic.composition, "utf8");
   await mkdir(paths.candidate, { recursive: true });
   return { tools, paths, home, base };
 }
@@ -136,7 +148,7 @@ async function renderFixture(run: RemotionkcScratch, voice: string): Promise<Vid
   const lint = await gate.lint();
   checks.push({ name: "lint", ok: lint !== null && lint.errors.length === 0, detail: lint === null ? "tsc did not answer inside the render profile" : lint.errors.length === 0 ? "tsc found no errors in the fixture" : lint.errors.map((error) => error.msg).join("; ") });
   const parsed = await gate.parseScene!(FIXTURE_COMPOSITION);
-  checks.push({ name: "gate parse", ok: parsed.ok && parsed.defaultExport && parsed.strings.includes("A chart from data"), detail: parsed.ok ? "the TypeScript parser read the fixture inside the gate profile" : `the parse failed: ${parsed.error ?? ""}` });
+  checks.push({ name: "gate parse", ok: parsed.ok && parsed.defaultExport && parsed.strings.includes(FIXTURE_LABEL), detail: parsed.ok ? "the TypeScript parser read the fixture inside the gate profile" : `the parse failed: ${parsed.error ?? ""}` });
   if (!(await step("render profile", "render", ["build", topic, "--no-narrate"], "the fixture built: the Headless Shell, WebGL and both ports inside the sandbox"))) return checks;
   if (!(await step("sidecars", "narrate", ["sidecars", topic], "the transcript, chapters and captions were written"))) return checks;
   const copy = path.join(run.paths.candidate, "doctor-fixture.mp4");
@@ -156,6 +168,10 @@ export async function runRemotionkcDoctor(): Promise<VideoDoctorReport> {
   checks.push({ name: "toolchain", ok: problems.length === 0, detail: problems.length === 0 ? "every program the profiles name was found" : problems.join("; ") });
   const voices = VOICES.map((voice) => voice.id).filter((id) => tools.voicesInstalled.includes(id));
   checks.push({ name: "voices", ok: voices.length > 0, detail: voices.length > 0 ? `installed: ${voices.join(", ")}` : "no kokoro voice from the list is installed" });
+  // The library listing, read once per check outside any job: it keeps the
+  // checkout's shot patterns where the art director's TOOL block takes them
+  // (`shots.ts`), so a plan never starts a subprocess of its own.
+  if (problems.length === 0) await remotionkcApiListing(tools).catch(() => null);
   const pathProblem = commandPathProblem(resolvedStudioHome(), tools.node);
   if (pathProblem !== null) checks.push({ name: "studio home", ok: false, detail: pathProblem });
   let sandbox = false;

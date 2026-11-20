@@ -490,11 +490,11 @@ failing without it, under the default `STUDIO_HOME` (inside this repository):
 | narrate profile | revideokc's, for the same gnosia-audio in remotionkc's own `.venv`; `/bin/sh` and the shell macOS runs as `sh` are allowed only when uv wrote the console script in its `#!/bin/sh` form, which it does for an interpreter path too long for a shebang (measured: a checkout under the session's temporary directory got it, and narration died on "Failed to exec /bin/bash as variant for /bin/sh") |
 | gate profile | revideokc's, but the parse uses the studio's own TypeScript (6), since remotionkc's TypeScript 7 is a native compiler with no JavaScript API; the parse needs only the syntax |
 | Wrapper | `api`, `lint` (the native `tsc`, run directly), `narrate`, `still` (narrate, then `still --no-narrate`), `build` (narrate, `build --no-narrate` at remotionkc's concurrency of three, then `sidecars` in the narrate profile), with revideokc's pipes, held-port check and records |
-| Checkout | `lib/`, `src/`, `tools/`, `package.json`, `tsconfig.json`, `remotion.config.ts` and `requirements-narration.txt` copied; Remotion's markup guides (the `remotion-markup` part of the skill remotionkc vendors) copied to `docs/remotion/` for the agent; `node_modules` and `.venv` linked |
+| Checkout | `lib/`, `src/`, `tools/`, `package.json`, `tsconfig.json`, `remotion.config.ts` and `requirements-narration.txt` copied; the shot library's guide copied to `docs/SHOTS.md` without its thumbnail lines; Remotion's markup guides copied to `docs/remotion/` only when the real checkout still has them (remotionkc stopped vendoring them, so on most machines there are none); `node_modules` and `.venv` linked |
 | Topic | `topic.yml`, `narration.json` from the brief, and `remotionkc new`'s composition with its one word cue taken out (it cued "scene", which a brief's line need not say, and a cue on an unsaid word throws) |
 | Gate | Steps 1 to 3 and 10 as revideokc's, on `composition.tsx`; a chapter's `hold` is refused by name, since remotionkc holds a scene with `extraFrames` in code |
-| Manual | `remotionkc-video` and remotionkc's cue, determinism and gotcha sections rewritten for one command and no network (no `@remotion/google-fonts`, no remote media), `remotionkc api`'s listing, and the doctor's fixture as the worked composition |
-| Doctor | revideokc's checks, on a fixture of a bar chart that springs up on a word with a KaTeX formula, then a lit three.js card whose shadow turns (`@remotion/three`). Under the default `STUDIO_HOME` the whole doctor took 61 s: 19 s to voice two lines in a fresh job cache (the model load is most of it), 40 s for the build (6 s of it the bundle) |
+| Manual | `remotionkc-video` and remotionkc's cue, determinism and gotcha sections rewritten for one command and no network (no `@remotion/google-fonts`, no remote media), the shot patterns by shot type, `remotionkc api`'s listing, and two worked compositions ("The manual by shot type" below) |
+| Doctor | revideokc's checks, on a fixture of two shot patterns in the series theme: an `EquationFocus` lit term by term (KaTeX), then a `Stage3D` card whose shadow turns (`@remotion/three`). It also reads `api --json` once per check, which keeps the shot patterns for the art director. Before the shot library the fixture was a hand-built bar chart. Under the default `STUDIO_HOME` the whole doctor took 61 s: 19 s to voice two lines in a fresh job cache (the model load is most of it), 40 s for the build (6 s of it the bundle) |
 | Tests | `test/video-remotionkc.test.ts` (31: profiles, environment, ports, source, checkout, scaffold, permissions, wrapper, gate) and `test/video-remotionkc-sandbox.test.ts` (4, real: the probe's 18 attempts blocked, the port pair and no other, the wrapper with its streams on a refused file, and `lint`, `still`, `build` and the gate under a refused `package.json` with a browserslist key above the studio home), 46 s |
 | Catalog | `video put` takes `composition.tsx`, `narration.json`, `.ts`, `.tsx` and `topic.yml` for a brief whose `tool` is remotionkc, and requires the composition and the narration |
 
@@ -509,6 +509,36 @@ Where this differs from the decisions above, and why:
   review, and the submodule pointer moves once they merge (Workflow 1).
 - **A silent remotionkc brief is refused**, as revideokc's is: its build
   refuses a video with no audio.
+
+### The manual by shot type (D113 of STUDIO-LOOK.md)
+
+remotionkc #11 gave the tool a shot library: a theme (`seriesTheme`,
+`ThemeProvider`, `useTheme`), a pattern for every shot type under
+`lib/shots/`, motion presets, `SceneTrack` transitions that move no scene in
+time, Lucide icons, and `docs/SHOTS.md`. The submodule pointer moved to it
+(`e9f11380`), and the remotionkc manual is now built around it:
+
+| Section | What it says |
+| --- | --- |
+| Your files | `docs/SHOTS.md` in the job, the library's guide to each pattern's props, without its pictures. Remotion's own guides only when the job has them |
+| What stays fixed and what varies | D111 for this tool: colours and fonts from the theme, never literals; the heading band is `SceneFrame`'s (or one `HeadingBand` over a `SceneTrack`); layout, shot type, motion and transitions vary, and neighbouring scenes never share a layout; a transition goes through `SceneTrack` |
+| The loop | Step 1: for each scene, take its `shot` and start from a pattern under its type, read the pattern in `SHOTS.md`, compose inside `SceneFrame`, and hand-build only what no pattern covers |
+| Shot patterns, by shot type | Built from `remotionkc api --json`'s `shots`, grouped in `SHOT_TYPES` order under each type's label, each pattern with its use-when and usage line. Never ordered or annotated by past use. It comes before the library listing, whose own text section of shots is dropped |
+| Worked compositions | The doctor's fixture (`EquationFocus`, `Stage3D`) and `video/remotionkc/worked.ts` (`SequenceDiagram`, `Compare`, `ArrayView` joined by `SceneTrack` under one `HeadingBand`), each with its narration |
+
+Every worked composition is rendered on this machine: the doctor renders its
+fixture, and `test/video-remotionkc-sandbox.test.ts` runs the doctor and
+narrates, lints, stills and builds `worked.ts` inside the job's profiles.
+
+The art director's TOOL block lists the same patterns by shot type (name and
+use-when line) for a remotionkc brief. It takes them from the last `api`
+read, which the doctor makes at the studio's start and on each refresh and
+every job makes for its manual, so a shot plan starts no subprocess of its
+own. Before the first read, and for the other tools, the block has none.
+
+The toolchain names `npm ci` in the remotionkc checkout when `lib/icons.tsx`
+is there and `node_modules` has no `lucide-react`, which a tree installed
+before this pointer move lacks.
 
 ## Paid end-to-end jobs
 

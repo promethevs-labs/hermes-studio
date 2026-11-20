@@ -276,6 +276,12 @@ export function remotionkcProblems(tools: Toolchain): string[] {
     if (own.compositor === null) problems.push("Remotion's compositor package for this platform is missing from node_modules");
     if (own.esbuild === null) problems.push("esbuild's binary for this platform is missing from node_modules, so a composition cannot be bundled");
     if (own.tsc === null) problems.push("TypeScript's native compiler for this platform is missing from node_modules, so a composition cannot be checked");
+    // The shot library's icons (remotionkc #11) import lucide-react, which a
+    // node_modules installed before that pointer move does not hold: every
+    // bundle then fails on `#lib`, whatever the composition draws.
+    if (existsSync(path.join(own.root, "lib", "icons.tsx")) && !existsSync(path.join(own.nodeModules, "lucide-react", "package.json"))) {
+      problems.push(`lucide-react, which the shot library's icons import, is missing from ${own.root}/node_modules: run npm ci there`);
+    }
   }
   if (own.parser === null) problems.push("the studio's own typescript package is missing, so the gate cannot parse a composition: run npm ci in this repository");
   if (own.narrationPython === null) problems.push(`gnosia-audio is not installed in ${own.root}/.venv: run npm run narration-deps there`);

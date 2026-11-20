@@ -19,7 +19,8 @@ import { remotionkcPaths } from "./paths";
  *   composition and import it), and nothing else. `topic.yml`, the
  *   checkout's copies and `render/` are the runner's.
  * - **Read** covers the topic folder (the working directory), the checkout's
- *   `lib/` and `docs/remotion/` copies, and the renders the agent looks at
+ *   `lib/` and `docs/` copies (the shot guide, `SHOTS.md`, and any guides of
+ *   Remotion's under `docs/remotion/`), and the renders the agent looks at
  *   (`render/out/` and `render/stills/`), which are the session's
  *   `--add-dir`s, and the brief's source note.
  * - The clean-room rule names the real remotionkc checkout's `topics/` and the
