@@ -1,4 +1,4 @@
-import type { JobReview, JobState } from "@hermes/schema/shared";
+import { CRITIC_DIMENSIONS, type CriticDimension, type JobReview, type JobState } from "@hermes/schema/shared";
 import type { VideoChapter } from "@hermes/tutor/media";
 
 import { assetFileHref, assetStatusHref } from "@/lib/library";
@@ -45,6 +45,7 @@ const VIDEO_STEP_NAMES = [
   "build",
   "check",
   "poster",
+  "critic",
   "ready",
 ] as const;
 
@@ -135,6 +136,27 @@ export interface VideoJob {
   brief?: VideoBrief;
   /** What a person decided about the cut, and why. Optional: a runner one version behind sends none. */
   review?: JobReview | null;
+  /** The picture check's latest scores and findings, or null when no critic scored the job. Optional, as `review`. */
+  critic?: VideoCritic | null;
+}
+
+/** One thing the picture check found in a named scene (the scene's class). */
+export interface CriticDefect {
+  scene: string;
+  problem: string;
+  fix: string;
+}
+
+/** The runner's `critic` on a video job (`criticView` in `video/critic.ts`). */
+export interface VideoCritic {
+  /** The attempt the scores judged, and how many the job ran. */
+  attempt: number;
+  attempts: number;
+  scores: Record<CriticDimension, number>;
+  defects: CriticDefect[];
+  notes: string[];
+  /** Defects of an earlier attempt that went back to the agent. */
+  sentBack: CriticDefect[];
 }
 
 /** One entry of `GET /api/jobs/{id}/sheets`: the latest contact sheet of one scene. */
@@ -320,6 +342,7 @@ const STEP_LABELS: Record<VideoStepName, string> = {
   build: "Build",
   check: "Check",
   poster: "Poster",
+  critic: "Picture check",
   ready: "Ready for review",
 };
 
@@ -335,6 +358,7 @@ const DOING: Record<VideoStepName, string> = {
   build: "Building the video",
   check: "Checking the video",
   poster: "Cutting the poster",
+  critic: "Checking the picture",
   ready: "Ready to review",
 };
 
@@ -403,6 +427,8 @@ export function stepRows(job: VideoJob): StepRow[] {
   const rows: StepRow[] = [];
   for (const name of VIDEO_STEP_NAMES) {
     if (name === "narration" && !narrated) continue;
+    // The picture check is a step only where the runner runs one and says so.
+    if (name === "critic" && !sent.has("critic")) continue;
     const step = sent.get(name);
     let status: StepStatus;
     if (job.state === "queued") status = name === "storyboard" ? "done" : "pending";
@@ -493,7 +519,9 @@ export function videoHeadline(job: VideoJob): string {
 export function videoStepCount(job: VideoJob): string | null {
   const step = currentStep(job);
   if (step === null) return null;
-  const names = VIDEO_STEP_NAMES.filter((name) => name !== "narration" || isNarratedJob(job));
+  const names = VIDEO_STEP_NAMES.filter(
+    (name) => (name !== "narration" || isNarratedJob(job)) && (name !== "critic" || job.steps.some((entry) => entry.name === "critic")),
+  );
   const at = names.indexOf(step);
   return at < 0 ? null : `Step ${at + 1} of ${names.length}`;
 }
@@ -873,4 +901,64 @@ export function readJobLookup(answer: { status: number; body: unknown } | { erro
     return { kind: "failed", reason: "the runner's answer was not a job" };
   }
   return { kind: "found", body: body as { kind?: string; jobId?: string } & Record<string, unknown> };
+}
+
+/* -------------------------------------------------------------------------- */
+/* The picture check                                                          */
+/* -------------------------------------------------------------------------- */
+
+/** Each critic score's label in the review, in the runner's order. */
+export const CRITIC_LABELS: Record<CriticDimension, string> = {
+  accuracy: "Matches the words",
+  layout: "Layout",
+  relevance: "Relevance",
+  variety: "Variety",
+  pacing: "Pacing",
+};
+
+/** A score at or under this reads in the warning colour. */
+export const CRITIC_LOW_SCORE = 3;
+
+export interface CriticTile {
+  dimension: CriticDimension;
+  label: string;
+  /** "4 / 5". */
+  value: string;
+  low: boolean;
+}
+
+export interface CriticLine {
+  /** `sent back`: an earlier attempt's defect the agent was asked to fix; `open`: the last attempt's; `note`: a remark. */
+  kind: "sent back" | "open" | "note";
+  /** "<Scene title>: <problem>", or the note. */
+  text: string;
+}
+
+/**
+ * The review's picture check block, from the runner's `critic`: five tiles
+ * in the runner's order, then one line per defect sent back, per defect
+ * still open, and per note. Null when no critic scored the job.
+ */
+export function pictureCheck(
+  job: Pick<VideoJob, "critic" | "classes" | "brief">,
+  chapters: readonly VideoChapter[] | null = null,
+): { attempt: string; tiles: CriticTile[]; lines: CriticLine[] } | null {
+  const critic = job.critic ?? null;
+  if (critic === null) return null;
+  const tiles = CRITIC_DIMENSIONS.map((dimension): CriticTile => {
+    const score = critic.scores[dimension];
+    return { dimension, label: CRITIC_LABELS[dimension], value: `${score} / 5`, low: score <= CRITIC_LOW_SCORE };
+  });
+  const defect =
+    (kind: CriticLine["kind"]) =>
+    (entry: CriticDefect): CriticLine => ({ kind, text: `${sceneTitle(job, entry.scene, chapters)}: ${entry.problem}` });
+  return {
+    attempt: `attempt ${critic.attempt} of ${critic.attempts}`,
+    tiles,
+    lines: [
+      ...critic.sentBack.map(defect("sent back")),
+      ...critic.defects.map(defect("open")),
+      ...critic.notes.map((note): CriticLine => ({ kind: "note", text: capitalised(note) })),
+    ],
+  };
 }

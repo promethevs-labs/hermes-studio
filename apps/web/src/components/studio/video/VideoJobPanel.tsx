@@ -14,9 +14,10 @@ import { useJobVerb } from "@/components/studio/use-job-verb";
 import { FADE_IN } from "@/components/ui/motion";
 import { FadeImg } from "@/components/studio/motion-parts";
 import { useJobEvents, useSheets, useTranscript, useVideoJob } from "@/components/studio/video/use-video-job";
+import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Callout } from "@/components/ui/Callout";
-import { buttonClasses, cx, FOCUS, LABEL } from "@/components/ui/classes";
+import { buttonClasses, cx, FOCUS, LABEL, type BadgeTone } from "@/components/ui/classes";
 import { composerKey } from "@/components/ui/composer-keys";
 import { Collapse } from "@/components/ui/Collapse";
 import { Disclosure } from "@/components/ui/Disclosure";
@@ -27,6 +28,7 @@ import { useFollowFoot } from "@/components/ui/use-follow-foot";
 import { ErrorText } from "@/components/ui/ErrorText";
 import { VideoPlayer } from "@/components/VideoPlayer";
 import { modelName } from "@/lib/model-name";
+import { capitalised } from "@/lib/sentence";
 import { announceOpener, leaveOpener, sessionStore } from "@/lib/studio-extend";
 import { isActive, narration, type StudioEvent } from "@/lib/studio-jobs";
 import { jobVerbPath } from "@/lib/studio-job-verb";
@@ -45,6 +47,7 @@ import {
   logLine,
   mediaFiles,
   mediaHref,
+  pictureCheck,
   readyHeadline,
   reviewActions,
   sceneTitle,
@@ -56,6 +59,7 @@ import {
   videoHeadline,
   videoStepCount,
   type ContactSheet,
+  type CriticLine,
   type StepRow,
   type VideoJob,
 } from "@/lib/studio-video-job";
@@ -677,6 +681,7 @@ function Review({
 
       {changes.length > 0 && <ChangedLines lines={changes} />}
       {job.gate !== null && ready && <Checks job={job} />}
+      <PictureCheck job={job} chapters={chapters} />
       <Actions job={job} path={path} accept={actions.accept} discard={actions.discard} change={actions.change} />
     </div>
   );
@@ -817,6 +822,51 @@ function Checks({ job }: { job: VideoJob }) {
           ))}
         </ul>
       </Collapse>
+    </section>
+  );
+}
+
+const LINE_TONE: Record<CriticLine["kind"], BadgeTone> = { "sent back": "accent", open: "warn", note: "muted" };
+
+/**
+ * The picture check (docs/STUDIO-VIDEOS.md, "The critic"): a critic's five
+ * scores on the contact sheets of the attempt it judged, then what it found.
+ * A defect an earlier attempt sent back to the agent is marked so, one the
+ * last attempt still has is open, and a note is only a remark. Nothing when
+ * no critic scored the job.
+ */
+export function PictureCheck({ job, chapters }: { job: VideoJob; chapters: VideoChapter[] | null }) {
+  const labelId = useId();
+  const check = pictureCheck(job, chapters);
+  if (check === null) return null;
+  return (
+    <section aria-labelledby={labelId} className="min-w-0">
+      <div className="flex flex-wrap items-baseline gap-2">
+        <h3 id={labelId} className={LABEL}>
+          Picture check
+        </h3>
+        <span className="text-[12px] text-text3">{capitalised(check.attempt)}</span>
+      </div>
+      <ul className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-5">
+        {check.tiles.map((tile) => (
+          <li key={tile.dimension} className="flex min-w-0 flex-col gap-0.5 rounded-xl bg-surface2 px-3 py-2">
+            <span className="truncate text-[12px] leading-4 text-text3">{tile.label}</span>
+            <span className={cx("text-[14px] leading-5 font-semibold tabular-nums", tile.low ? "text-warn-text" : "text-text")}>{tile.value}</span>
+          </li>
+        ))}
+      </ul>
+      {check.lines.length > 0 && (
+        <ul className="mt-3 flex flex-col gap-1.5">
+          {check.lines.map((line, at) => (
+            <li key={at} className="flex min-w-0 items-start gap-2 text-[13px] leading-5 text-text2">
+              <Badge tone={LINE_TONE[line.kind]} className="shrink-0">
+                {capitalised(line.kind)}
+              </Badge>
+              <span className="min-w-0 flex-1 pt-0.5 break-words">{line.text}</span>
+            </li>
+          ))}
+        </ul>
+      )}
     </section>
   );
 }

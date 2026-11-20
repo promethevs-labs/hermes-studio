@@ -8,6 +8,7 @@ import { BriefError, loadVocabulary } from "../diagram/brief";
 import { JobRefused } from "../diagram/runner";
 import { validateVideoBrief } from "./brief";
 import { backendFor, type SheetEntry } from "./backend";
+import { criticRunView, criticView } from "./critic";
 import { isLook, readCalls } from "./calls";
 import { candidateNames, type VideoPaths } from "./paths";
 import { briefTool } from "./tools";
@@ -100,6 +101,9 @@ export function videoView(record: VideoJobRecord): Record<string, unknown> {
     // A person's verdict detail, `{ verdict, tags, note, at }`: a discard's
     // reason, an accept, or a revise on the job it revised. Null when none.
     review: record.review ?? null,
+    // The picture check (`critic.ts`): the latest scored run, its defects and
+    // notes, and the defects an earlier attempt sent back. Null when none scored.
+    critic: criticView(record),
     note: videoNote(record),
   };
 }
@@ -225,6 +229,12 @@ export async function videoJobRoutes(
         if (carried !== null) await drafts!.markDrawing(carried, next.id, "video");
         return send(response, 201, { jobId: next.id, state: next.state, parentJob: id, note: `queued, continuing ${id}` });
       }
+      case "POST critic": {
+        // A picture check of a video already made, from its kept sheets; it
+        // retries nothing (docs/STUDIO-VIDEOS.md, "The critic").
+        const run = await runner.criticRun(id);
+        return send(response, 200, { jobId: id, critic: criticRunView(run) });
+      }
       case "GET sheets":
         if (segments.length === 4) return sheetList(response, record);
         if (segments.length === 5) return sheetBytes(response, record, segments[4] ?? "");
@@ -234,7 +244,7 @@ export async function videoJobRoutes(
         return fail(response, 404, `no route ${method} ${url.pathname}`);
       default:
         return fail(response, 404, `no route ${method} ${url.pathname}`, {
-          routes: ["GET events|log|sheets|sheets/{scene}.png|media/{file}", "POST cancel|accept|discard|revise|resume"],
+          routes: ["GET events|log|sheets|sheets/{scene}.png|media/{file}", "POST cancel|accept|discard|revise|resume|critic"],
         });
     }
   } catch (error) {

@@ -5,6 +5,7 @@ import type { AgentAuth } from "../config";
 import type { CostSource } from "../cost";
 import type { GateStep } from "../data/store";
 import type { ValidVideoBrief } from "./brief";
+import type { CriticRun } from "./critic";
 import type { DeadTools } from "./dead-tools";
 
 /**
@@ -70,7 +71,7 @@ export interface VideoGateResult {
 
 /** One step of the manimkc-video skill, as the job view lists it. */
 export interface VideoStep {
-  name: "storyboard" | "narration" | "setup" | "scene-code" | "lint" | "preview" | "look" | "build" | "check" | "poster" | "ready";
+  name: "storyboard" | "narration" | "setup" | "scene-code" | "lint" | "preview" | "look" | "build" | "check" | "poster" | "critic" | "ready";
   state: "pending" | "running" | "done" | "failed";
   rounds: number;
   note: string | null;
@@ -151,4 +152,12 @@ export interface VideoJobRecord {
   runRecordError?: string | null;
   /** A person's verdict detail, kept beside the catalog's `job.review`. Null until one is written. */
   review?: JobReview | null;
+  /**
+   * Every picture check the job had, in order (`critic.ts`): each attempt's
+   * after its gate passed, and any from the standalone route, with the whole
+   * text of what it found, the sheets it read and why it gave nothing when it
+   * did not. Absent on a record from before the critic, which reads as none.
+   * The attempt's scores alone go on `attempts[n].critic` for the run record.
+   */
+  critic?: CriticRun[];
 }

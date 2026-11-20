@@ -15,6 +15,7 @@ import {
   reviseNote,
   runFileFor,
   startAttempt,
+  withAttemptCritic,
   withAttemptGate,
   type AttemptStart,
 } from "../data/run-record";
@@ -31,8 +32,31 @@ import { isNarrated, type ValidVideoBrief } from "./brief";
 import { briefTool, DEFAULT_VIDEO_TOOL, notInStudio, type VideoToolName } from "./tools";
 import { backendFor, type BackendJob, type VideoBackend } from "./backend";
 import { appendRead, editsOn, readCalls, readReads, ReadTracker, isToolResult, LineQueue, WrapperOutputTracker } from "./calls";
-import { BASH_TIMEOUT_MS, VIDEO_MAX_ATTEMPTS, VIDEO_RUNNER_NAME, videoConcurrency, videoHangMs, videoMaxTurns } from "./config";
+import {
+  BASH_TIMEOUT_MS,
+  VIDEO_MAX_ATTEMPTS,
+  VIDEO_RUNNER_NAME,
+  videoConcurrency,
+  videoCriticMode,
+  videoCriticModel,
+  videoCriticTimeoutMs,
+  videoHangMs,
+  videoMaxTurns,
+  type VideoCriticMode,
+} from "./config";
 import { safeCopy, safeRead } from "./copy";
+import {
+  CRITIC_RUNS_KEPT,
+  criticSpend,
+  criticSummary,
+  defectFinding,
+  runCritic,
+  skippedRun,
+  type CriticCall,
+  type CriticRun,
+  type CriticSource,
+} from "./critic";
+import { videoPromptFacing } from "./prompt";
 import { deadTools, deadToolsMessage, type DeadTools } from "./dead-tools";
 import type { VideoDoctor, VideoDoctorReport } from "./doctor";
 import { runVideoGate, type GateTools } from "./gate";
@@ -73,6 +97,13 @@ interface Running {
   reads: ReadTracker;
   edits: number;
   gateRunning: boolean;
+  /** The picture check's mode, read once when the job starts, so its step list keeps one shape. */
+  criticMode: VideoCriticMode;
+  /** The critic call running now, which a cancel stops. */
+  critic: CriticCall | null;
+  criticRunning: boolean;
+  /** Set once a critic's defects went back to the agent: once per job. */
+  criticRetrySpent: boolean;
   /** How many wrapper calls the narration log has said something about. */
   callsNarrated: number;
   /** The calls log's size when the backend last kept previewed sources, and how many calls it had seen. */
@@ -184,8 +215,13 @@ export class VideoRunner {
     this.deps = deps;
   }
 
+  /** Standalone picture checks running now (`criticRun`), which drain stops. */
+  private readonly standaloneCritics = new Map<string, { call: CriticCall | null; cancelled: boolean }>();
+  private readonly standaloneSettled = new Map<string, Promise<void>>();
+
+  /** After the job's run and any standalone picture check of it have written everything. */
   settled(id: string): Promise<void> {
-    return this.settledJobs.get(id) ?? Promise.resolve();
+    return Promise.all([this.settledJobs.get(id), this.standaloneSettled.get(id)]).then(() => undefined);
   }
 
   get busy(): number {
@@ -271,7 +307,9 @@ export class VideoRunner {
   /* ------------------------------------------------------------------ */
 
   spend(now: number = Date.now()): ReturnType<typeof spendWindow> {
-    return spendWindow([...this.store.list(), ...(this.deps.otherSpend?.() ?? [])], DAILY_WINDOW_MS, now);
+    // A critic's cost is its own, never on the job's `cost_usd`, and counts here as its own entry.
+    const records = this.store.list();
+    return spendWindow([...records, ...criticSpend(records), ...(this.deps.otherSpend?.() ?? [])], DAILY_WINDOW_MS, now);
   }
 
   /** `STUDIO_DAILY_USD`, counting a video like any job (V14). Unset, the default, refuses nothing. */
@@ -529,6 +567,10 @@ export class VideoRunner {
         reads: new ReadTracker(),
         edits: 0,
         gateRunning: false,
+        criticMode: videoCriticMode(),
+        critic: null,
+        criticRunning: false,
+        criticRetrySpent: false,
         callsNarrated: 0,
         callsKeptSize: -1,
         callsKept: 0,
@@ -871,7 +913,21 @@ export class VideoRunner {
       });
       await this.refreshSteps(entry);
       findings = gate.findings;
-      if (gate.ok) break;
+      if (!gate.ok) continue;
+      // The picture check, after the gate passed (D116): its defects go back
+      // to the agent as the next attempt's findings at most once per job, and
+      // only with two attempts left after this one, so a gate failure the
+      // retry causes can still be fixed.
+      const sendBack = await this.pictureCheck(entry, {
+        attempt,
+        backend,
+        paths,
+        classes: scaffolded.classes,
+        auth,
+        mayRetry: !entry.criticRetrySpent && VIDEO_MAX_ATTEMPTS - attempt >= 2,
+      });
+      if (sendBack.length === 0 || entry.cancelled) break;
+      findings = sendBack;
     }
 
     if (entry.cancelled) {
@@ -1045,6 +1101,14 @@ export class VideoRunner {
       gateRunning: entry.gateRunning,
       ready: record.state === "awaiting_review",
       agentRunning: entry.agent !== null,
+      critic:
+        entry.criticMode === "off"
+          ? null
+          : {
+              running: entry.criticRunning,
+              runs: (record.critic ?? []).filter((run) => !run.standalone).length,
+              note: entry.criticRunning ? "reading the contact sheets" : criticStepNote(record.critic?.at(-1)),
+            },
     });
     const running = steps.find((step) => step.state === "running");
     await this.store.update(record.id, { steps, ...(running === undefined ? {} : { phase: running.name }) });
@@ -1153,6 +1217,7 @@ export class VideoRunner {
     if (entry !== undefined) {
       entry.cancelled = true;
       await entry.agent?.stop("cancelled");
+      await entry.critic?.stop("cancelled");
     }
     return updated;
   }
@@ -1230,8 +1295,192 @@ export class VideoRunner {
     for (const entry of this.running.values()) {
       entry.cancelled = true;
       await entry.agent?.stop("cancelled");
+      await entry.critic?.stop("cancelled");
+    }
+    for (const standalone of this.standaloneCritics.values()) {
+      standalone.cancelled = true;
+      await standalone.call?.stop("cancelled");
     }
   }
+
+  /* ------------------------------------------------------------------ */
+  /* The picture check                                                  */
+  /* ------------------------------------------------------------------ */
+
+  /** Why the cap stops a critic call now, or null when it does not. */
+  private criticCapReason(): string | null {
+    const cap = dailyCapUsd();
+    if (cap === null) return null;
+    const window = this.spend();
+    if (window.totalUsd < cap) return null;
+    return `the studio has spent $${window.totalUsd.toFixed(2)} in the last 24 hours, at or over the $${cap.toFixed(2)} STUDIO_DAILY_USD cap, so no critic was run`;
+  }
+
+  /**
+   * One run onto the job's record: the whole text in `critic`, the last
+   * `CRITIC_RUNS_KEPT` kept, and, for an attempt's run that spawned, its
+   * summary on that attempt for the run record (null when it gave no scores).
+   */
+  private async keepCriticRun(id: string, run: CriticRun): Promise<VideoJobRecord> {
+    const current = this.store.get(id);
+    const runs = [...(current?.critic ?? []), run].slice(-CRITIC_RUNS_KEPT);
+    const attempts = run.attempt !== null && run.calls > 0 ? withAttemptCritic(current?.attempts, run.attempt, criticSummary(run)) : current?.attempts;
+    return this.store.update(id, { critic: runs, ...(attempts === undefined ? {} : { attempts }) });
+  }
+
+  /** The sheets a critic reads for a job: each from where it is now, the kept copy first. */
+  private async criticSources(record: VideoJobRecord, backend: VideoBackend, paths: VideoPaths, keptFirst: boolean): Promise<CriticSource[]> {
+    const sources: CriticSource[] = [];
+    for (const sheet of backend.sheets(paths, record.classes)) {
+      const kept = path.join(paths.job, "sheets", sheet.kept);
+      const candidates = keptFirst ? [kept, sheet.file] : [sheet.file];
+      for (const from of candidates) {
+        // Only whether something is there: the copy is what checks what it is.
+        if ((await lstat(from).catch(() => null)) === null) continue;
+        sources.push({ id: sheet.id, title: sheet.title, scenes: sheet.scenes, from });
+        break;
+      }
+    }
+    return sources;
+  }
+
+  /**
+   * The picture check of one attempt whose build passed the gate (D116):
+   * scores on the attempt, the whole text on the record, and, when this job
+   * may still send one back, the defects as the next attempt's findings.
+   * Empty when nothing goes back. A critic that cannot run, or gives no
+   * usable answer, changes nothing about the job.
+   */
+  private async pictureCheck(
+    entry: Running,
+    input: { attempt: number; backend: VideoBackend; paths: VideoPaths; classes: string[]; auth: AgentAuth; mayRetry: boolean },
+  ): Promise<string[]> {
+    if (entry.criticMode === "off" || entry.cancelled) return [];
+    const id = entry.record.id;
+    const record = this.store.get(id) ?? entry.record;
+    const capped = this.criticCapReason();
+    if (capped !== null) {
+      await this.keepCriticRun(id, skippedRun(input.attempt, capped));
+      await this.store.emit(id, { type: "step", state: "running", note: `picture check: skipped, ${capped}` });
+      await this.refreshSteps(entry);
+      return [];
+    }
+    entry.criticRunning = true;
+    await this.store.update(id, { phase: "critic", heartbeatAt: new Date().toISOString() });
+    await this.refreshSteps(entry);
+    await this.store.emit(id, { type: "phase", phase: "critic", note: "picture check: a critic is reading the contact sheets", state: "running" });
+    let run: CriticRun;
+    try {
+      run = await runCritic({
+        jobId: id,
+        label: `attempt-${input.attempt}`,
+        attempt: input.attempt,
+        sources: await this.criticSources(record, input.backend, input.paths, false),
+        brief: videoPromptFacing(record.brief, input.classes),
+        scenes: input.classes.map((scene, at) => ({ class: scene, name: record.brief.scenes[at]?.name ?? scene })),
+        auth: input.auth,
+        model: videoCriticModel(),
+        timeoutMs: videoCriticTimeoutMs(),
+        onCall: (call) => {
+          entry.critic = call;
+          // A cancel that landed between two calls stops the next as it starts.
+          if (call !== null && entry.cancelled) void call.stop("cancelled");
+        },
+        cancelled: () => entry.cancelled,
+      });
+    } catch (error) {
+      // Our own filesystem failing under the copy: still not the job's failure.
+      run = skippedRun(input.attempt, `the picture check could not be set up: ${(error as Error).message}`);
+    } finally {
+      entry.critic = null;
+      entry.criticRunning = false;
+    }
+    const sendBack = entry.criticMode === "retry" && input.mayRetry && !entry.cancelled && run.scores !== null && run.defects.length > 0;
+    run.sentBack = sendBack;
+    await this.keepCriticRun(id, run);
+    await this.refreshSteps(entry);
+    await this.store.emit(id, { type: "step", state: "running", note: `picture check: ${criticStepNote(run) ?? "done"}` });
+    if (!sendBack) return [];
+    entry.criticRetrySpent = true;
+    return run.defects.map(defectFinding);
+  }
+
+  /** Whether a standalone critic is running on this job now. */
+  criticRunning(id: string): boolean {
+    return this.standaloneCritics.has(id);
+  }
+
+  /**
+   * `POST /api/jobs/{id}/critic`: a picture check of a job already made,
+   * from its kept sheets (`jobs/<id>/sheets/`, written at its verdict) or,
+   * in review, from its render's, copied first either way. It retries
+   * nothing; the run lands on the job record as a standalone one. Refused
+   * with 503 when the critic is off, 409 for a job in any other state, one
+   * with no sheet or one already being checked, and 429 under the cap.
+   */
+  async criticRun(id: string): Promise<CriticRun> {
+    if (videoCriticMode() === "off") throw new JobRefused(503, "the picture check is off (STUDIO_VIDEO_CRITIC=off), so no critic was run");
+    const record = this.store.get(id);
+    if (record === undefined) throw new JobRefused(404, `no job ${id}`);
+    if (!["awaiting_review", "accepted", "discarded"].includes(record.state)) {
+      throw new JobRefused(409, `job ${id} is ${record.state}; a picture check is run on a video in review, accepted or discarded`);
+    }
+    if (this.standaloneCritics.has(id)) throw new JobRefused(409, `a picture check of job ${id} is already running`);
+    if (this.draining) throw new JobRefused(503, "the runner is shutting down, so no critic was run");
+    const backend = backendFor(briefTool(record.brief));
+    const paths = await backend.paths(record.id, record.slug);
+    const sources = await this.criticSources(record, backend, paths, true);
+    if (sources.length === 0) throw new JobRefused(409, `job ${id} has no contact sheet left to read`, { reason: "no-sheets" });
+    const capped = this.criticCapReason();
+    if (capped !== null) throw new JobRefused(429, capped, { reason: "daily-cap" });
+    const holder: { call: CriticCall | null; cancelled: boolean } = { call: null, cancelled: false };
+    this.standaloneCritics.set(id, holder);
+    const label = `standalone-${(record.critic ?? []).filter((run) => run.standalone).length + 1}-${Date.now()}`;
+    const done = (async () => {
+      let run: CriticRun;
+      try {
+        run = await runCritic({
+          jobId: id,
+          label,
+          attempt: null,
+          sources,
+          brief: videoPromptFacing(record.brief, record.classes),
+          scenes: record.classes.map((scene, at) => ({ class: scene, name: record.brief.scenes[at]?.name ?? scene })),
+          auth: agentAuth(),
+          model: videoCriticModel(),
+          timeoutMs: videoCriticTimeoutMs(),
+          onCall: (call) => {
+            holder.call = call;
+            if (call !== null && holder.cancelled) void call.stop("cancelled");
+          },
+          cancelled: () => holder.cancelled,
+        });
+      } catch (error) {
+        run = skippedRun(null, `the picture check could not be set up: ${(error as Error).message}`);
+      }
+      await this.keepCriticRun(id, run);
+      return run;
+    })();
+    const settled = done.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.standaloneSettled.set(id, settled);
+    try {
+      return await done;
+    } finally {
+      this.standaloneCritics.delete(id);
+      if (this.standaloneSettled.get(id) === settled) this.standaloneSettled.delete(id);
+    }
+  }
+}
+
+/** What the job view's picture check step says about a run. */
+function criticStepNote(run: CriticRun | undefined): string | null {
+  if (run === undefined) return null;
+  if (run.scores === null) return `no scores: ${run.error ?? "the critic gave none"}`;
+  const found = [`${run.defects.length} defect${run.defects.length === 1 ? "" : "s"}`, `${run.notes.length} note${run.notes.length === 1 ? "" : "s"}`].join(", ");
+  return `${found}${run.sentBack ? ", sent back to the agent" : ""}`;
 }
 
 /** The final source into `source/`, the gate's careful way: the files the job's backend names. */

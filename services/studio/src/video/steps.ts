@@ -27,6 +27,12 @@ export interface StepFacts {
   ready: boolean;
   /** True while the agent is running. */
   agentRunning: boolean;
+  /**
+   * The picture check (`critic.ts`): absent or null when it is off, so the
+   * list has no such step; else whether it is reading now, how many times it
+   * has run, and what the last run said.
+   */
+  critic?: { running: boolean; runs: number; note: string | null } | null;
 }
 
 function step(name: VideoStep["name"], state: VideoStep["state"], rounds = 0, note: string | null = null): VideoStep {
@@ -110,6 +116,11 @@ export function deriveSteps(facts: StepFacts): VideoStep[] {
   );
   const poster = gate?.steps.find((entry) => entry.name === "poster");
   steps.push(step("poster", poster === undefined ? "pending" : poster.ok ? "done" : "failed", poster === undefined ? 0 : 1));
+  // Never `failed`: a critic that gave nothing leaves the job as it was.
+  const critic = facts.critic ?? null;
+  if (critic !== null) {
+    steps.push(step("critic", critic.running ? "running" : critic.runs === 0 ? "pending" : "done", critic.runs + (critic.running ? 1 : 0), critic.note));
+  }
   steps.push(step("ready", facts.ready ? "done" : "pending", facts.ready ? 1 : 0));
   return steps;
 }

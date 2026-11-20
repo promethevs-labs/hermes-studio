@@ -1069,6 +1069,97 @@ tool's doctor is told: health shows the stop beside the verdict as
 `toolchainStop`, and the checks run again at once. The rule and its reasons
 are in `services/studio/src/video/dead-tools.ts`.
 
+## The critic
+
+The gate's step 10 checks that the agent Read each sheet. Nothing in the gate
+looks at the pixels. The critic does (D116 of docs/STUDIO-LOOK.md). The code
+is `services/studio/src/video/critic.ts`, and the words it reads are
+`critic-prompt.ts` beside it.
+
+**When it runs.** After an attempt's build passes the gate, and only then. It
+reads that attempt's contact sheets: one per scene for manimkc, the stills
+sheet and the build's sheet for remotionkc and revideokc. The job view shows
+it as the step "Picture check".
+
+**What it reads, and why from copies.** Agent code wrote every sheet under
+`render/`, and a process that outlives the agent can still change one. So the
+runner copies each sheet into `jobs/<id>/critic/attempt-<n>/sheets/` first,
+the gate's way (`safeCopy`): a regular file with one link, no symbolic link
+followed, at most 20 MB, and at most 16 sheets. A copy that does not start
+with the PNG signature is deleted. A sheet that fails any of this is skipped
+and named on the run. With no sheet left, no critic runs for that attempt.
+
+**The seal.** One `claude -p` on the machine's login, as every video job
+runs (`agentEnv`), with its temp root inside the run's own directory. It has
+one tool, Read, through `--tools Read`. Its settings file allows Read on
+exactly the copied sheets, by absolute path, and blocks reads outside its
+working directory, which holds only those copies. It also denies every other
+tool, the rest of the job, the studio home, every other job and the owner's
+secrets. It runs with no MCP server, no setting sources, `--safe-mode`,
+slash commands off and `--permission-prompts none`, as the planner does. Its
+system prompt replaces the CLI's own. The brief reaches it on stdin, never in
+argv. When the init event lists any tool but Read, or any MCP server, the
+runner stops the call and records why. `criticArgv` and `criticSettings`
+build both, and `test/video-critic.test.ts` pins every flag.
+
+**The rubric.** Five whole scores from 1 to 5: accuracy (the picture shows
+what the words say), layout (nothing overlaps, is cut off or is crowded),
+relevance (the picture explains and is not decoration), variety (scenes
+differ in shot and layout) and pacing (the screen changes with the voice).
+The critic gets the brief as the agent saw it (`videoPromptFacing`, each
+beat's `say`, `show` and `labels`, and a scene's `shot` plan where the brief
+has one) in the data fence. Then it gets each sheet's path and the scenes it
+shows. The brief is data, and so is any text inside a picture.
+
+**Defect or note.** A defect names a scene of the brief and is one of six
+things: two things overlapping, something cut off at the frame's edge, text
+too small to read, the picture contradicting the spoken line or a label (a
+wrong number), an object left over from an earlier beat, or an empty frame
+while the voice speaks. Anything about taste, variety or pacing is a note.
+The reply is one fenced block tagged `critic`. The runner checks it
+strictly: whole scores from 1 to 5, at most six defects and six notes, each
+text one line of at most 300 characters with no control character, and each
+defect's scene one of the brief's. An unusable reply gets one follow-up in
+the same session, naming what was wrong. A second unusable reply, a timeout
+(`STUDIO_VIDEO_CRITIC_TIMEOUT_MS`, three minutes a call) or a refused first
+request means no critic for that attempt, and the run says why. A critic
+failure never fails the job.
+
+**The one retry.** In `retry` mode a defect goes back to the agent as the
+next attempt's finding, one line each: "Scene <class>: <problem> Fix:
+<fix>". That happens once per job. It happens only when at least two
+attempts remain after this one, so a gate failure the retry causes can still
+be fixed. The next attempt is gated and checked as usual and can never send
+anything back. A job whose last attempt still has defects goes to review as
+before. Scores never block anything.
+
+**Where it is kept.** The attempt's entry in the run record carries the
+scores, the model, the cost and the counts (`withAttemptCritic`). The job's
+`job.json` keeps every run in `critic`: each defect's scene, problem and
+fix, the notes, the sheets it read, the ones it skipped and any error.
+
+**Cost and the cap.** A critic's cost is its own: it is never added to the
+job's `cost_usd`. Each run still counts in the rolling day behind
+`STUDIO_DAILY_USD` as its own entry, in both runners' windows. When the cap
+is already reached, the critic is skipped and the run says so.
+
+**The modes.** `STUDIO_VIDEO_CRITIC` is `retry` by default. `report` scores
+each attempt and sends nothing back. `off` never runs it, and the job view
+has no such step. `STUDIO_VIDEO_CRITIC_MODEL` is the model, `sonnet` by
+default.
+
+**The standalone route.** `POST /api/jobs/{id}/critic` checks a video
+already made: one in review, accepted or discarded. It reads the sheets kept
+under `jobs/<id>/sheets/` at the verdict, or the render's for a video still
+in review, copied first either way. It retries nothing and stores the run on
+the job as a standalone one. It answers `{ jobId, critic }`, or 409 with no
+sheet left (or a check already running), 429 under the cap and 503 when the
+mode is `off`. The benchmark harness uses it to score videos made before the
+critic existed.
+
+**What passing means.** A video passes the critic when the critic's read of
+its last attempt names no defect.
+
 ## The job view
 
 **While it runs.** The panel's body is the video job view, in the same place
@@ -1217,8 +1308,8 @@ whole score from 1 to 5 for each of accuracy, layout, relevance, variety and
 pacing (services/catalog/SCHEMA.md, "The run and review columns", says what
 each means). `withAttemptCritic` in `run-record.ts` sets it on attempt `n`,
 the way `withAttemptGate` sets the gate. It is the one attempt key that may be
-left out: an attempt no critic judged has none, and is stored as it was. No
-runner calls it yet; the critic itself is a later change. `catalog eval
+left out: an attempt no critic judged has none, and is stored as it was. The
+video runner calls it after each picture check ("The critic"). `catalog eval
 report` reads each job's last judged attempt into its `critic` column.
 
 **The run record.** At every terminal state the runner reaches (Ready,
