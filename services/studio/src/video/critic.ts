@@ -103,6 +103,8 @@ export interface CriticRun {
   sentBack: boolean;
   /** How many times `claude` was spawned: 0 when there was nothing to read or the cap stopped it, 2 after a follow-up. */
   calls: number;
+  /** Its directory's name under the job's `critic/`, when it made one. Absent on a run recorded before it. */
+  label?: string;
 }
 
 /** A run that never spawned: nothing to read, the cap, or the mode. */
@@ -237,6 +239,33 @@ async function isPng(file: string): Promise<boolean> {
   } finally {
     await handle.close();
   }
+}
+
+/**
+ * A run's own directory under the job's `critic/`: from its label, or, for a
+ * run recorded before labels, from where its copies sit. Null when it names
+ * none, or when what it names is not a directory directly under `critic/`.
+ */
+export function criticRunDir(jobId: string, run: Pick<CriticRun, "label" | "sheets">): string | null {
+  const root = path.join(jobDir(jobId), "critic");
+  const first = run.sheets[0]?.file;
+  const dir = run.label !== undefined ? path.join(root, run.label) : first === undefined ? null : path.dirname(path.dirname(first));
+  if (dir === null) return null;
+  return path.dirname(dir) === root && path.basename(dir) !== "" && !path.basename(dir).startsWith(".") ? dir : null;
+}
+
+/**
+ * The directories of the standalone runs a trim dropped, which nothing kept
+ * still names: never an attempt's, and never one a kept run (the fallback's
+ * attempt run among them) points at. Each holds up to sixteen sheet copies.
+ */
+export function droppedCriticDirs(jobId: string, before: readonly CriticRun[], kept: readonly CriticRun[]): string[] {
+  const keep = new Set(kept.map((run) => criticRunDir(jobId, run)).filter((dir): dir is string => dir !== null));
+  const dirs = before
+    .filter((run) => run.standalone && !kept.includes(run))
+    .map((run) => criticRunDir(jobId, run))
+    .filter((dir): dir is string => dir !== null && path.basename(dir).startsWith("standalone-") && !keep.has(dir));
+  return [...new Set(dirs)];
 }
 
 /* -------------------------------------------------------------------------- */
@@ -672,6 +701,7 @@ export async function runCritic(input: CriticInput): Promise<CriticRun> {
     return skippedRun(input.attempt, skipped.length === 0 ? "the job has no contact sheet to read" : "no contact sheet could be read safely", {
       startedAt,
       skipped,
+      label: input.label,
     });
   }
   await writeFile(paths.system, `${criticSystemPrompt()}\n`, "utf8");
@@ -720,6 +750,7 @@ export async function runCritic(input: CriticInput): Promise<CriticRun> {
       error: null,
       sentBack: false,
       calls,
+      label: input.label,
       ...patch,
     };
   };

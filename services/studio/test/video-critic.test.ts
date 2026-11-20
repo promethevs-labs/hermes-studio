@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, readFile, rm, symlink, truncate, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, symlink, truncate, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -807,6 +807,22 @@ describe("the history and the spend", () => {
     expect(critic.fallbackSheet({ critic: runs, fallback: { attempt: 1, retryErrorKind: "gate", retryError: null, at: at(0) } }, "TB1_WhyItMatters")).toBe("/kept/01.png");
   });
 
+  it("names for deletion only a dropped standalone run's own directory, never an attempt's or one a kept run names", () => {
+    const root = path.join(home, "jobs", "j1", "critic");
+    const sheetIn = (label: string) => [{ id: "a", title: null, scenes: [], file: path.join(root, label, "sheets", "01-a.png") }];
+    const attempt = critic.skippedRun(1, "", { label: "attempt-1", sheets: sheetIn("attempt-1") });
+    const gone = critic.skippedRun(null, "", { label: "standalone-1-1" });
+    const unlabelled = critic.skippedRun(null, "", { sheets: sheetIn("standalone-2-2") });
+    const shared = critic.skippedRun(null, "", { label: "standalone-3-3" });
+    const twin = critic.skippedRun(null, "", { label: "standalone-3-3" });
+    const escaping = critic.skippedRun(null, "", { label: "../../other" });
+    const before = [attempt, gone, unlabelled, shared, twin, escaping];
+    const dropped = critic.droppedCriticDirs("j1", before, [attempt, twin]);
+
+    expect(dropped.sort()).toEqual([path.join(root, "standalone-1-1"), path.join(root, "standalone-2-2")]);
+    expect(critic.criticRunDir("j1", escaping)).toBeNull();
+  });
+
   it("keeps every run's spend inside the window however many the history drops, and only those", () => {
     const window = 24 * 3_600_000;
     let record: { critic: import("../src/video/critic").CriticRun[]; criticSpend?: SpendEntryT[] } = { critic: [] };
@@ -911,6 +927,22 @@ describe("the standalone route", () => {
     // Never on an attempt: it judged no attempt the job ran.
     expect(Object.hasOwn(record.attempts![0]!, "critic")).toBe(false);
     expect(videoView(record).critic).toMatchObject({ attempt: 1, attempts: 1, defects: [DEFECT], sentBack: [] });
+  });
+
+  it("deletes the files of each standalone run the history drops, and keeps the rest and every run's spend", async () => {
+    const job = await acceptedJob();
+    await plans([{}], [{ reply: reply() }]);
+    const total = critic.CRITIC_RUNS_KEPT + 1;
+    for (let n = 0; n < total; n += 1) await runner.criticRun(job.id);
+    const record = store.get(job.id)!;
+    const dirs = (await readdir(path.join(home, "jobs", job.id, "critic"))).sort();
+
+    expect(record.critic).toHaveLength(critic.CRITIC_RUNS_KEPT);
+    // The one run the history dropped took its copies with it; every kept run's are there.
+    expect(dirs).toHaveLength(critic.CRITIC_RUNS_KEPT);
+    for (const run of record.critic!) expect(dirs).toContain(run.label);
+    for (const run of record.critic!) for (const sheet of run.sheets) expect(existsSync(sheet.file)).toBe(true);
+    expect(record.criticSpend).toHaveLength(total);
   });
 
   it("lets only one of two checks pressed together through, and frees the job once it ends", async () => {

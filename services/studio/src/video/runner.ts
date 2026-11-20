@@ -51,6 +51,7 @@ import {
   withCriticSpend,
   criticSummary,
   defectFinding,
+  droppedCriticDirs,
   fallbackSheet,
   runCritic,
   skippedRun,
@@ -1352,7 +1353,11 @@ export class VideoRunner {
     const runs = keptCriticRuns(current?.critic ?? [], run);
     const spend = withCriticSpend(current ?? {}, run, DAILY_WINDOW_MS);
     const attempts = run.attempt !== null && run.calls > 0 ? withAttemptCritic(current?.attempts, run.attempt, criticSummary(run)) : current?.attempts;
-    return this.store.update(id, { critic: runs, criticSpend: spend, ...(attempts === undefined ? {} : { attempts }) });
+    const updated = await this.store.update(id, { critic: runs, criticSpend: spend, ...(attempts === undefined ? {} : { attempts }) });
+    // The copies of the standalone runs the trim dropped go too, after the
+    // record no longer names them; every attempt's files and the spend list stay.
+    for (const dir of droppedCriticDirs(id, [...(current?.critic ?? []), run], runs)) await rm(dir, { recursive: true, force: true });
+    return updated;
   }
 
   /** The sheets a critic reads for a job: each from where it is now, the kept copy first. */
