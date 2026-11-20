@@ -10,6 +10,7 @@ import { MANIMKC } from "../index/video-tool";
 import {
   evalReport,
   formatEvalReport,
+  reportCritic,
   type EvalReport,
   type ReportJob,
   type ReportVideo,
@@ -78,6 +79,7 @@ function reportJob(row: JobRow): NonNullable<ReportVideo["job"]> {
     wallSeconds: wallSeconds(row),
     attempts: run === null || run === undefined ? (row.attempt > 0 ? row.attempt : null) : run.attempts.length,
     state: row.state,
+    critic: reportCritic(run?.attempts),
   };
 }
 
@@ -194,6 +196,7 @@ export async function readReportInputs(
       turns: row.turns,
       wallSeconds: wallSeconds(row),
       reviewTags: [...(row.review?.tags ?? [])],
+      critic: reportCritic(row.run?.attempts),
     }));
   return { videos, extraJobs };
 }

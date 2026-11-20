@@ -1211,6 +1211,16 @@ and null for an attempt that never reached it. Before this, each attempt's
 gate overwrote the last and only the final one was kept. A `job.json` from
 before the field loads with an empty list.
 
+An attempt entry may also carry `critic`: a vision critic's scores on that
+attempt's contact sheets, `{ model, costUsd, scores, defects, notes }`, with a
+whole score from 1 to 5 for each of accuracy, layout, relevance, variety and
+pacing (services/catalog/SCHEMA.md, "The run and review columns", says what
+each means). `withAttemptCritic` in `run-record.ts` sets it on attempt `n`,
+the way `withAttemptGate` sets the gate. It is the one attempt key that may be
+left out: an attempt no critic judged has none, and is stored as it was. No
+runner calls it yet; the critic itself is a later change. `catalog eval
+report` reads each job's last judged attempt into its `critic` column.
+
 **The run record.** At every terminal state the runner reaches (Ready,
 failed, cancelled, the reconcile's interrupted, a job cancelled before it
 started, and a runner that threw after the claim), it builds a `JobRun`
