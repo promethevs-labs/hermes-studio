@@ -65,9 +65,18 @@ export function capLine(plan, what, label) {
  * loops take them; the runner is started at the typed cap, which is no more
  * than the command may spend anyway. Throws, with nothing posted, when the
  * runner gives no usable figure: a command that cannot tell what the home has
- * spent must not guess.
+ * spent must not guess. `deps.queuedJobs()`, when given, lists jobs left queued
+ * in the home, which refuse the measuring (see below).
  */
 export async function measureHomeSpend(deps, options) {
+  // The runner has no mode that takes no jobs, and a runner started over a
+  // home picks up a job left `queued` by a command that died while enqueueing,
+  // then cancels it when it is stopped. So a home holding one is refused
+  // before any runner starts.
+  const queued = deps.queuedJobs?.() ?? [];
+  if (queued.length > 0) {
+    throw new Error(`${queued.join(', ')} ${queued.length === 1 ? 'is' : 'are'} still queued in this home from an earlier command, and any runner started over it would run ${queued.length === 1 ? 'it' : 'them'}, paid; nothing was started. Finish it with a \`run --resume\` of its label, or move its jobs/<id> directory out of the home's studio folder`);
+  }
   const runner = await deps.start(deps.envFor({ ...options, runnerCapUsd: options.cap }));
   let total;
   try {

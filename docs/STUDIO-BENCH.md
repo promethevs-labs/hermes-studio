@@ -142,8 +142,11 @@ spend plus that number:
    and posts nothing, reads `dailyCap.totalUsd` from its `/api/health`, and
    stops it. The figure is the runner's own, from the same `spendWindow` the
    cap refuses on, so spend older than 24 hours is not in it. The bench reads
-   no job files itself. If the runner gives no figure, the command stops with
-   nothing posted.
+   no cost files itself. If the runner gives no figure, the command stops with
+   nothing posted. The runner has no mode that takes no jobs, so a home with a
+   job still `queued` from an earlier command that died is refused before any
+   runner starts, since the measuring runner would run that job and cancel it
+   when it stops.
 2. For `run`, the allowance is `--cap` less what this label already spent, read
    from its run file (zero for a new label). A resume is never handed a fresh
    cap: with $4 recorded under `--cap 5`, it may spend $1 more, whether or not

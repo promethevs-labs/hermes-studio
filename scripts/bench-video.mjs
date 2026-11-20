@@ -37,7 +37,7 @@ import { BENCH_TOOLS, FALLBACK_CHARS_PER_SECOND, jobBody, loadBriefs, loadTopics
 import { capEnvValue } from './lib/bench-video/budget.mjs';
 import { compareRuns, formatCompare } from './lib/bench-video/compare.mjs';
 import { DEFAULT_PORT, homePaths, homeRefusal, parseCap, readMarker, runnerEnv, setupHome, STUDIO_PORT } from './lib/bench-video/home.mjs';
-import { readJobFiles, sourceMetrics } from './lib/bench-video/metrics.mjs';
+import { queuedJobIds, readJobFiles, sourceMetrics } from './lib/bench-video/metrics.mjs';
 import { readRun, runBench } from './lib/bench-video/run.mjs';
 import { call, portFree, startRunner, stopTree } from './lib/bench-video/runner.mjs';
 import { scoreRun } from './lib/bench-video/score.mjs';
@@ -224,6 +224,7 @@ async function verbScore(args) {
       call,
       portFree,
       readJob: (jobId) => readJobFiles(paths.studio, jobId),
+      queuedJobs: () => queuedJobIds(paths.studio),
       log: (line) => process.stdout.write(`${line}\n`),
       stopped: () => state.interrupted,
       onJob: (jobId) => (state.currentJob = jobId),
@@ -296,6 +297,7 @@ async function verbRun(args) {
       call,
       portFree,
       readJob: (jobId) => readJobFiles(paths.studio, jobId),
+      queuedJobs: () => queuedJobIds(paths.studio),
       metrics: (jobId) => sourceMetrics(paths.studio, jobId, chosen, libraryNames),
       log: (line) => process.stdout.write(`${line}\n`),
       stopped: () => state.interrupted,
