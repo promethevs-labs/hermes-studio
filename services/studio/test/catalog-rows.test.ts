@@ -57,7 +57,7 @@ vi.mock("../src/data/catalog", () => catalogMock);
 const { Runner } = await import("../src/diagram/runner");
 const { JobStore, RecordStore } = await import("../src/data/store");
 const { VideoRunner } = await import("../src/video/runner");
-const { planRow, stepsBetween, leaseHolder } = await import("../src/data/catalog-rows");
+const { CatalogRows, planRow, stepsBetween, leaseHolder } = await import("../src/data/catalog-rows");
 const { RUNNER_NAME } = await import("../src/config");
 const { VIDEO_RUNNER_NAME } = await import("../src/video/config");
 const { jobDir, targetPath } = await import("../src/paths");
@@ -376,6 +376,33 @@ describe("the startup reconcile, for diagram jobs", () => {
     expect(status.pending).toBeNull();
     expect(status.left).toEqual([expect.objectContaining({ id: record.id, reason: expect.stringContaining("not an attempt") })]);
     expect(store.get(record.id)?.catalogErrors.at(-1)).toContain("not an attempt");
+  });
+
+  it("keeps a failed finish owed when the pass meets its job still being written", async () => {
+    // Greptile on #735: the live `finish` owes the reconcile when its `job
+    // finish` fails, and the job stays busy until its session end returns. A
+    // health pass in that window skipped the busy row and cleared the debt,
+    // so nothing asked again once the job settled.
+    const store = new JobStore();
+    const record = await store.create(diagramRecord("d-busy", "awaiting_review"));
+    row(record.id, { kind: "diagram", targetPath: record.targetPath });
+    let busy = true;
+    const rowsUnderTest = new CatalogRows<JobRecord>({
+      kind: "diagram",
+      runnerName: RUNNER_NAME,
+      store,
+      busy: () => busy,
+      finishInput: async (each, state) => ({ jobId: each.id, state }),
+    });
+    rowsUnderTest.owe(`job finish for ${record.id} did not land: database is locked`);
+    const during = await rowsUnderTest.retry(Date.now() + 61_000);
+    expect(catalogMock.jobFinish).not.toHaveBeenCalled();
+    expect(during.pending).not.toBeNull();
+    // Settled: the next pass moves the row and the debt is paid.
+    busy = false;
+    const after = await rowsUnderTest.retry(Date.now() + 200_000);
+    expect(rows.get(record.id)?.state).toBe("awaiting_review");
+    expect(after.pending).toBeNull();
   });
 
   it("an enqueue refused by the lease of a job this runner already finished moves that row and goes through", async () => {

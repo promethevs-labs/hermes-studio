@@ -455,6 +455,37 @@ describe("a claim the catalog refuses", () => {
     expect(catalogMock.jobFinish).not.toHaveBeenCalled();
   });
 
+  it("still leaves the holder's row alone when recording the refusal throws", async () => {
+    // Greptile on #735: a throw while writing the refusal reached the crash
+    // handler, which wrote `internal` over `not-claimed` and finished the
+    // other runner's live row as failed.
+    catalogMock.jobClaim.mockResolvedValue({ ok: false, json: null, error: "job x is running, and running → running is not a transition.", offline: false });
+    const update = store.update.bind(store);
+    let thrown = false;
+    vi.spyOn(store, "update").mockImplementation(async (id, patch) => {
+      if (!thrown && patch.errorKind === "not-claimed") {
+        thrown = true;
+        throw new Error("ENOSPC: no space left on device");
+      }
+      return update(id, patch);
+    });
+
+    const { record } = await runner.enqueue(await brief());
+    await runner.settled(record.id);
+
+    expect(thrown).toBe(true);
+    expect(store.get(record.id)).toMatchObject({ state: "failed", errorKind: "not-claimed" });
+    expect(catalogMock.jobFinish).not.toHaveBeenCalled();
+  });
+
+  it("finishes the row when the attempt held the claim and then threw", async () => {
+    reviewMock.dirtyFiles.mockRejectedValueOnce(new Error("git is not on PATH"));
+    const { record } = await runner.enqueue(await brief());
+    await runner.settled(record.id);
+    expect(store.get(record.id)).toMatchObject({ state: "failed", errorKind: "internal" });
+    expect(catalogMock.jobFinish).toHaveBeenCalledWith(expect.objectContaining({ jobId: record.id, state: "failed", errorKind: "internal" }));
+  });
+
   it("runs anyway when the claim failed because nothing answered", async () => {
     catalogMock.jobClaim.mockResolvedValue({
       ok: false,

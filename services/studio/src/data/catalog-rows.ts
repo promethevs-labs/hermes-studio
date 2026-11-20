@@ -291,7 +291,16 @@ export class CatalogRows<R extends RowRecord> {
         orphans.push({ id: row.id, targetPath: row.targetPath, state: row.state, runner: row.runner });
         continue;
       }
-      if (this.deps.busy(row.id)) continue;
+      if (this.deps.busy(row.id)) {
+        // Still being written by the runner, so not this pass's to move. A
+        // record that is already finished over a live row may be one whose
+        // `job finish` just failed: the debt stays, or nothing would ask
+        // again once the job settles.
+        if (!LIVE.has(record.state) && row.state !== record.state) {
+          owed ??= `job ${row.id} was still being finished when the reconcile read its row`;
+        }
+        continue;
+      }
       const plan = planRow(row, record, this.deps.runnerName);
       if (plan.kind === "leave") left.push({ id: row.id, targetPath: row.targetPath, state: row.state, reason: plan.reason });
       if (plan.kind !== "repair") continue;

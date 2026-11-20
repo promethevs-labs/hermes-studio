@@ -120,6 +120,13 @@ interface Running {
   meter: JobCostMeter;
   /** When the meter's figure was last written to the record. See `syncCost`. */
   costWrittenAt: number;
+  /**
+   * What the catalog said to this attempt's claim: not asked yet, the row is
+   * this runner's (or the catalog did not answer, D16), or refused, when the
+   * row is somebody else's. The crash handler finishes the row only when held,
+   * as the video runner's `mayFinish` does.
+   */
+  claim: "pending" | "held" | "refused";
 }
 
 /**
@@ -724,6 +731,7 @@ export class Runner {
         // Zero, not `Date.now()`: the first line of a job should land a figure
         // rather than wait out a throttle window it never asked for.
         costWrittenAt: 0,
+        claim: "pending",
         jobTimer: setTimeout(() => {
           // Caught rather than left to reject: by the time the ceiling fires
           // the job may already be finishing, and `cancel` refuses a job that
@@ -746,16 +754,24 @@ export class Runner {
           state: "failed",
           phase: null,
           finishedAt: new Date().toISOString(),
-          errorKind: "internal",
+          // A refused claim stays `not-claimed` however the attempt ended, so
+          // the catalog reconcile keeps leaving the holder's row alone too.
+          errorKind: entry.claim === "refused" ? "not-claimed" : "internal",
           error: `the runner threw: ${(error as Error).message}`,
         });
-        // The row too, as the video runner's handler does: a record that
-        // failed here used to leave its row `running`, holding the path's
-        // lease until a person finished it by hand.
-        const finished = await this.finishInput(failed, "failed")
-          .then((input) => jobFinish(input))
-          .catch((thrown: unknown) => ({ ok: false, error: (thrown as Error).message }));
-        if (!finished.ok) await this.finishMissed(next.id, finished.error);
+        // The row too, only when this attempt holds it, as the video
+        // runner's `mayFinish` guards its handler: a refused claim's row is
+        // another runner's live job. Before the claim the row is still this
+        // runner's queued one, which the catalog reconcile claims and
+        // finishes, so it is owed rather than finished here.
+        if (entry.claim === "held") {
+          const finished = await this.finishInput(failed, "failed")
+            .then((input) => jobFinish(input))
+            .catch((thrown: unknown) => ({ ok: false, error: (thrown as Error).message }));
+          if (!finished.ok) await this.finishMissed(next.id, finished.error);
+        } else if (entry.claim === "pending") {
+          this.rows.owe(`job ${next.id} failed before its claim, so its queued row still holds the lease`);
+        }
       }).finally(() => {
         clearTimeout(entry.jobTimer);
         this.running.delete(next.id);
@@ -814,6 +830,8 @@ export class Runner {
     if (!opened.ok) await this.store.noteCatalogError(id, opened.error ?? "");
 
     const claimed = await jobClaim(id, RUNNER_NAME, sessionId);
+    // Before any write that could throw, so the crash handler knows whose row it is.
+    entry.claim = !claimed.ok && !claimed.offline ? "refused" : "held";
     if (!claimed.ok) {
       await this.store.noteCatalogError(id, claimed.error ?? "");
       if (!claimed.offline) {

@@ -130,6 +130,8 @@ interface Running {
    * someone else's (Greptile on #201).
    */
   mayFinish: boolean;
+  /** The catalog answered the claim and refused it: the row is someone else's, and stays `not-claimed` on the record however the attempt ends. */
+  claimRefused: boolean;
 }
 
 export interface VideoParent {
@@ -611,6 +613,7 @@ export class VideoRunner {
         deadTools: null,
         output: null,
         mayFinish: false,
+        claimRefused: false,
       };
       this.running.set(next.id, entry);
       let settle: () => void = () => undefined;
@@ -629,9 +632,12 @@ export class VideoRunner {
           await this.store.update(next.id, {
             state: "failed",
             finishedAt: new Date().toISOString(),
-            errorKind: "internal",
+            // A refused claim stays `not-claimed`, so the catalog reconcile leaves the holder's row alone too.
+            errorKind: entry.claimRefused ? "not-claimed" : "internal",
             error: `the video runner threw: ${(error as Error).message}`,
           });
+          // Before the claim the row is still this runner's queued one: owed to the reconcile, which claims and finishes it.
+          if (!entry.mayFinish && !entry.claimRefused) this.rows.owe(`job ${next.id} failed before its claim, so its queued row still holds the lease`);
           if (entry.mayFinish) {
             const finished = await jobFinish({
               jobId: next.id,
@@ -719,6 +725,8 @@ export class VideoRunner {
     const opened = await sessionStart({ id: sessionId, title: record.brief.title, goal: record.brief.idea, agentSessionId });
     if (!opened.ok) await this.store.noteCatalogError(id, opened.error ?? "");
     const claimed = await jobClaim(id, VIDEO_RUNNER_NAME, sessionId);
+    // Before any write that could throw, so the crash handler knows whose row it is.
+    entry.claimRefused = !claimed.ok && !claimed.offline;
     if (!claimed.ok) {
       await this.store.noteCatalogError(id, claimed.error ?? "");
       if (!claimed.offline) {
