@@ -1299,9 +1299,12 @@ job's `cost_usd`. Each run still counts in the rolling day behind
 `STUDIO_DAILY_USD` as its own entry, in both runners' windows. When the cap
 is already reached, the critic is skipped and the run says so.
 
-**The modes.** `STUDIO_VIDEO_CRITIC` is `retry` by default. `report` scores
-each attempt and sends nothing back. `off` never runs it, and the job view
-has no such step. `STUDIO_VIDEO_CRITIC_MODEL` is the model, `sonnet` by
+**The modes.** `STUDIO_VIDEO_CRITIC` is `report` by default (D121 of
+docs/STUDIO-LOOK.md; it was `retry` until 2026-11-20). `report` scores each
+attempt, records the read on the job and sends nothing back, so a job makes
+one attempt for the critic's sake. `retry` also sends the defects it can
+point to back to the agent, once per job. `off` never runs it, and the job
+view has no such step. `STUDIO_VIDEO_CRITIC_MODEL` is the model, `sonnet` by
 default.
 
 **The standalone route.** `POST /api/jobs/{id}/critic` checks a video
@@ -1313,8 +1316,14 @@ sheet left (or a check already running), 429 under the cap and 503 when the
 mode is `off`. The benchmark harness uses it to score videos made before the
 critic existed.
 
-**What passing means.** A video passes the critic when the critic's read of
-its last attempt names no defect.
+**What passing means.** A video passes the critic when no score of the five
+is below 3 and their mean is at least 3.5 (`passesCritic` in
+`packages/schema/src/shared.ts`, D121 of docs/STUDIO-LOOK.md). The mark is
+provisional: the threshold was picked after seeing the benchmark data, and it
+stands until the owner's thumbs ratings can calibrate it. Defects play no
+part in it. The retry in `retry` mode acts on defects and the pass mark reads
+scores, so the two are separate. A run file written before 2026-11-20 holds
+`passed` by the old rule, no defect on the last attempt.
 
 ## The job view
 
