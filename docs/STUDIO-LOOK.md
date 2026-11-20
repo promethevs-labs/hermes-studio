@@ -162,7 +162,11 @@ The benchmark's briefs are fixed scripts, one for each kind of picture: an
 array being searched, a tree growing, a graph traversal, numbers on a chart,
 a code walk, a comparison, a sequence over time, a memory view, a request
 moving through a system, an equation, a layered structure and a metaphor.
-The same twelve run before and after, with the same model.
+The same twelve run before and after, with the same model. The baseline is
+`npm run bench:video -- run`, then `score` on it for the critic's scores;
+the run after the changes is `run --shots`, which plans each brief's shots
+afresh, and `compare` puts the two side by side (docs/STUDIO-BENCH.md, "A
+before and after").
 
 | Measure | From | Better is |
 | --- | --- | --- |

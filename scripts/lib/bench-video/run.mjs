@@ -13,8 +13,10 @@ import { existsSync, readFileSync } from 'node:fs';
 
 import { jobBody, runSlug } from './briefs.mjs';
 import { costOf } from './cost.mjs';
-import { recordFields } from './metrics.mjs';
+import { criticCurrent, criticFromStandalone, criticFromView, criticRefused, verdictLine } from './critic.mjs';
+import { criticCostOf, recordFields } from './metrics.mjs';
 import { writeJsonAtomic } from './home.mjs';
+import { plannedBody, shotsKept, shotsRecord } from './shots.mjs';
 
 /** Job states after which the runner does nothing more on its own. */
 export const SETTLED = Object.freeze(['awaiting_review', 'accepted', 'discarded', 'failed', 'cancelled', 'interrupted']);
@@ -59,8 +61,40 @@ export function emptyResult(id) {
     wallSeconds: null,
     renderSeconds: null,
     metrics: null,
+    shots: null,
+    critic: null,
+    criticCostUsd: null,
+    checkCostUsd: null,
     error: null,
   };
+}
+
+/** A refusal as one line: the status, the runner's reason code when it gave one, and its message. */
+export function refusalMessage(answer) {
+  const reason = answer.json?.detail?.reason ?? null;
+  return `${answer.status}${reason === null ? '' : ` ${reason}`}: ${answer.json?.error ?? answer.text ?? ''}`.trim();
+}
+
+/**
+ * One standalone picture check of a finished job, `POST /api/jobs/{id}/critic`.
+ * Resolves `{ critic, status, stop }`: the record to keep, the answer's
+ * status (0 when none came), and why a caller should stop, or null. A 429
+ * (the cap) or no answer always stops; a 503 means the runner cannot run
+ * the critic at all; a 409 (no kept sheet) is recorded and the caller goes on.
+ */
+export async function standaloneCritic(call, base, jobId, jobView) {
+  let answer;
+  try {
+    answer = await call(base, 'POST', `/api/jobs/${encodeURIComponent(jobId)}/critic`, {}, { timeoutMs: 20 * 60_000 });
+  } catch (error) {
+    return { critic: criticRefused(`the critic request did not get an answer: ${error.message}`, jobView), status: 0, stop: 'the runner did not answer the critic request' };
+  }
+  if (answer.status === 200) return { critic: criticFromStandalone(answer.json?.critic, jobView), status: 200, stop: null };
+  const message = refusalMessage(answer);
+  const critic = criticRefused(`the critic was refused, ${message}`, jobView);
+  if (answer.status === 429) return { critic, status: 429, stop: `the runner refused the critic at the daily cap (${message})` };
+  if (answer.status === 503) return { critic, status: 503, stop: `the runner cannot run the critic (${message})` };
+  return { critic, status: answer.status, stop: null };
 }
 
 /** The manual hashes the run's jobs carried, each once. */
@@ -83,13 +117,35 @@ export function toolReadiness(health, tool) {
   return NOT_YET.test(reason) ? { ready: null, reason } : { ready: false, reason };
 }
 
-class Stop extends Error {}
+/** A clean stop: what finished is written down, the runner is stopped, and the verb exits 1. */
+export class Stop extends Error {}
 
 export { costOf };
 
 /**
+ * The spend guards every verb checks on `/api/health` before money moves:
+ * the runner reports the cap it was started with and finds the claude CLI
+ * (an Error, nothing was posted), and the home's rolling day is under that
+ * cap (a Stop). Neither looks at a tool's doctor.
+ */
+export function checkSpendGuards(health, cap) {
+  if (health.status !== 200) throw new Error(`/api/health answered ${health.status}`);
+  const capUsd = health.json?.dailyCap?.capUsd;
+  if (typeof capUsd !== 'number' || Math.abs(capUsd - cap) > 1e-9) {
+    throw new Error(`the runner reports a daily cap of ${capUsd ?? 'none'}, not the $${cap} it was started with; nothing was posted`);
+  }
+  if (health.json?.claude === false) throw new Error('the runner cannot find the claude CLI; nothing was posted');
+  if (health.json?.dailyCap?.exceeded === true) {
+    throw new Stop(`the scratch home has already spent $${Number(health.json.dailyCap.totalUsd ?? 0).toFixed(2)} of the $${cap} cap in the last 24 hours`);
+  }
+}
+
+/**
  * Run the selected briefs. `options`: `{ home, label, tool, model, cap, port,
- * keepGoing, resume, entries, runFile, env }`. `deps`: `start(env)` resolves
+ * keepGoing, resume, shots, critic, entries, runFile, env }`, where `shots`
+ * asks the art director for each brief's shot plan before it is posted and
+ * `critic` asks for a standalone picture check of a landed video whose job
+ * has no read of its build in review. `deps`: `start(env)` resolves
  * `{ base, stop }` for a runner over the home; `call(base, method, path,
  * body, opts)` answers `{ status, json }`; `envFor(options)` is the runner's
  * environment; `portFree(port)`, `readJob(jobId)`, `metrics(jobId)`,
@@ -114,12 +170,19 @@ export async function runBench(options, deps) {
   if (existing !== null && (existing.tool !== tool || (existing.model ?? null) !== model)) {
     throw new Error(`${runFile} was run with ${existing.tool} and model ${existing.model ?? 'default'}; a resume must use the same tool and model`);
   }
+  const askShots = options.shots === true;
+  const askCritic = options.critic === true;
+  if (existing !== null && (existing.shotsAsked === true) !== askShots) {
+    throw new Error(`${runFile} was run ${existing.shotsAsked === true ? 'with' : 'without'} --shots; a resume must ask for shots the same way`);
+  }
   const results = new Map((existing?.results ?? []).map((result) => [result.id, result]));
   const run = {
     label,
     tool,
     model,
     capUsd: cap,
+    shotsAsked: askShots,
+    criticAsked: askCritic,
     startedAt: existing?.startedAt ?? new Date(now()).toISOString(),
     endedAt: null,
     manualHashes: [],
@@ -170,15 +233,7 @@ export async function runBench(options, deps) {
     for (;;) {
       if (stopped()) throw new Stop('stopped before the first brief');
       const health = await call(base, 'GET', '/api/health', undefined, { timeoutMs: 60_000 });
-      if (health.status !== 200) throw new Error(`/api/health answered ${health.status}`);
-      const capUsd = health.json?.dailyCap?.capUsd;
-      if (typeof capUsd !== 'number' || Math.abs(capUsd - cap) > 1e-9) {
-        throw new Error(`the runner reports a daily cap of ${capUsd ?? 'none'}, not the $${cap} it was started with; nothing was posted`);
-      }
-      if (health.json?.claude === false) throw new Error('the runner cannot find the claude CLI; nothing was posted');
-      if (health.json?.dailyCap?.exceeded === true) {
-        throw new Stop(`the scratch home has already spent $${Number(health.json.dailyCap.totalUsd ?? 0).toFixed(2)} of the $${cap} cap in the last 24 hours`);
-      }
+      checkSpendGuards(health, cap);
       const { ready, reason } = toolReadiness(health.json, tool);
       if (ready === true) break;
       if (ready === false) throw new Error(`${reason}; nothing was posted`);
@@ -191,6 +246,10 @@ export async function runBench(options, deps) {
     begun = true;
     save();
     log(`bench: ${work.length} brief${work.length === 1 ? '' : 's'} on ${tool}, model ${model ?? 'the runner default'}, cap $${cap.toFixed(2)} for this home's rolling day`);
+    if (askShots || askCritic) {
+      const asked = [askShots ? "the art director plans each brief's shots first" : null, askCritic ? 'a job with no critic of its build in review gets a standalone check' : null];
+      log(`bench: ${asked.filter((line) => line !== null).join('; ')}`);
+    }
 
     for (const { entry, plan } of work) {
       if (stopped()) throw new Stop('stopped');
@@ -212,6 +271,13 @@ export async function runBench(options, deps) {
           // Stopped, cancelled, interrupted or gone: the next post is a new
           // attempt, and what the old one cost stays counted.
           if (typeof shown.json?.costUsd === 'number') previous = { ...previous, costUsd: shown.json.costUsd };
+          // Its picture checks were paid apart from the job's own cost.
+          const checked = criticCostOf(deps.readJob(previous.jobId)?.job);
+          if (checked !== null) previous = { ...previous, criticCostUsd: checked };
+          // Saved before any cap check below, so spent() counts what the old
+          // attempt really cost; `fresh` then carries the same sum in
+          // `earlierCostUsd`, so the total is the same before and after it.
+          put(previous);
           attempt += 1;
         }
       }
@@ -220,18 +286,70 @@ export async function runBench(options, deps) {
         // A new attempt carries what earlier attempts of this brief cost, so
         // the run's own sum never forgets money already spent.
         const newAttempt = previous !== undefined && attempt > (previous.tries ?? 0);
-        const earlierCostUsd = (previous?.earlierCostUsd ?? 0) + (newAttempt ? (previous?.costUsd ?? 0) : 0);
-        put({ ...emptyResult(entry.id), id: entry.id, slug, state: 'posting', tries: attempt, stopped: false, earlierCostUsd });
+        const earlierCostUsd = (previous?.earlierCostUsd ?? 0) + (newAttempt ? (previous?.costUsd ?? 0) + (previous?.criticCostUsd ?? 0) : 0);
+        const body = jobBody(entry, { label, tool, model, attempt });
+        // A plan already recorded stands: a resume never pays for a second one.
+        let shots = askShots ? (previous?.shots ?? null) : null;
+        // A standalone check already paid for stays counted too (a check only
+        // runs on a landed video, which a resume skips, so this is a guard).
+        const fresh = { ...emptyResult(entry.id), id: entry.id, slug, tries: attempt, stopped: false, earlierCostUsd, checkCostUsd: previous?.checkCostUsd ?? null };
+        // Every paid call is preceded, after the last await before it, by a
+        // stop check and a cap check. A record whose post may already have
+        // reached the runner is left as it is, so a resume reposts it under
+        // the same idempotency key rather than queueing a second job.
+        const hold = (why, reason) => {
+          const now = results.get(entry.id);
+          if (!(now?.state === 'posting' || now?.state === 'unanswered') || now.tries !== attempt) {
+            put({ ...fresh, state: 'not-posted', shots, error: `not posted: ${why}` });
+          }
+          throw new Stop(reason);
+        };
+        const capReason = () => `this run's recorded cost, $${spent().toFixed(2)}, has reached the $${cap.toFixed(2)} cap`;
+        if (askShots && !shotsKept(shots)) {
+          if (stopped()) hold('the bench was stopped before its shot plan was asked for', 'stopped');
+          if (spent() >= cap) hold('the run reached its cap before its shot plan', capReason());
+          put({ ...fresh, state: 'planning', shots: null });
+          let planned;
+          try {
+            planned = await call(base, 'POST', '/api/video/shots', { brief: body }, { timeoutMs: 30 * 60_000 });
+          } catch (error) {
+            put({ ...results.get(entry.id), state: 'unanswered', error: `the shot plan request did not get an answer: ${error.message}` });
+            throw new Stop(`${entry.id}: the runner did not answer the shot plan request`);
+          }
+          if (planned.status !== 200) {
+            const message = refusalMessage(planned);
+            const refused = { state: 'refused', costUsd: null, reason: message, types: null, brief: null };
+            put({ ...results.get(entry.id), state: 'refused', shots: refused, error: `the shot plan was refused, ${message}` });
+            if (planned.status === 429) throw new Stop(`${entry.id}: the runner refused its shot plan at the daily cap (${message})`);
+            log(`${entry.id}: shot plan refused, ${message}`);
+            if (options.keepGoing !== true) throw new Stop(`${entry.id}'s shot plan was refused; pass --keep-going to carry on past a refusal`);
+            continue;
+          }
+          shots = shotsRecord(planned.json);
+          put({ ...results.get(entry.id), shots });
+          const cost = shots.costUsd === null ? '' : `, $${shots.costUsd.toFixed(2)}`;
+          log(`${entry.id}: shots ${shots.state}${cost}${shots.types === null ? '' : `, ${shots.types.join(' ')}`}${shots.reason === null ? '' : `, ${shots.reason}`}`);
+          if (shots.state === 'off' && options.keepGoing !== true) {
+            put({ ...results.get(entry.id), state: 'not-posted', error: `the run asked for shots and the runner cannot plan them: ${shots.reason ?? 'the art director is off'}` });
+            throw new Stop(`${entry.id}: the runner's art director is off; pass --keep-going to post the briefs without shots`);
+          }
+        }
+        // A stop that arrived while the plan was being made (or while a
+        // resume asked about an old job) is honoured before any paid video
+        // work is queued. A plan is already in the run file, so a resume posts
+        // it without paying for it again; the cap counts the plan just paid for.
+        if (stopped()) hold('the bench was stopped before the job was queued', 'stopped');
+        if (spent() >= cap) hold(shots?.costUsd > 0 ? 'the run reached its cap with this shot plan' : 'the run reached its cap before the job was queued', capReason());
+        put({ ...fresh, state: 'posting', shots });
         let answer;
         try {
-          answer = await call(base, 'POST', '/api/jobs', jobBody(entry, { label, tool, model, attempt }), { timeoutMs: 120_000 });
+          answer = await call(base, 'POST', '/api/jobs', plannedBody(body, shots), { timeoutMs: 120_000 });
         } catch (error) {
           put({ ...results.get(entry.id), state: 'unanswered', error: `the post did not get an answer: ${error.message}` });
           throw new Stop(`${entry.id}: the runner did not answer the post`);
         }
         if (answer.status !== 200 && answer.status !== 201) {
-          const reason = answer.json?.detail?.reason ?? null;
-          const message = `${answer.status}${reason === null ? '' : ` ${reason}`}: ${answer.json?.error ?? answer.text ?? ''}`.trim();
+          const message = refusalMessage(answer);
           put({ ...results.get(entry.id), state: 'refused', error: message });
           if (answer.status === 429) throw new Stop(`${entry.id}: the runner refused it at the daily cap (${message})`);
           log(`${entry.id}: refused, ${message}`);
@@ -282,7 +400,47 @@ export async function runBench(options, deps) {
           error = `accept answered ${accepted.status}: ${accepted.json?.error ?? accepted.json?.note ?? ''}`.trim();
         }
       }
+      // The picture check of a landed video: the job's own, read from its
+      // view, or with --critic a standalone one when the job has no read of
+      // the build in review. Never a standalone check of a job that has one.
+      let critic = null;
+      let criticStop = null;
+      // What the job just cost, and what the runner's own checks of it cost,
+      // go into the run file before any decision about another paid call, so
+      // the cap below counts them.
+      const settledCost = recordFields(deps.readJob(jobId));
+      put({
+        ...results.get(entry.id),
+        costUsd: settledCost.costUsd ?? (typeof view.costUsd === 'number' ? view.costUsd : null),
+        criticCostUsd: settledCost.criticCostUsd,
+      });
+      if (state === 'accepted') {
+        const after = await call(base, 'GET', `/api/jobs/${encodeURIComponent(jobId)}`).catch(() => null);
+        const jobView = after?.status === 200 ? after.json : view;
+        critic = criticFromView(jobView?.critic ?? null);
+        if (!criticCurrent(critic) && askCritic) {
+          // Checked after the GET above, the last await before the paid call.
+          // A stop keeps the landed video's record as it is (accepted, its
+          // costs, its job's own critic) and ends the run; `score` checks it later.
+          if (stopped()) {
+            log(`${entry.id}: no standalone critic, the bench was stopped`);
+            criticStop = 'stopped';
+          } else if (spent() >= cap) log(`${entry.id}: no standalone critic, the run's recorded cost has reached the cap`);
+          else {
+            const checked = await standaloneCritic(call, base, jobId, jobView);
+            critic = checked.critic;
+            log(`${entry.id}: standalone critic ${verdictLine(critic)}`);
+            if (checked.stop !== null && (checked.status !== 503 || options.keepGoing !== true)) {
+              criticStop = `${entry.id}: ${checked.stop}${checked.status === 503 ? '; pass --keep-going to carry on without it' : ''}`;
+            }
+          }
+        }
+      }
       const fields = recordFields(deps.readJob(jobId), Math.round((now() - posted) / 100) / 10);
+      // This run's standalone check, added to any the record already carried.
+      const priorCheck = results.get(entry.id)?.checkCostUsd;
+      const thisCheck = critic?.source === 'standalone' && typeof critic.costUsd === 'number' ? critic.costUsd : null;
+      const checkCostUsd = thisCheck === null && typeof priorCheck !== 'number' ? null : (typeof priorCheck === 'number' ? priorCheck : 0) + (thisCheck ?? 0);
       // Look metrics only for a video that landed: a failed job's kept source
       // can be the untouched scene stub, which scans as a busy picture.
       const metrics = state === 'accepted' ? deps.metrics(jobId) : null;
@@ -296,12 +454,16 @@ export async function runBench(options, deps) {
         state,
         ...fields,
         metrics,
+        shots: results.get(entry.id)?.shots ?? null,
+        critic,
+        checkCostUsd,
         error,
         errorKind: view.errorKind ?? null,
       };
       put(result);
       log(`${entry.id}: ${state}${result.costUsd === null ? '' : `, $${result.costUsd.toFixed(2)}`}${error === null ? '' : `, ${error}`}`);
       if (acceptFailed && options.keepGoing !== true) throw new Stop(`${entry.id}: the accept failed; pass --keep-going to carry on past it`);
+      if (criticStop !== null) throw new Stop(criticStop);
       if (state === 'failed' && SYSTEMIC_ERRORS.includes(view.errorKind) && options.keepGoing !== true) {
         throw new Stop(`${entry.id} failed with error kind ${view.errorKind}, which says the machine is the problem; pass --keep-going to carry on`);
       }
