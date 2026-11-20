@@ -73,6 +73,21 @@ export function turnsOf(job, attempts) {
   return typeof job?.turns === 'number' ? job.turns : null;
 }
 
+/**
+ * What the runner's own picture checks of a job's attempts cost, from the run
+ * history in its `job.json` (`critic`, each run marked `standalone` or not).
+ * A critic's cost is never on the job's `cost_usd` (docs/STUDIO-VIDEOS.md,
+ * "The critic"), so it is read here. A standalone check is left out: the
+ * bench asked for it to measure the video, and counts it apart, in
+ * `checkCostUsd`. Null when the job kept no critic history.
+ */
+export function criticCostOf(job) {
+  if (!Array.isArray(job?.critic)) return null;
+  return job.critic
+    .filter((run) => run?.standalone !== true)
+    .reduce((sum, run) => sum + (typeof run?.costUsd === 'number' && Number.isFinite(run.costUsd) ? run.costUsd : 0), 0);
+}
+
 const seconds = (from, to) => {
   const start = Date.parse(from ?? '');
   const end = Date.parse(to ?? '');
@@ -93,6 +108,7 @@ export function recordFields({ job, run }, measuredSeconds = null) {
     attempts: attempts.length > 0 ? attempts.length : typeof job?.attempt === 'number' ? job.attempt : null,
     turns: turnsOf(job, attempts),
     costUsd: typeof job?.costUsd === 'number' ? job.costUsd : null,
+    criticCostUsd: criticCostOf(job),
     wallSeconds: seconds(job?.startedAt, job?.finishedAt) ?? measuredSeconds,
     renderSeconds: typeof run?.renderSeconds === 'number' ? run.renderSeconds : null,
     manualHash: run?.manualHash ?? job?.manualHash ?? null,

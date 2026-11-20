@@ -8,14 +8,18 @@
 //
 //   validate                       every brief against the bench rules and the studio's validator
 //   setup --home DIR [--reuse]     build a scratch home: catalog, seed, bench topics, studio state
-//   run --home DIR --label NAME --tool TOOL --cap USD [--model ID] [--only a,b] [--port N] [--keep-going] [--resume]
-//                                  post each brief, follow it, accept it into the scratch catalog
+//   run --home DIR --label NAME --tool TOOL --cap USD [--model ID] [--only a,b] [--port N] [--keep-going] [--resume] [--shots] [--critic]
+//                                  post each brief, follow it, accept it into the scratch catalog;
+//                                  --shots plans each brief's shots first, --critic checks a video
+//                                  whose job has no critic of its build in review
+//   score --home DIR --label NAME --cap USD [--port N] [--only a,b] [--again]
+//                                  the critic's scores for a run that already exists
 //   compare --home DIR A B [--json]
 //                                  two runs side by side
-//   dry-run --tool TOOL [--only a,b] [--label NAME] [--json]
+//   dry-run --tool TOOL [--only a,b] [--label NAME] [--shots] [--critic] [--json]
 //                                  what run would post; no network, nothing started
 //
-// A run spends money: it starts paid agent sessions. --cap has no default.
+// A run and a score spend money: they start paid agent sessions. --cap has no default.
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -31,6 +35,7 @@ import { DEFAULT_PORT, homePaths, homeRefusal, parseCap, readMarker, runnerEnv, 
 import { readJobFiles, sourceMetrics } from './lib/bench-video/metrics.mjs';
 import { readRun, runBench } from './lib/bench-video/run.mjs';
 import { call, portFree, startRunner, stopTree } from './lib/bench-video/runner.mjs';
+import { scoreRun } from './lib/bench-video/score.mjs';
 import { validateBench } from './lib/bench-video/validate.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -115,7 +120,11 @@ async function verbSetup(args) {
 }
 
 function verbDryRun(args) {
-  const { values } = parseArgs({ args, options: { tool: { type: 'string' }, only: { type: 'string' }, label: { type: 'string' }, json: { type: 'boolean' } }, strict: true });
+  const { values } = parseArgs({
+    args,
+    options: { tool: { type: 'string' }, only: { type: 'string' }, label: { type: 'string' }, json: { type: 'boolean' }, shots: { type: 'boolean' }, critic: { type: 'boolean' } },
+    strict: true,
+  });
   const chosen = tool(values.tool);
   const name = label(values.label ?? 'dry');
   const entries = selectBriefs(loadBriefs(), only(values.only));
@@ -128,7 +137,97 @@ function verbDryRun(args) {
     process.stdout.write(`  ${entry.id.padEnd(24)} slug ${runSlug(entry.id, name).padEnd(34)} ${String(entry.brief.targetSeconds).padStart(3)} s target, ${predictedSeconds(entry.brief).toFixed(1)} s predicted\n`);
   }
   process.stdout.write(`predicted at ${FALLBACK_CHARS_PER_SECOND} characters a second, the studio's fallback; the runner uses gnosia-audio's rate\n`);
+  process.stdout.write(
+    values.shots === true
+      ? 'shots: asked for; each brief goes to POST /api/video/shots first, and the planned brief is posted (paid, once per brief)\n'
+      : 'shots: not asked for; each brief is posted as stored, with no shot plan (--shots asks for one)\n',
+  );
+  process.stdout.write(
+    values.critic === true
+      ? "critic: each landed video's own critic is read from its job, and a job with none of its build in review gets a standalone check (paid)\n"
+      : "critic: each landed video's own critic is read from its job; no standalone check is asked for (--critic asks for one)\n",
+  );
   return 0;
+}
+
+/**
+ * The signal handling `run` and `score` share: the first SIGINT, SIGTERM or
+ * SIGHUP asks the loop to stop (it cancels the running job and stops the
+ * runner); a second asks the runner to cancel the job while it still
+ * answers, then stops it and every process group it started.
+ */
+function signals(port) {
+  const state = { interrupted: false, runnerPid: null, currentJob: null, cancels: true };
+  for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+    process.on(signal, () => {
+      if (state.interrupted) {
+        if (state.runnerPid === null) process.exit(130);
+        const base = `http://127.0.0.1:${port}`;
+        const cancel = state.currentJob === null || !state.cancels ? Promise.resolve() : call(base, 'POST', `/api/jobs/${encodeURIComponent(state.currentJob)}/cancel`, {}, { timeoutMs: 2_000 }).catch(() => null);
+        void cancel
+          .then(() => stopTree(state.runnerPid, { graceMs: 2_000 }))
+          .then((stopped) => {
+            process.stderr.write(
+              stopped.clean
+                ? 'bench:video: the runner and every process group it started are stopped\n'
+                : `bench:video: process groups ${stopped.survivors.join(', ')} survived SIGKILL; check them with ps -g and stop them by hand\n`,
+            );
+          })
+          .finally(() => process.exit(130));
+        return;
+      }
+      state.interrupted = true;
+      process.stderr.write(`\nbench:video: ${signal}; ${state.cancels ? 'cancelling the running job and ' : ''}stopping the runner (again to force)\n`);
+    });
+  }
+  return state;
+}
+
+/** `--cap` and `--port` as `run` and `score` take them, checked. */
+function capAndPort(values) {
+  if (values.cap === undefined) throw new Usage('--cap is required: the most this home may spend in a rolling day, in US dollars, such as --cap 10');
+  const cap = parseCap(values.cap);
+  if (cap === null) throw new Usage(`--cap must be a number of dollars above zero, written as digits (10 or 7.50), not "${values.cap}"`);
+  const port = values.port === undefined ? DEFAULT_PORT : Number(values.port);
+  if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Usage('--port must be a whole number from 1024 to 65535');
+  if (port === STUDIO_PORT) throw new Usage(`--port ${STUDIO_PORT} is the studio's own port; the bench runs its own runner on another (default ${DEFAULT_PORT})`);
+  return { cap, port };
+}
+
+async function verbScore(args) {
+  const { values } = parseArgs({
+    args,
+    options: { home: { type: 'string' }, label: { type: 'string' }, cap: { type: 'string' }, port: { type: 'string' }, only: { type: 'string' }, again: { type: 'boolean' } },
+    strict: true,
+  });
+  const home = benchHome(values.home);
+  const name = label(values.label);
+  const { cap, port } = capAndPort(values);
+  if (readMarker(home) === null) throw new Usage(`${home} is not a bench home (no ${homePaths(home).marker}); run setup first`);
+  const paths = homePaths(home);
+  const runFile = join(paths.runs, `${name}.json`);
+  if (!existsSync(runFile)) throw new Usage(`no run ${name} in this home (${runFile}); score reads a run that already exists`);
+
+  // A standalone check cannot be cancelled through a job route, so a signal stops the runner.
+  const state = signals(port);
+  state.cancels = false;
+  const run = await scoreRun(
+    { home, label: name, cap, port, only: only(values.only), again: values.again === true, runFile },
+    {
+      envFor: (options) => runnerEnv(process.env, { home: options.home, port: options.port, cap: values.cap.trim() }),
+      start: (env) => startRunner({ root: ROOT, env, port, logFile: join(paths.runs, `${name}.score.runner.log`), onSpawn: (pid) => (state.runnerPid = pid) }),
+      call,
+      portFree,
+      readJob: (jobId) => readJobFiles(paths.studio, jobId),
+      log: (line) => process.stdout.write(`${line}\n`),
+      stopped: () => state.interrupted,
+      onJob: (jobId) => (state.currentJob = jobId),
+    },
+  );
+  const scored = run.results.filter((result) => result.state === 'accepted' && result.critic !== null && result.critic !== undefined).length;
+  const accepted = run.results.filter((result) => result.state === 'accepted').length;
+  process.stdout.write(`wrote ${runFile}: ${scored} of ${accepted} accepted video${accepted === 1 ? '' : 's'} have a critic recorded${run.scoring?.stopReason === undefined ? '' : `; stopped: ${run.scoring.stopReason}`}\n`);
+  return state.interrupted ? 130 : run.scoring?.stopReason === undefined ? 0 : 1;
 }
 
 async function verbRun(args) {
@@ -144,18 +243,15 @@ async function verbRun(args) {
       port: { type: 'string' },
       'keep-going': { type: 'boolean' },
       resume: { type: 'boolean' },
+      shots: { type: 'boolean' },
+      critic: { type: 'boolean' },
     },
     strict: true,
   });
   const home = benchHome(values.home);
   const name = label(values.label);
   const chosen = tool(values.tool);
-  if (values.cap === undefined) throw new Usage('--cap is required: the most this home may spend in a rolling day, in US dollars, such as --cap 10');
-  const cap = parseCap(values.cap);
-  if (cap === null) throw new Usage(`--cap must be a number of dollars above zero, written as digits (10 or 7.50), not "${values.cap}"`);
-  const port = values.port === undefined ? DEFAULT_PORT : Number(values.port);
-  if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Usage('--port must be a whole number from 1024 to 65535');
-  if (port === STUDIO_PORT) throw new Usage(`--port ${STUDIO_PORT} is the studio's own port; the bench runs its own runner on another (default ${DEFAULT_PORT})`);
+  const { cap, port } = capAndPort(values);
   const model = values.model ?? null;
   if (model !== null && !isAgentModel(model)) throw new Usage(`--model "${model}" is not a model name the claude CLI takes`);
   if (readMarker(home) === null) throw new Usage(`${home} is not a bench home (no ${homePaths(home).marker}); run setup first`);
@@ -173,55 +269,37 @@ async function verbRun(args) {
     libraryNames = (await manimkcLibraryNames(process.env.MANIMKC_ROOT?.trim() || join(ROOT, 'tools', 'manimkc'))) ?? undefined;
   }
 
-  let interrupted = false;
-  let runnerPid = null;
-  let currentJob = null;
-  for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
-    process.on(signal, () => {
-      if (interrupted) {
-        // A second signal: stop the runner now and leave.
-        // A second signal: ask the runner to cancel the job while it still
-        // answers, then stop it and every process group it started.
-        if (runnerPid === null) process.exit(130);
-        const base = `http://127.0.0.1:${port}`;
-        const cancel = currentJob === null ? Promise.resolve() : call(base, 'POST', `/api/jobs/${encodeURIComponent(currentJob)}/cancel`, {}, { timeoutMs: 2_000 }).catch(() => null);
-        void cancel
-          .then(() => stopTree(runnerPid, { graceMs: 2_000 }))
-          .then((stopped) => {
-            process.stderr.write(
-              stopped.clean
-                ? 'bench:video: the runner and every process group it started are stopped\n'
-                : `bench:video: process groups ${stopped.survivors.join(', ')} survived SIGKILL; check them with ps -g and stop them by hand\n`,
-            );
-          })
-          .finally(() => process.exit(130));
-        return;
-      }
-      interrupted = true;
-      process.stderr.write(`\nbench:video: ${signal}; cancelling the running job and stopping the runner (again to force)\n`);
-    });
-  }
-
+  const state = signals(port);
   const run = await runBench(
-    { home, label: name, tool: chosen, model, cap, port, keepGoing: values['keep-going'] === true, resume: values.resume === true, entries, runFile },
+    {
+      home,
+      label: name,
+      tool: chosen,
+      model,
+      cap,
+      port,
+      keepGoing: values['keep-going'] === true,
+      resume: values.resume === true,
+      shots: values.shots === true,
+      critic: values.critic === true,
+      entries,
+      runFile,
+    },
     {
       envFor: (options) => runnerEnv(process.env, { home: options.home, port: options.port, cap: values.cap.trim() }),
-      start: async (env) => {
-        const started = await startRunner({ root: ROOT, env, port, logFile: join(paths.runs, `${name}.runner.log`), onSpawn: (pid) => (runnerPid = pid) });
-        return started;
-      },
+      start: (env) => startRunner({ root: ROOT, env, port, logFile: join(paths.runs, `${name}.runner.log`), onSpawn: (pid) => (state.runnerPid = pid) }),
       call,
       portFree,
       readJob: (jobId) => readJobFiles(paths.studio, jobId),
       metrics: (jobId) => sourceMetrics(paths.studio, jobId, chosen, libraryNames),
       log: (line) => process.stdout.write(`${line}\n`),
-      stopped: () => interrupted,
-      onJob: (jobId) => (currentJob = jobId),
+      stopped: () => state.interrupted,
+      onJob: (jobId) => (state.currentJob = jobId),
     },
   );
   const settled = run.results.filter((result) => ['accepted', 'failed', 'cancelled'].includes(result.state)).length;
   process.stdout.write(`wrote ${runFile}: ${settled} of ${run.results.length} recorded brief${run.results.length === 1 ? '' : 's'} settled${run.stopReason === undefined ? '' : `; stopped: ${run.stopReason}`}\n`);
-  return interrupted ? 130 : run.stopReason === undefined ? 0 : 1;
+  return state.interrupted ? 130 : run.stopReason === undefined ? 0 : 1;
 }
 
 function verbCompare(args) {
@@ -244,11 +322,13 @@ const USAGE = `usage: npm run bench:video -- <verb>
 
   validate
   setup --home DIR [--reuse]
-  run --home DIR --label NAME --tool ${BENCH_TOOLS.join('|')} --cap USD [--model ID] [--only id,id] [--port N] [--keep-going] [--resume]
+  run --home DIR --label NAME --tool ${BENCH_TOOLS.join('|')} --cap USD [--model ID] [--only id,id] [--port N]
+      [--keep-going] [--resume] [--shots] [--critic]
+  score --home DIR --label NAME --cap USD [--port N] [--only id,id] [--again]
   compare --home DIR <labelA> <labelB> [--json]
-  dry-run --tool ${BENCH_TOOLS.join('|')} [--only id,id] [--label NAME] [--json]
+  dry-run --tool ${BENCH_TOOLS.join('|')} [--only id,id] [--label NAME] [--shots] [--critic] [--json]
 
-docs/STUDIO-BENCH.md has the rest. A run starts paid agent sessions.`;
+docs/STUDIO-BENCH.md has the rest. A run and a score start paid agent sessions.`;
 
 async function main(argv) {
   const [verb, ...rest] = argv;
@@ -260,6 +340,8 @@ async function main(argv) {
         return await verbSetup(rest);
       case 'run':
         return await verbRun(rest);
+      case 'score':
+        return await verbScore(rest);
       case 'compare':
         return verbCompare(rest);
       case 'dry-run':

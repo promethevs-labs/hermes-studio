@@ -57,9 +57,10 @@ Add `--silent` before `bench:video` when you pipe `--json` output.
 | Verb | What it does |
 | --- | --- |
 | `validate` | Checks every brief against the bench's rules and against `validateVideoBrief` itself, with each of manimkc, remotionkc and revideokc. No network, nothing started |
-| `dry-run --tool T [--only a,b] [--label L] [--json]` | Prints what `run` would post: ids, slugs and predicted seconds, or the bodies with `--json`. No network, nothing started |
+| `dry-run --tool T [--only a,b] [--label L] [--shots] [--critic] [--json]` | Prints what `run` would post: ids, slugs and predicted seconds, and whether shots and a standalone critic would be asked for, or the job bodies with `--json`. No network, nothing started |
 | `setup --home DIR [--reuse]` | Builds a scratch home (below) |
-| `run --home DIR --label L --tool T --cap USD [--model M] [--only a,b] [--port N] [--keep-going] [--resume]` | Posts each brief, one at a time, to a runner it starts, follows each job, accepts it, and writes the run file. This is the verb that spends money |
+| `run --home DIR --label L --tool T --cap USD [--model M] [--only a,b] [--port N] [--keep-going] [--resume] [--shots] [--critic]` | Posts each brief, one at a time, to a runner it starts, follows each job, accepts it, reads its critic, and writes the run file. This is the verb that spends money |
+| `score --home DIR --label L --cap USD [--port N] [--only a,b] [--again]` | Asks the critic about each accepted video of a run that already exists and has no critic recorded, and writes the scores into its run file. It spends money too |
 | `compare --home DIR A B [--json]` | Compares two run labels in the same home |
 
 The predicted seconds in `validate` and `dry-run` use the studio's fallback
@@ -147,10 +148,17 @@ every noted group still alive, and polls each one. The log says when all
 are stopped, or which groups survived.
 
 The run file is written after every step: `{ label, tool, model, capUsd,
-startedAt, endedAt, manualHashes, results, stopReason? }`, each result `{ id,
-jobId, state, gateOk, attempts, turns, costUsd, wallSeconds, renderSeconds,
-metrics: { variety, helperTop5Share, fadeShare, uses3d } | null, error }`,
-plus `slug`, `tries`, `errorKind` and `earlierCostUsd`. `wallSeconds` is the
+shotsAsked, criticAsked, startedAt, endedAt, manualHashes, results,
+stopReason?, scoring? }`, each result `{ id, jobId, state, gateOk, attempts,
+turns, costUsd, wallSeconds, renderSeconds, metrics: { variety,
+helperTop5Share, fadeShare, uses3d } | null, shots, critic, criticCostUsd,
+checkCostUsd, error }`, plus `slug`, `tries`, `errorKind` and
+`earlierCostUsd`. `shots` and `critic` are below. `criticCostUsd` is what the
+runner's own picture checks of the job's attempts cost, read from the run
+history in its `job.json`, since a critic's cost is never on the job's own
+`cost_usd`. `checkCostUsd` is what the standalone checks the bench asked for
+cost. Both count toward the cap; only the first is part of what making the
+video cost, which `compare` sets side by side. `wallSeconds` is the
 job record's start to finish, else the bench's own clock. `turns` is the sum
 over `run.json`'s attempts when every attempt has a count, since the job
 record's own `turns` is the last attempt's alone, and that figure otherwise. A label whose run
@@ -162,6 +170,9 @@ the job it already has rather than queueing a second, and posts the rest as
 a new attempt, which is paid again. What an earlier attempt cost stays in `earlierCostUsd` and counts
 toward the cap.
 
+A resume must ask for shots the same way the run did (`--shots` or not), or
+it is refused; `--critic` may differ.
+
 The look metrics come from the job's kept scene source, `jobs/<id>/source/`
 under `DIR/studio`, scanned by the catalog's own `scanSources`
 (`services/catalog/src/ingredients/scan.ts`), with manimkc's library names
@@ -171,6 +182,75 @@ than by job. A result has metrics only when its state is `accepted`: a
 failed job can keep the untouched scene stub, which scans like a busy
 picture. `compare` likewise leaves any result that did not land out of the
 look means.
+
+## Shots
+
+The stored briefs carry no shots, on purpose: with `run --shots` the art
+director plans them afresh on each run. Before each brief is posted, the
+bench sends it, exactly as it is about to be posted, to `POST
+/api/video/shots` (docs/STUDIO-VIDEOS.md, "The shot plan"), and records the
+answer on the result as `shots: { state, costUsd, reason, types, brief }`:
+
+| `state` | What the bench does |
+| --- | --- |
+| `planned`, `reused` | Posts the brief the route answered, which carries `scenes[].shot`, under the run's own slug, tool, model and key. `types` is each scene's shot type, and `brief` the planned brief |
+| `failed` | Posts the stored brief with no shots, and keeps the route's reason |
+| `off` | Stops before posting, since the run asked for shots and the runner cannot plan them (`STUDIO_ART_DIRECTOR=off`); with `--keep-going` it posts the stored brief |
+| `refused` | The route did not answer 200. A 429 stops the run cleanly, as the enqueue's does; anything else stops it unless `--keep-going` |
+
+The art director's cost counts in the bench's own cap arithmetic and in the
+totals. The bench checks its cap again after a plan and stops before posting
+the job when the plan reached it. A resume never pays for a second plan: a
+result recorded as `planned`, `reused` or `failed` keeps what it has, and the
+planned brief in the run file is posted again. A plan request that got no
+answer is asked again on a resume, and anything it cost is not known to the
+bench (the runner's cap still counts it).
+
+## The critic
+
+After a job is accepted the bench reads its `critic` from `GET
+/api/jobs/{id}` (docs/STUDIO-VIDEOS.md, "The critic") and records it on every
+run as `critic: { source, attempt, current, scores, mean, defects, notes,
+sentBack, passed, error }`. `source` is `job` for the runner's own check and
+`standalone` for one the bench asked for. `current` says whether the scores
+are of the build in review. `mean` is the mean of the five scores. `passed`
+is D116 of docs/STUDIO-LOOK.md: the critic's read of the last attempt names
+no defect; the scores never block. It is null when the build in review was
+not scored, and `error` then says why.
+
+With `run --critic`, a landed video whose job has no critic of its build in
+review (the runner's critic is off, or its check gave no answer) gets a
+standalone check, `POST /api/jobs/{id}/critic`, recorded with `source:
+"standalone"` and its cost in `checkCostUsd`, counted toward the cap. A job that already has a critic of the
+build in review is never checked again. A 409 (no kept sheet) is recorded and
+the run goes on, a 429 stops it, and a 503 (`STUDIO_VIDEO_CRITIC=off`) stops
+it unless `--keep-going`. The video itself is already recorded as accepted
+when that happens, so `score` can check it later.
+
+`score` does the same for a run file that already exists, such as a baseline
+made before the critic did. It starts a runner over the home as `run` does,
+with the same guards (the port free, the cap in force, the claude CLI found)
+except the tool's doctor, which reading kept sheets does not need. For each
+accepted result with no critic recorded, it reads the job's own critic first
+and records that when it is of the build in review, paying nothing; else it
+calls the standalone route. Each answer is written into the run file as it
+comes (atomically), so a stop leaves what was scored and the next `score`
+carries on. A result a standalone check already answered for, a 409
+included, is left alone unless `--again`. A 409 is recorded and the scoring
+goes on; a 429, a 503 or no answer stops it. `--cap` is required. Its own
+stop is what this scoring spent reaching the cap, kept in the run file's
+`scoring: { startedAt, endedAt, capUsd, spentUsd, stopReason? }`; the
+runner's rolling day counts the run's earlier spending as well. Never run
+`score` on a home while a `run` on it is going.
+
+## A before and after
+
+1. `run` the baseline, before the changes: `run --label base`.
+2. `score` it: `score --label base`, which gives the baseline the critic's
+   scores whether or not the runner had a critic when it ran.
+3. After the changes, `run --shots --label art`. The runner's critic scores
+   each attempt as it goes; add `--critic` to check any video it did not.
+4. `compare base art`.
 
 ## Starting a real run on the owner's Mac
 
@@ -198,6 +278,12 @@ Unknown until measured. Past studio videos cost about $2 to $3.60 each, and
 these are 60 to 75 seconds, so a guess for twelve is $25 to $45 a run. The
 first real run is the measurement.
 
+What the art director's plan (`--shots`), the runner's own critic and a
+standalone check (`--critic`, `score`) cost per brief is unmeasured too,
+until the first real run that uses them. Each is recorded per result
+(`shots.costUsd`, `criticCostUsd`, `checkCostUsd`) and counted toward the
+cap.
+
 A paid run needs the owner's go-ahead and `--cap`, which has no default. The
 cap is the runner's `STUDIO_DAILY_USD`: a rolling 24 hours over everything
 this home's runner spent, checked when a job is queued. It never stops a job
@@ -209,22 +295,36 @@ already running, so a run can end up to one job's cost over the cap.
 numbers (variety, top-five helper share, fade share, 3D) with each mean and
 difference taken over the briefs measured on both sides, and a line saying
 how many pairs that was; and the run numbers (gate pass, attempts, turns,
-cost with earlier attempts included, wall minutes) with their totals. Each shows A, B and the difference.
-A brief only one run has is listed below the tables and left out of both.
+cost with earlier attempts, the shot plan and the runner's own picture checks
+included, and a standalone check left out since it measures rather than
+makes the video, wall minutes) with their totals. Each shows A, B and the difference.
+A brief only one run has is listed below the tables and left out of all of them.
 `--json` prints the same comparison as data.
 
-`lookColumns` in `scripts/lib/bench-video/compare.mjs` is where critic scores
-join later: a result that carries `critic: { <name>: <number> }` gets a look
-column for each name, compared like the scanner's numbers.
+When either run carries critic scores or shot plans, two more tables follow.
+The first has the critic's mean, the pass or fail (D116, counted on the last
+line), the distinct shot types per video and the art director's cost. The
+second has each of the five critic dimensions. Every mean and its difference
+cover only the briefs measured on both sides, with the pairs shown, so a
+baseline with no shots and a run with them shows each side's figures per
+brief and no shot type mean. A critic of an earlier build than the one in
+review, or of a video that did not land, is left out. With neither run
+carrying them, the output is as before. `lookColumns` and `runColumns` in
+`scripts/lib/bench-video/compare.mjs` are where the columns are chosen.
 
 ## What the tests cover
 
 The tests make no paid call and write only under the OS temp directory:
 every brief passes `validateVideoBrief` with the bench vocabulary and stays
 in the band; ids and needs are unique; `compare`'s exact text on two fixture
-runs; `run`'s loop against a stand-in HTTP server that plays a runner
-(the guard's header rules, a doctor that answers late, 201, 409, 429, a
-failed job, a stop mid-job, a resume and the cap); and `setup`'s refusals.
+runs, with the critic and shots on one side, on both and on neither; `run`'s
+loop against a stand-in HTTP server that plays a runner (the guard's header
+rules, a doctor that answers late, 201, 409, 429, a failed job, a stop
+mid-job, a resume and the cap; shots planned, reused on a resume with no
+second call, failed, off and refused at 429, the plan's cost in the cap; the
+critic read from the job, and the standalone route called only when needed);
+`score` over an existing run file with a 409 and a 429; and `setup`'s
+refusals.
 No test runs the loop against the real `createApi`: that needs the catalog,
 the gate and a backend replaced, as `services/studio/test/video-run-record.test.ts`
 does, and the stand-in covers the same routes.

@@ -14,12 +14,32 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { readJobFiles, recordFields, sourceMetrics, turnsOf } from './metrics.mjs';
 import { planFor, runBench, toolReadiness } from './run.mjs';
 import { call, portFree } from './runner.mjs';
+import { scoreRun, wantsScore } from './score.mjs';
+import { costOf, knownCostOf } from './cost.mjs';
 
 const brief = (id) => ({
   id,
   needs: `needs of ${id}`,
-  brief: { title: `Title ${id}`, topic: 'computer-networks', slug: id, mode: 'new', idea: 'An idea.', audience: 'familiar', targetSeconds: 60, voice: 'af_heart', scenes: [], concepts: [] },
+  brief: {
+    title: `Title ${id}`,
+    topic: 'computer-networks',
+    slug: id,
+    mode: 'new',
+    idea: 'An idea.',
+    audience: 'familiar',
+    targetSeconds: 60,
+    voice: 'af_heart',
+    scenes: [
+      { name: 'Start', beats: [{ say: 'One.', show: 'A row of boxes.' }] },
+      { name: 'Middle', beats: [{ say: 'Two.', show: 'The boxes split.' }] },
+      { name: 'End', beats: [{ say: 'Three.', show: 'One box is left.' }] },
+    ],
+    concepts: [],
+  },
 });
+
+/** The critic's scores on the five dimensions. */
+const SCORES = { accuracy: 4, layout: 3, relevance: 5, variety: 3, pacing: 4 };
 
 const SCENE = `from manimlib import *
 
@@ -31,10 +51,16 @@ class A1_Start(Scene):
 
 /**
  * A stand-in runner. `scripts` maps a brief id to what its job does:
- * `{ enqueue: 201 | 409 | 429 | 503, polls, end: 'awaiting_review' | 'failed', cost, errorKind }`.
+ * `{ enqueue: 201 | 409 | 429 | 503, polls, end: 'awaiting_review' | 'failed', cost, errorKind }`,
+ * and to what the two newer routes answer for it:
+ * `shots: { status, shotPlan: 'planned' | 'failed' | 'off', cost, reason }` for
+ * `POST /api/video/shots` (planned by default), `critic` for the job view's own
+ * critic (a `criticView`, or null for none) with `criticCost` for what it spent,
+ * and `standalone: { status: 200 | 409 | 429 | 503, scores, defects, cost }` for
+ * `POST /api/jobs/{id}/critic`.
  */
 function standIn({ studioHome, scripts, capUsd = 5, doctorAfter = 1, toolAvailable = true }) {
-  const seen = { posts: [], accepts: [], cancels: [], refusedByGuard: [], health: 0 };
+  const seen = { posts: [], accepts: [], cancels: [], refusedByGuard: [], health: 0, shots: [], critics: [] };
   const jobs = new Map();
   let next = 1;
   const send = (res, status, body) => {
@@ -48,9 +74,26 @@ function standIn({ studioHome, scripts, capUsd = 5, doctorAfter = 1, toolAvailab
     // A failed job can keep the untouched scene stub, which scans like a picture.
     if (job.script.stub === true) writeFileSync(join(dir, 'source', 'scenes.py'), SCENE);
     const started = '2026-11-20T10:00:00.000Z';
+    // The critic's runs and spend sit apart from the job's cost, as the runner keeps them.
+    const critic = [
+      ...(typeof job.script.criticCost === 'number' ? [{ attempt: 2, standalone: false, startedAt: started, finishedAt: started, costUsd: job.script.criticCost }] : []),
+      ...job.standaloneSpend.map((costUsd) => ({ attempt: null, standalone: true, startedAt: started, finishedAt: started, costUsd })),
+    ];
+    const criticSpend = critic.map(({ startedAt, finishedAt, costUsd }) => ({ startedAt, finishedAt, costUsd }));
     writeFileSync(
       join(dir, 'job.json'),
-      JSON.stringify({ id: job.id, state: job.state, attempt: 2, turns: 31, costUsd: job.script.cost ?? 1.25, startedAt: started, finishedAt: '2026-11-20T10:12:30.000Z', gate: { ok: job.state !== 'failed' }, manualHash: 'abc123def456aaaa' }),
+      JSON.stringify({
+        id: job.id,
+        state: job.state,
+        attempt: 2,
+        turns: 31,
+        costUsd: job.script.cost ?? 1.25,
+        startedAt: started,
+        finishedAt: '2026-11-20T10:12:30.000Z',
+        gate: { ok: job.state !== 'failed' },
+        manualHash: 'abc123def456aaaa',
+        ...(critic.length === 0 ? {} : { critic, criticSpend }),
+      }),
     );
     writeFileSync(
       join(dir, 'run.json'),
@@ -82,6 +125,21 @@ function standIn({ studioHome, scripts, capUsd = 5, doctorAfter = 1, toolAvailab
           video: { tools: [{ name: 'manimkc', available: done && toolAvailable, reason: !done ? 'the manimkc doctor has not finished its first check' : toolAvailable ? null : 'this machine cannot make manimkc videos right now: venv: missing' }] },
         });
       }
+      if (req.method === 'POST' && req.url === '/api/video/shots') {
+        seen.shots.push(body);
+        const id = body.brief.slug.replace(/-[a-z0-9]+$/, '');
+        const plan = scripts[id]?.shots ?? {};
+        if ((plan.status ?? 200) === 429) return send(res, 429, { error: 'the studio has spent $5.10 in the last 24 hours', detail: { reason: 'daily-cap', totalUsd: 5.1, capUsd } });
+        if ((plan.status ?? 200) !== 200) return send(res, plan.status, { error: `refused with ${plan.status}`, detail: null });
+        const answered = { ...body.brief };
+        delete answered.kind;
+        const state = plan.shotPlan ?? 'planned';
+        const types = ['title', 'array-or-memory', 'recap-map'];
+        if (state === 'planned') {
+          answered.scenes = answered.scenes.map((scene, i) => ({ ...scene, shot: { type: types[i % types.length], layout: 'centre', motion: 'build', why: 'it fits' } }));
+        }
+        return send(res, 200, { brief: answered, shotPlan: state, costUsd: plan.cost ?? (state === 'planned' ? 0.3 : 0), ...(plan.reason === undefined ? {} : { reason: plan.reason }) });
+      }
       if (req.method === 'POST' && req.url === '/api/jobs') {
         seen.posts.push(body);
         const known = [...jobs.values()].find((job) => job.key === body.idempotencyKey);
@@ -91,7 +149,7 @@ function standIn({ studioHome, scripts, capUsd = 5, doctorAfter = 1, toolAvailab
         const status = script.enqueue ?? 201;
         if (status === 429) return send(res, 429, { error: 'the studio has spent $5.10 in the last 24 hours', detail: { reason: 'daily-cap', totalUsd: 5.1, capUsd } });
         if (status !== 201) return send(res, status, { error: `refused with ${status}`, detail: null });
-        const job = { id: `job-${next++}`, key: body.idempotencyKey, state: 'queued', polls: 0, script };
+        const job = { id: `job-${next++}`, key: body.idempotencyKey, state: 'queued', polls: 0, script, critic: script.critic ?? null, standaloneSpend: [] };
         jobs.set(job.id, job);
         return send(res, 201, { jobId: job.id, kind: 'video', state: 'queued', created: true });
       }
@@ -106,7 +164,31 @@ function standIn({ studioHome, scripts, capUsd = 5, doctorAfter = 1, toolAvailab
               writeFiles(job);
             } else job.state = 'running';
           }
-          return send(res, 200, { jobId: job.id, state: job.state, costUsd: ['running', 'cancelled'].includes(job.state) ? 0.4 : (job.script.cost ?? 1.25), error: job.state === 'failed' ? 'the gate failed: scene two runs long' : null, errorKind: job.state === 'failed' ? (job.script.errorKind ?? 'gate') : null });
+          return send(res, 200, {
+            jobId: job.id,
+            state: job.state,
+            attempt: 2,
+            costUsd: ['running', 'cancelled'].includes(job.state) ? 0.4 : (job.script.cost ?? 1.25),
+            error: job.state === 'failed' ? 'the gate failed: scene two runs long' : null,
+            errorKind: job.state === 'failed' ? (job.script.errorKind ?? 'gate') : null,
+            critic: ['awaiting_review', 'accepted'].includes(job.state) ? job.critic : null,
+          });
+        }
+        if (req.method === 'POST' && parts[3] === 'critic') {
+          seen.critics.push(job.id);
+          const answer = job.script.standalone ?? {};
+          const status = answer.status ?? 200;
+          if (status === 429) return send(res, 429, { error: 'the studio has spent $5.10 in the last 24 hours', detail: { reason: 'daily-cap' } });
+          if (status === 409) return send(res, 409, { error: `job ${job.id} has no contact sheet left to read`, detail: { reason: 'no-sheets' } });
+          if (status !== 200) return send(res, status, { error: 'the picture check is off (STUDIO_VIDEO_CRITIC=off), so no critic was run', detail: null });
+          const scores = answer.scores ?? SCORES;
+          const defects = answer.defects ?? [];
+          const costUsd = answer.cost ?? 0.12;
+          job.standaloneSpend.push(costUsd);
+          writeFiles(job);
+          // The standalone run is now the job's latest read of its build in review.
+          job.critic = { attempt: 2, attempts: 2, build: 2, current: true, unscoredReason: null, scores, defects, notes: ['a note'], sentBack: job.critic?.sentBack ?? [] };
+          return send(res, 200, { jobId: job.id, critic: { standalone: true, attempt: null, model: 'sonnet', costUsd, scores, defects, notes: ['a note'], sheets: [], skipped: [], error: null } });
         }
         if (req.method === 'POST' && parts[3] === 'accept') {
           seen.accepts.push(job.id);
@@ -313,6 +395,208 @@ describe('runBench', () => {
     const run = await runBench(options(['a-one', 'b-two', 'c-three'].map(brief)), deps().deps);
     expect(stand.seen.posts.map((post) => post.slug)).toEqual(['a-one-base', 'b-two-base']);
     expect(run.stopReason).toMatch(/recorded cost, \$6.00, has reached the \$5.00 cap/);
+  });
+});
+
+describe('run --shots', () => {
+  it('plans each brief with the body it will post, posts the planned brief, and records the plan', async () => {
+    stand = await standIn({ studioHome, scripts: {} });
+    const run = await runBench(options(['a-one'].map(brief), { shots: true }), deps().deps);
+    expect(stand.seen.refusedByGuard).toEqual([]);
+    // The plan was asked with the brief exactly as the job was going to be posted.
+    expect(stand.seen.shots).toHaveLength(1);
+    const asked = stand.seen.shots[0].brief;
+    expect(asked).toMatchObject({ kind: 'video', slug: 'a-one-base', tool: 'manimkc', model: 'sonnet', idempotencyKey: 'bench-video:base:a-one:1' });
+    expect(asked.scenes.every((scene) => scene.shot === undefined)).toBe(true);
+    const [posted] = stand.seen.posts;
+    expect(posted).toMatchObject({ kind: 'video', slug: 'a-one-base', tool: 'manimkc', model: 'sonnet', idempotencyKey: 'bench-video:base:a-one:1' });
+    expect(posted.scenes.map((scene) => scene.shot.type)).toEqual(['title', 'array-or-memory', 'recap-map']);
+    expect(run.shotsAsked).toBe(true);
+    expect(run.results[0]).toMatchObject({
+      state: 'accepted',
+      shots: { state: 'planned', costUsd: 0.3, reason: null, types: ['title', 'array-or-memory', 'recap-map'] },
+    });
+    expect(run.results[0].shots.brief.scenes[1].shot.type).toBe('array-or-memory');
+  });
+
+  it('counts the plan in the cap, and a resume reuses a recorded plan without asking again', async () => {
+    // a-one: 4.50 for the job and 0.30 for its plan. b-two's plan brings the
+    // run to 5.10, so it stops before b-two's job is posted.
+    stand = await standIn({ studioHome, scripts: { 'a-one': { cost: 4.5 }, 'b-two': { cost: 1 } } });
+    const first = await runBench(options(['a-one', 'b-two'].map(brief), { shots: true }), deps().deps);
+    expect(stand.seen.shots.map((asked) => asked.brief.slug)).toEqual(['a-one-base', 'b-two-base']);
+    expect(stand.seen.posts.map((post) => post.slug)).toEqual(['a-one-base']);
+    expect(first.stopReason).toMatch(/recorded cost, \$5.10, has reached the \$5.00 cap/);
+    expect(first.results[1]).toMatchObject({ id: 'b-two', jobId: null, state: 'not-posted', shots: { state: 'planned', costUsd: 0.3 } });
+
+    await expect(runBench(options(['a-one', 'b-two'].map(brief), { resume: true, cap: 10 }), deps().deps)).rejects.toThrow(/was run with --shots; a resume must ask for shots the same way/);
+    // The owner raises the cap; the runner over the home now reports $10.
+    await new Promise((resolve) => stand.server.close(resolve));
+    stand = await standIn({ studioHome, scripts: { 'b-two': { cost: 1 } }, capUsd: 10 });
+    const resumed = await runBench(options(['a-one', 'b-two'].map(brief), { shots: true, resume: true, cap: 10 }), deps().deps);
+    expect(stand.seen.shots).toEqual([]);
+    const reposted = stand.seen.posts.at(-1);
+    expect(reposted.idempotencyKey).toBe('bench-video:base:b-two:2');
+    expect(reposted.scenes.map((scene) => scene.shot.type)).toEqual(['title', 'array-or-memory', 'recap-map']);
+    expect(resumed.results[1]).toMatchObject({ state: 'accepted', shots: { state: 'planned', costUsd: 0.3 } });
+  });
+
+  it('posts the brief without shots when the plan failed, and records why', async () => {
+    stand = await standIn({ studioHome, scripts: { 'a-one': { shots: { shotPlan: 'failed', cost: 0.1, reason: 'the reply had no shots block' } } } });
+    const run = await runBench(options(['a-one'].map(brief), { shots: true }), deps().deps);
+    expect(stand.seen.posts[0].scenes.every((scene) => scene.shot === undefined)).toBe(true);
+    expect(run.results[0]).toMatchObject({ state: 'accepted', shots: { state: 'failed', costUsd: 0.1, reason: 'the reply had no shots block', types: null, brief: null } });
+    expect(run.stopReason).toBeUndefined();
+  });
+
+  it('stops before posting when the art director is off, unless --keep-going', async () => {
+    const off = { shots: { shotPlan: 'off', cost: 0, reason: 'the art director is off on this studio (STUDIO_ART_DIRECTOR=off)' } };
+    stand = await standIn({ studioHome, scripts: { 'a-one': off, 'b-two': off } });
+    const stopped = await runBench(options(['a-one', 'b-two'].map(brief), { shots: true }), deps().deps);
+    expect(stand.seen.posts).toEqual([]);
+    expect(stopped.stopReason).toMatch(/art director is off; pass --keep-going/);
+    expect(stopped.results).toEqual([expect.objectContaining({ id: 'a-one', state: 'not-posted', shots: expect.objectContaining({ state: 'off' }) })]);
+
+    rmSync(runFile);
+    const kept = await runBench(options(['a-one', 'b-two'].map(brief), { shots: true, keepGoing: true }), deps().deps);
+    expect(stand.seen.posts.map((post) => post.slug)).toEqual(['a-one-base', 'b-two-base']);
+    expect(kept.results.map((result) => [result.state, result.shots.state])).toEqual([
+      ['accepted', 'off'],
+      ['accepted', 'off'],
+    ]);
+  });
+
+  it('stops cleanly at a 429 from the shot plan, with nothing posted', async () => {
+    stand = await standIn({ studioHome, scripts: { 'a-one': { shots: { status: 429 } } } });
+    const d = deps();
+    const run = await runBench(options(['a-one', 'b-two'].map(brief), { shots: true }), d.deps);
+    expect(stand.seen.posts).toEqual([]);
+    expect(run.stopReason).toMatch(/a-one: the runner refused its shot plan at the daily cap/);
+    expect(run.results).toEqual([expect.objectContaining({ id: 'a-one', state: 'refused', shots: expect.objectContaining({ state: 'refused' }) })]);
+    expect(d.started.stopped).toBe(1);
+  });
+});
+
+describe('the critic on a run', () => {
+  const view = (extra = {}) => ({ attempt: 2, attempts: 2, build: 2, current: true, unscoredReason: null, scores: SCORES, defects: [], notes: ['tidy'], sentBack: [], ...extra });
+
+  it('reads the job\'s own critic after the accept, counts what it spent, and never calls the standalone route for it', async () => {
+    const defect = { scene: 'A2_Split', problem: 'the labels overlap', fix: 'move the right label down' };
+    stand = await standIn({ studioHome, scripts: { 'a-one': { critic: view(), criticCost: 0.15 }, 'b-two': { critic: view({ defects: [defect] }) } } });
+    const run = await runBench(options(['a-one', 'b-two'].map(brief), { critic: true }), deps().deps);
+    expect(stand.seen.critics).toEqual([]);
+    expect(run.criticAsked).toBe(true);
+    expect(run.results[0]).toMatchObject({
+      criticCostUsd: 0.15,
+      critic: { source: 'job', attempt: 2, current: true, scores: SCORES, mean: 3.8, defects: [], notes: ['tidy'], sentBack: [], passed: true, error: null },
+    });
+    expect(run.results[1].critic).toMatchObject({ source: 'job', passed: false, defects: [defect] });
+  });
+
+  it('records a job with no critic of its build in review, and calls the standalone route only with --critic', async () => {
+    const stale = view({ attempt: 1, current: false, unscoredReason: 'the check timed out' });
+    stand = await standIn({ studioHome, scripts: { 'a-one': { critic: null }, 'b-two': { critic: stale } } });
+    const plain = await runBench(options(['a-one', 'b-two'].map(brief)), deps().deps);
+    expect(stand.seen.critics).toEqual([]);
+    expect(plain.results[0].critic).toMatchObject({ source: 'job', current: false, scores: null, passed: null, error: 'no critic scored this job' });
+    expect(plain.results[1].critic).toMatchObject({ source: 'job', attempt: 1, current: false, passed: null, error: 'the check timed out' });
+
+    // A fresh label posts the same briefs again as new jobs.
+    const asked = await runBench(options(['a-one', 'b-two'].map(brief), { critic: true, label: 'again', runFile: join(dir, 'runs', 'again.json') }), deps().deps);
+    expect(stand.seen.critics).toEqual(['job-3', 'job-4']);
+    // The standalone check is the bench's measuring: kept apart from the runner's own checks.
+    expect(asked.results[0]).toMatchObject({ criticCostUsd: 0, checkCostUsd: 0.12, critic: { source: 'standalone', attempt: 2, current: true, scores: SCORES, passed: true, costUsd: 0.12 } });
+    // It counts toward the cap, and not in the cost compare sets side by side.
+    expect(costOf(asked.results[0])).toBeCloseTo(1.37);
+    expect(knownCostOf(asked.results[0])).toBeCloseTo(1.25);
+  });
+
+  it('stops after the video when the runner cannot run the critic, unless --keep-going', async () => {
+    stand = await standIn({ studioHome, scripts: { 'a-one': { critic: null, standalone: { status: 503 } }, 'b-two': { critic: null, standalone: { status: 503 } } } });
+    const run = await runBench(options(['a-one', 'b-two'].map(brief), { critic: true }), deps().deps);
+    expect(stand.seen.posts).toHaveLength(1);
+    expect(run.results[0]).toMatchObject({ state: 'accepted', critic: { source: 'standalone', passed: null, error: expect.stringMatching(/^the critic was refused, 503/) } });
+    expect(run.stopReason).toMatch(/cannot run the critic.*--keep-going/);
+  });
+});
+
+describe('scoreRun', () => {
+  /** A baseline made before the critic: two accepted videos and a failed one, no critic on any. */
+  async function baseline(scripts) {
+    stand = await standIn({ studioHome, scripts: { 'a-one': { critic: null, ...scripts['a-one'] }, 'b-two': { critic: null, ...scripts['b-two'] }, 'c-three': { end: 'failed', cost: 0.5 } } });
+    await runBench(options(['a-one', 'b-two', 'c-three'].map(brief)), deps().deps);
+    const written = JSON.parse(readFileSync(runFile, 'utf8'));
+    // As a file from before the critic, with no critic fields at all.
+    for (const result of written.results) {
+      delete result.critic;
+      delete result.criticCostUsd;
+    }
+    writeFileSync(runFile, JSON.stringify(written));
+    stand.seen.critics.length = 0;
+  }
+  const scoreOptions = (extra = {}) => ({ home: dir, label: 'base', cap: 5, port: 7260, runFile, ...extra });
+
+  it('scores each accepted result once, records a 409 and goes on, and a second score has nothing to do', async () => {
+    await baseline({ 'b-two': { standalone: { status: 409 } } });
+    const d = deps();
+    const run = await scoreRun(scoreOptions(), d.deps);
+    expect(stand.seen.refusedByGuard).toEqual([]);
+    expect(stand.seen.critics).toEqual(['job-1', 'job-2']);
+    expect(d.started).toMatchObject({ count: 1, stopped: 1 });
+    const written = JSON.parse(readFileSync(runFile, 'utf8'));
+    expect(written).toEqual(run);
+    const [one, two, three] = written.results;
+    expect(one).toMatchObject({ state: 'accepted', criticCostUsd: 0, checkCostUsd: 0.12, critic: { source: 'standalone', scores: SCORES, mean: 3.8, passed: true } });
+    expect(two).toMatchObject({ state: 'accepted', critic: { source: 'standalone', scores: null, passed: null, error: expect.stringMatching(/409 no-sheets/) } });
+    expect(three.critic).toBeUndefined();
+    expect(written.scoring).toMatchObject({ capUsd: 5, spentUsd: 0.12 });
+    expect(written.scoring.stopReason).toBeUndefined();
+    expect(wantsScore(one)).toBe(false);
+    expect(wantsScore(two)).toBe(false);
+    expect(wantsScore(two, true)).toBe(true);
+
+    const idle = deps();
+    await scoreRun(scoreOptions(), idle.deps);
+    expect(idle.started.count).toBe(0);
+    expect(idle.lines).toEqual([expect.stringMatching(/^nothing to score/)]);
+
+    // --again asks once more, for each result a standalone check answered.
+    await scoreRun(scoreOptions({ again: true }), deps().deps);
+    expect(stand.seen.critics).toEqual(['job-1', 'job-2', 'job-1', 'job-2']);
+  });
+
+  it('stops cleanly at a 429 and stops the runner', async () => {
+    await baseline({ 'a-one': { standalone: { status: 429 } } });
+    const d = deps();
+    const run = await scoreRun(scoreOptions(), d.deps);
+    expect(stand.seen.critics).toEqual(['job-1']);
+    expect(run.scoring.stopReason).toMatch(/a-one: the runner refused the critic at the daily cap/);
+    expect(run.results[0].critic).toMatchObject({ source: 'standalone', passed: null, error: expect.stringMatching(/429 daily-cap/) });
+    expect(run.results[1].critic).toBeUndefined();
+    expect(d.started.stopped).toBe(1);
+  });
+
+  it('records a job\'s own critic of the build in review without paying for another', async () => {
+    await baseline({ 'a-one': { critic: { attempt: 2, attempts: 2, build: 2, current: true, unscoredReason: null, scores: SCORES, defects: [], notes: [], sentBack: [] } } });
+    const run = await scoreRun(scoreOptions({ only: ['a-one'] }), deps().deps);
+    expect(stand.seen.critics).toEqual([]);
+    expect(run.results[0].critic).toMatchObject({ source: 'job', current: true, passed: true });
+    expect(run.results[1].critic).toBeUndefined();
+  });
+
+  it('needs no tool doctor, but refuses a runner that reports another cap, and a run file that is not there', async () => {
+    await baseline({});
+    await new Promise((resolve) => stand.server.close(resolve));
+    stand = await standIn({ studioHome, scripts: {}, toolAvailable: false, doctorAfter: 0 });
+    // The stand-in forgot the jobs; the GETs answer 404, which is recorded and passed over.
+    const run = await scoreRun(scoreOptions(), deps().deps);
+    expect(run.scoring.stopReason).toBeUndefined();
+    expect(run.results[0].scoreError).toMatch(/answered 404/);
+
+    await new Promise((resolve) => stand.server.close(resolve));
+    stand = await standIn({ studioHome, scripts: {}, capUsd: 50 });
+    await expect(scoreRun(scoreOptions(), deps().deps)).rejects.toThrow(/daily cap of 50, not the \$5/);
+    await expect(scoreRun(scoreOptions({ runFile: join(dir, 'runs', 'none.json') }), deps().deps)).rejects.toThrow(/no run file/);
   });
 });
 
