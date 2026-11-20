@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   evalReport,
   formatEvalReport,
+  reportCritic,
   type ReportJob,
   type ReportVideo,
 } from "../src/ingredients/report";
@@ -277,6 +278,96 @@ describe("evalReport: where a rating is counted", () => {
   });
 });
 
+describe("a job's critic", () => {
+  const scores = (accuracy: number, layout: number, relevance: number, variety: number, pacing: number) => ({
+    accuracy,
+    layout,
+    relevance,
+    variety,
+    pacing,
+  });
+  const critic = (s: ReturnType<typeof scores>) => ({ model: "opus", costUsd: 0.01, scores: s, defects: 1, notes: 0 });
+  const attempt = (n: number, c?: ReturnType<typeof critic> | null) => ({
+    n,
+    startedAt: null,
+    endedAt: null,
+    turns: 1,
+    costUsd: 0.1,
+    gate: null,
+    ...(c === undefined ? {} : { critic: c }),
+  });
+
+  it("is the last attempt that has one, passing over an attempt with none or a null one", () => {
+    expect(reportCritic([attempt(1, critic(scores(1, 1, 1, 1, 1))), attempt(2, critic(scores(5, 4, 4, 3, 3)))])).toEqual({
+      mean: 3.8,
+      scores: scores(5, 4, 4, 3, 3),
+    });
+    // Attempt 3 was not judged and attempt 4's critic gave nothing: attempt 2 stands.
+    expect(reportCritic([attempt(1, critic(scores(1, 1, 1, 1, 1))), attempt(2, critic(scores(2, 2, 2, 2, 3))), attempt(3), attempt(4, null)])).toEqual({
+      mean: 2.2,
+      scores: scores(2, 2, 2, 2, 3),
+    });
+    expect(reportCritic([attempt(1), attempt(2, null)])).toBeNull();
+    expect(reportCritic([])).toBeNull();
+    expect(reportCritic(undefined)).toBeNull();
+    expect(reportCritic(null)).toBeNull();
+  });
+
+  it("is a dash in every critic column and no totals line when no job has one", () => {
+    const report = evalReport(sample, [extra()]);
+    expect(report.totals.critic).toEqual({
+      n: 0,
+      mean: null,
+      scores: { accuracy: null, layout: null, relevance: null, variety: null, pacing: null },
+    });
+    const text = formatEvalReport(report);
+    expect(text).not.toContain("Critic");
+    const rows = text.split("\n").filter((line) => line.startsWith("manimkc "));
+    expect(rows).toHaveLength(2);
+    expect(rows[1]).toMatch(/\s-$/);
+  });
+
+  it("averages over the jobs that have one, the extras too, and groups each under its own job", () => {
+    const report = evalReport(
+      [
+        video({ assetId: "a", job: job({ model: "opus", critic: { mean: 4, scores: scores(5, 4, 4, 3, 4) } }) }),
+        video({ assetId: "b", job: job({ model: "opus", critic: null }) }),
+        video({ assetId: "c", job: job({ model: "sonnet" }) }),
+        // A rating that names another job moves the rating, never the critic.
+        video({
+          assetId: "d",
+          rating: { value: -1, tags: [], job: { model: "haiku", manualHash: null }, stale: true },
+          job: job({ model: "sonnet", critic: { mean: 2, scores: scores(2, 2, 2, 2, 2) } }),
+        }),
+      ],
+      [extra({ model: "opus", state: "discarded", critic: { mean: 3, scores: scores(3, 4, 3, 2, 3) } }), extra({ model: "opus" })],
+    );
+    expect(report.totals.critic).toEqual({
+      n: 3,
+      mean: 3,
+      scores: { accuracy: 3.3333, layout: 3.3333, relevance: 3, variety: 2.3333, pacing: 3 },
+    });
+    const model = (key: string) => report.byModel.find((g) => g.key === key)!;
+    expect(model("opus").critic).toEqual({ n: 2, mean: 3.5, scores: { accuracy: 4, layout: 4, relevance: 3.5, variety: 2.5, pacing: 3.5 } });
+    expect(model("sonnet").critic).toMatchObject({ n: 1, mean: 2 });
+    expect(model("haiku").critic).toMatchObject({ n: 0, mean: null });
+
+    const text = formatEvalReport(report);
+    expect(text).toContain("  Critic                      3.0 over 3 jobs (accuracy 3.3, layout 3.3, relevance 3.0, variety 2.3,\n");
+    expect(text).toContain("pacing 3.0)\n");
+    expect(text).not.toContain(String.fromCharCode(0x2014));
+    for (const line of text.split("\n")) expect(line.length).toBeLessThanOrEqual(100);
+    const costRow = (key: string) => text.split("\n").find((line) => line.startsWith(`${key} `) && line.includes("$"))!;
+    expect(costRow("opus")).toMatch(/\s3\.5$/);
+    expect(costRow("sonnet")).toMatch(/\s2\.0$/);
+  });
+
+  it("says job for one job", () => {
+    const text = formatEvalReport(evalReport([video({ assetId: "a", job: job({ critic: { mean: 4.2, scores: scores(5, 4, 4, 4, 4) } }) })]));
+    expect(text).toContain("4.2 over 1 job (accuracy 5.0");
+  });
+});
+
 describe("formatEvalReport", () => {
   const report = evalReport(sample, [
     extra({ reviewTags: ["too busy"] }),
@@ -332,10 +423,10 @@ describe("formatEvalReport", () => {
       remotionkc       2      0   0     0         -         1          0       0    100%      0
         older: ratings of an older version of the video than it is now.
 
-      Tool        cost mean  cost median  turns  wall median  variety  top 5  fade   3D
-      ----------  ---------  -----------  -----  -----------  -------  -----  ----  ---
-      manimkc         $2.00        $2.00   15.0        15.0m     0.60    80%   75%  50%
-      remotionkc          -            -      -            -        -      -     -    -
+      Tool        cost mean  cost median  turns  wall median  variety  top 5  fade   3D  critic
+      ----------  ---------  -----------  -----  -----------  -------  -----  ----  ---  ------
+      manimkc         $2.00        $2.00   15.0        15.0m     0.60    80%   75%  50%       -
+      remotionkc          -            -      -            -        -      -     -    -       -
 
         manimkc rating tags: pacing 2, clear 1
         manimkc discard tags: too busy 1
@@ -349,11 +440,11 @@ describe("formatEvalReport", () => {
       sonnet         1      0   0     0         -         1          0       0    100%      0
         older: ratings of an older version of the video than it is now.
 
-      Model     cost mean  cost median  turns  wall median  variety  top 5  fade   3D
-      --------  ---------  -----------  -----  -----------  -------  -----  ----  ---
-      (no job)          -            -      -            -        -      -     -    -
-      opus          $2.00        $2.00   15.0        15.0m     0.60    80%   75%  50%
-      sonnet            -            -      -            -        -      -     -    -
+      Model     cost mean  cost median  turns  wall median  variety  top 5  fade   3D  critic
+      --------  ---------  -----------  -----  -----------  -------  -----  ----  ---  ------
+      (no job)          -            -      -            -        -      -     -    -       -
+      opus          $2.00        $2.00   15.0        15.0m     0.60    80%   75%  50%       -
+      sonnet            -            -      -            -        -      -     -    -       -
 
         opus rating tags: pacing 2, clear 1
         opus discard tags: too busy 1
@@ -367,11 +458,11 @@ describe("formatEvalReport", () => {
       abcdef01       2      2   1     1       50%         2          1       1     50%      0
         older: ratings of an older version of the video than it is now.
 
-      Manual    cost mean  cost median  turns  wall median  variety  top 5  fade   3D
-      --------  ---------  -----------  -----  -----------  -------  -----  ----  ---
-      (no job)          -            -      -            -        -      -     -    -
-      (none)            -            -      -            -        -      -     -    -
-      abcdef01      $2.00        $2.00   15.0        15.0m     0.60    80%   75%  50%
+      Manual    cost mean  cost median  turns  wall median  variety  top 5  fade   3D  critic
+      --------  ---------  -----------  -----  -----------  -------  -----  ----  ---  ------
+      (no job)          -            -      -            -        -      -     -    -       -
+      (none)            -            -      -            -        -      -     -    -       -
+      abcdef01      $2.00        $2.00   15.0        15.0m     0.60    80%   75%  50%       -
 
         abcdef01 rating tags: pacing 2, clear 1
         abcdef01 discard tags: too busy 1

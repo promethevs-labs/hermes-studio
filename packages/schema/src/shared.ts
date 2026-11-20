@@ -930,6 +930,38 @@ export interface JobRunGate {
   warnings: number;
 }
 
+/**
+ * What a vision critic scores on a video attempt's contact sheets, each
+ * from 1 (poor) to 5 (good):
+ *
+ * - `accuracy`: the picture shows what the words say.
+ * - `layout`: nothing overlaps, is cut off or is crowded.
+ * - `relevance`: the picture helps explain the idea and is not decoration.
+ * - `variety`: scenes differ in shot and layout.
+ * - `pacing`: the screen changes with the voice, with no long held frames.
+ */
+export const CRITIC_DIMENSIONS = ["accuracy", "layout", "relevance", "variety", "pacing"] as const;
+export type CriticDimension = (typeof CRITIC_DIMENSIONS)[number];
+
+/** The lowest and highest score a critic gives on one dimension. */
+export const CRITIC_SCORE_RANGE = { min: 1, max: 5 } as const;
+
+/**
+ * A critic's read of one attempt's contact sheets: whole scores from 1
+ * (poor) to 5 (good) on each of `CRITIC_DIMENSIONS`, all five required.
+ */
+export interface JobRunCritic {
+  /** The model that judged, when the stream named one. */
+  model: string | null;
+  /** What the critic's own call cost. */
+  costUsd: number | null;
+  scores: Record<CriticDimension, number>;
+  /** How many pointable defects it sent back to the agent. */
+  defects: number;
+  /** How many remarks it only reported. */
+  notes: number;
+}
+
 /** One attempt of a job, as the runner saw it. */
 export interface JobRunAttempt {
   /** 1, 2, 3: the attempt's number. */
@@ -940,6 +972,12 @@ export interface JobRunAttempt {
   turns: number | null;
   costUsd: number | null;
   gate: JobRunGate | null;
+  /**
+   * A vision critic's verdict on this attempt, when one judged it. The one
+   * key an attempt may leave out: a record written before critics existed
+   * has none, and keeps none when checked.
+   */
+  critic?: JobRunCritic | null;
 }
 
 /**
@@ -1080,9 +1118,55 @@ function checkGate(value: unknown, field: string): Check<JobRunGate | null> {
   return { ok: true, value: { ok: value.ok, steps, findings: value.findings, warnings: value.warnings } };
 }
 
+function checkCritic(value: unknown, field: string): Check<JobRunCritic | null> {
+  if (value === null) return { ok: true, value: null };
+  if (!isPlainObject(value)) return { ok: false, reason: `${field} is null or an object.` };
+  const known = ["model", "costUsd", "scores", "defects", "notes"] as const;
+  const stray = strayKeys(value, known);
+  if (stray.length > 0) return { ok: false, reason: `${field} has unknown fields: ${stray.join(", ")}.` };
+  const missing = known.filter((key) => !Object.hasOwn(value, key));
+  if (missing.length > 0) return { ok: false, reason: `${field} is missing: ${missing.join(", ")}.` };
+  const model = shortText(value.model, `${field}.model`, true);
+  if (!model.ok) return model;
+  if (value.costUsd !== null && !isAmount(value.costUsd)) {
+    return { ok: false, reason: `${field}.costUsd is null or a number, 0 or more.` };
+  }
+  const scores = value.scores;
+  if (!isPlainObject(scores)) {
+    return { ok: false, reason: `${field}.scores is an object with a score for each of ${CRITIC_DIMENSIONS.join(", ")}.` };
+  }
+  const strayScores = strayKeys(scores, CRITIC_DIMENSIONS);
+  if (strayScores.length > 0) {
+    return { ok: false, reason: `${field}.scores has unknown fields: ${strayScores.join(", ")}.` };
+  }
+  const checkedScores = {} as Record<CriticDimension, number>;
+  for (const dimension of CRITIC_DIMENSIONS) {
+    const score = scores[dimension];
+    if (!Number.isInteger(score) || (score as number) < CRITIC_SCORE_RANGE.min || (score as number) > CRITIC_SCORE_RANGE.max) {
+      return {
+        ok: false,
+        reason: `${field}.scores.${dimension} is a whole number from ${CRITIC_SCORE_RANGE.min} to ${CRITIC_SCORE_RANGE.max}.`,
+      };
+    }
+    checkedScores[dimension] = score as number;
+  }
+  if (!isCount(value.defects)) return { ok: false, reason: `${field}.defects is a whole number, 0 or more.` };
+  if (!isCount(value.notes)) return { ok: false, reason: `${field}.notes is a whole number, 0 or more.` };
+  return {
+    ok: true,
+    value: {
+      model: model.value,
+      costUsd: value.costUsd as number | null,
+      scores: checkedScores,
+      defects: value.defects,
+      notes: value.notes,
+    },
+  };
+}
+
 function checkAttempt(value: unknown, field: string): Check<JobRunAttempt> {
   if (!isPlainObject(value)) return { ok: false, reason: `${field} is an object.` };
-  const stray = strayKeys(value, ["n", "startedAt", "endedAt", "turns", "costUsd", "gate"]);
+  const stray = strayKeys(value, ["n", "startedAt", "endedAt", "turns", "costUsd", "gate", "critic"]);
   if (stray.length > 0) return { ok: false, reason: `${field} has unknown fields: ${stray.join(", ")}.` };
   if (!Number.isInteger(value.n) || (value.n as number) < 1) {
     return { ok: false, reason: `${field}.n is a whole number, 1 or more.` };
@@ -1104,17 +1188,22 @@ function checkAttempt(value: unknown, field: string): Check<JobRunAttempt> {
   }
   const gate = checkGate(value.gate, `${field}.gate`);
   if (!gate.ok) return gate;
-  return {
-    ok: true,
-    value: {
-      n: value.n as number,
-      startedAt: instants.startedAt,
-      endedAt: instants.endedAt,
-      turns: value.turns as number | null,
-      costUsd: value.costUsd as number | null,
-      gate: gate.value,
-    },
+  const attempt: JobRunAttempt = {
+    n: value.n as number,
+    startedAt: instants.startedAt,
+    endedAt: instants.endedAt,
+    turns: value.turns as number | null,
+    costUsd: value.costUsd as number | null,
+    gate: gate.value,
   };
+  // The one optional key: carried only when the input had it, so a record
+  // written before critics existed comes back exactly as it went in.
+  if (Object.hasOwn(value, "critic")) {
+    const critic = checkCritic(value.critic, `${field}.critic`);
+    if (!critic.ok) return critic;
+    attempt.critic = critic.value;
+  }
+  return { ok: true, value: attempt };
 }
 
 const JOB_RUN_KEYS = [

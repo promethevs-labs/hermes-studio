@@ -4,6 +4,7 @@ import {
   checkJobReview,
   checkJobRun,
   cleanRating,
+  CRITIC_DIMENSIONS,
   isStudioRelativePath,
   JOB_RUN_LIMITS,
   type JobRun,
@@ -191,6 +192,93 @@ describe("checkJobRun", () => {
     expect(checkJobRun(run({ attempts: [{ ...attempt, gate: { ...gate, steps: [{ name: "lint" }] } }] })).ok).toBe(false);
     expect(checkJobRun(run({ attempts: [{ ...attempt, gate: { ...gate, findings: -1 } }] })).ok).toBe(false);
     expect(checkJobRun(run({ attempts: [{ ...attempt, gate: { ...gate, more: 1 } }] })).ok).toBe(false);
+  });
+
+  it("keeps the six attempt keys required, so only critic may be left out", () => {
+    const attempt = { n: 1, startedAt: null, endedAt: null, turns: null, costUsd: null, gate: null };
+    for (const key of Object.keys(attempt)) {
+      const without: Record<string, unknown> = { ...attempt };
+      delete without[key];
+      expect(checkJobRun(run({ attempts: [without] })).ok, key).toBe(false);
+    }
+  });
+
+  describe("an attempt's critic", () => {
+    const attempt = { n: 1, startedAt: null, endedAt: null, turns: 3, costUsd: 0.2, gate: null };
+    const critic = {
+      model: "claude-opus-5-5",
+      costUsd: 0.03,
+      scores: { accuracy: 5, layout: 4, relevance: 4, variety: 3, pacing: 1 },
+      defects: 2,
+      notes: 1,
+    };
+    const attemptsOf = (checked: ReturnType<typeof checkJobRun>) => (checked.ok ? checked.run.attempts : null);
+
+    it("leaves an absent critic absent, so an old record round-trips byte for byte", () => {
+      const input = run();
+      const checked = checkJobRun(input);
+      expect(JSON.stringify(checked.ok && checked.run)).toBe(JSON.stringify(input));
+      const [first] = attemptsOf(checked) ?? [];
+      expect(first !== undefined && Object.hasOwn(first, "critic")).toBe(false);
+    });
+
+    it("keeps a null critic null, and a valid one as it was", () => {
+      expect(attemptsOf(checkJobRun(run({ attempts: [{ ...attempt, critic: null }] })))).toEqual([{ ...attempt, critic: null }]);
+      const withCritic = run({ attempts: [{ ...attempt, critic }] });
+      const checked = checkJobRun(withCritic);
+      expect(attemptsOf(checked)).toEqual([{ ...attempt, critic }]);
+      expect(JSON.stringify(checked.ok && checked.run)).toBe(JSON.stringify(withCritic));
+      // Rebuilt, never the caller's objects.
+      const [first] = attemptsOf(checked) ?? [];
+      expect(first?.critic).not.toBe(critic);
+      expect(first?.critic?.scores).not.toBe(critic.scores);
+    });
+
+    it("takes a null model and cost, the lowest and highest scores, and zero counts", () => {
+      const sparse = { ...critic, model: null, costUsd: null, defects: 0, notes: 0, scores: { accuracy: 1, layout: 5, relevance: 1, variety: 5, pacing: 3 } };
+      expect(checkJobRun(run({ attempts: [{ ...attempt, critic: sparse }] })).ok).toBe(true);
+    });
+
+    it("refuses a critic of the wrong shape", () => {
+      const bad: Array<[string, unknown, string]> = [
+        ["not an object", "great", "critic is null or an object"],
+        ["a list", [], "critic is null or an object"],
+        ["an unknown field", { ...critic, mood: "happy" }, "unknown fields: mood"],
+        ["a missing field", (({ notes: _notes, ...rest }) => rest)(critic), "missing: notes"],
+        ["an empty model", { ...critic, model: "" }, "critic.model"],
+        ["a long model", { ...critic, model: "x".repeat(JOB_RUN_LIMITS.maxChars + 1) }, "critic.model"],
+        ["a model that is not text", { ...critic, model: 4 }, "critic.model"],
+        ["a negative cost", { ...critic, costUsd: -0.01 }, "critic.costUsd"],
+        ["a cost that is not finite", { ...critic, costUsd: Number.POSITIVE_INFINITY }, "critic.costUsd"],
+        ["a cost as text", { ...critic, costUsd: "0.03" }, "critic.costUsd"],
+        ["scores that are not an object", { ...critic, scores: [5, 4, 4, 3, 1] }, "critic.scores is an object"],
+        ["a missing dimension", { ...critic, scores: { accuracy: 5, layout: 4, relevance: 4, variety: 3 } }, "scores.pacing"],
+        ["an unknown dimension", { ...critic, scores: { ...critic.scores, colour: 3 } }, "unknown fields: colour"],
+        ["a score of 0", { ...critic, scores: { ...critic.scores, layout: 0 } }, "scores.layout is a whole number from 1 to 5"],
+        ["a score of 6", { ...critic, scores: { ...critic.scores, variety: 6 } }, "scores.variety"],
+        ["a fractional score", { ...critic, scores: { ...critic.scores, accuracy: 4.5 } }, "scores.accuracy"],
+        ["a score as text", { ...critic, scores: { ...critic.scores, relevance: "4" } }, "scores.relevance"],
+        ["a null score", { ...critic, scores: { ...critic.scores, pacing: null } }, "scores.pacing"],
+        ["negative defects", { ...critic, defects: -1 }, "critic.defects"],
+        ["fractional notes", { ...critic, notes: 1.5 }, "critic.notes"],
+        ["null defects", { ...critic, defects: null }, "critic.defects"],
+      ];
+      for (const [what, value, reason] of bad) {
+        expect(checkJobRun(run({ attempts: [{ ...attempt, critic: value }] })), what).toEqual({
+          ok: false,
+          reason: expect.stringContaining(reason),
+        });
+      }
+    });
+
+    it("names the attempt the bad critic is on", () => {
+      const checked = checkJobRun(run({ attempts: [attempt, { ...attempt, n: 2, critic: { ...critic, defects: -1 } }] }));
+      expect(checked).toEqual({ ok: false, reason: expect.stringContaining("attempts[1].critic.defects") });
+    });
+
+    it("lists the five dimensions in the order the report prints them", () => {
+      expect(CRITIC_DIMENSIONS).toEqual(["accuracy", "layout", "relevance", "variety", "pacing"]);
+    });
   });
 
   it("bounds the lists, so one record cannot grow without limit", () => {

@@ -138,8 +138,12 @@ draw well. **Before making a video, run the `video-router` skill**
 (`.claude/skills/video-router/`); it applies
 [docs/VIDEO-TOOLS.md](docs/VIDEO-TOOLS.md), picks a tool, says why, and hands
 over to that tool's skill. Change the routing in that page, never in the
-skill. Each tool's own capability doc is where to look for what it can do
-beyond the videos made so far.
+skill. Since 2026-11-20 a series keeps its palette, typeface, heading
+position and voice while its shots and layouts vary, and a studio video no
+row of that page claims goes to remotionkc; at a terminal the default is
+still manimkc (D111 and D112 of [docs/STUDIO-LOOK.md](docs/STUDIO-LOOK.md)).
+Each tool's own capability doc is where to look for what it can do beyond
+the videos made so far.
 
 ## Asset generation: tools/manimkc/
 

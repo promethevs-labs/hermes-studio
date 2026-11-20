@@ -483,7 +483,7 @@ export function toolsBlock(): string {
       "",
       "Pick by what the video mainly needs; the first row that fits wins (need | tool | why):",
       ...routes,
-      "When nothing in the video needs more than the last row, use manimkc.",
+      "When no row above the last fits, use remotionkc.",
       "",
       "The capability matrix (capability | manimkc | remotionkc | revideokc): yes is rendered in a topic, built is constructed but not yet in a narrated topic, no is missing or poor:",
       ...matrix,

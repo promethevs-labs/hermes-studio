@@ -154,6 +154,25 @@ describe.skipIf(!reachable.ok)("the eval records at the CLI", () => {
       expect(row?.state).toBe("running");
       expect(row?.run).toBeNull();
     });
+
+    it("stores an attempt's critic as given, and refuses a score out of range", async () => {
+      const queued = await runEnqueue({
+        brief: { kind: "diagram", topic: "alpha", target: "learn/assets/judged.tldr", idempotencyKey: "key-judged" },
+        repoRoot: root,
+      });
+      await runClaim({ jobId: queued.job.id });
+      const critic = { model: null, costUsd: 0.01, scores: { accuracy: 4, layout: 5, relevance: 3, variety: 2, pacing: 4 }, defects: 2, notes: 0 };
+      const judged: JobRun = { ...RUN, attempts: [{ ...RUN.attempts[0]!, critic }, { ...RUN.attempts[0]!, n: 2, critic: null }] };
+      await expect(
+        runFinish({
+          jobId: queued.job.id,
+          state: "awaiting_review",
+          run: { ...judged, attempts: [{ ...RUN.attempts[0]!, critic: { ...critic, scores: { ...critic.scores, variety: 7 } } }] },
+        }),
+      ).rejects.toThrow(/attempts\[0\]\.critic\.scores\.variety/);
+      await runFinish({ jobId: queued.job.id, state: "awaiting_review", run: judged });
+      expect((await runShow(queued.job.id)).run).toEqual(judged);
+    });
   });
 
   describe("job review", () => {
