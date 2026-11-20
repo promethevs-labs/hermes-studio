@@ -4,9 +4,14 @@
 // in review and the run asked for one, it calls the standalone
 // `POST /api/jobs/{id}/critic`. Either way the result carries
 // `critic: { source, attempt, current, scores, mean, defects, notes,
-// sentBack, passed, error }`. `passed` is D116 of docs/STUDIO-LOOK.md: the
-// critic's read of the last attempt names no defect; the scores never block.
-// It is null when the build in review was not scored.
+// sentBack, passed, error }`. `passed` is `passesCritic` of
+// packages/schema/src/shared.ts (D121 of docs/STUDIO-LOOK.md, provisional):
+// no score below 3 and a mean of at least 3.5. Defects play no part in it.
+// It is null when the build in review was not scored. A run file written
+// before D121 holds `passed` by the old rule (no defect on the last
+// attempt); `compare` recomputes it from the stored scores.
+
+import { passesCritic } from '@hermes/schema/shared';
 
 const list = (value) => (Array.isArray(value) ? value.map((item) => (item !== null && typeof item === 'object' ? { ...item } : item)) : []);
 
@@ -43,7 +48,7 @@ export function criticFromView(view, source = 'job') {
     defects,
     notes: list(view.notes),
     sentBack: list(view.sentBack),
-    passed: current ? defects.length === 0 : null,
+    passed: current ? passesCritic(scores) : null,
     error: current ? null : typeof view.unscoredReason === 'string' && view.unscoredReason !== '' ? view.unscoredReason : 'the build in review was not scored',
   };
 }
@@ -67,7 +72,7 @@ export function criticFromStandalone(run, jobView = null) {
     defects,
     notes: list(run?.notes),
     sentBack: list(jobView?.critic?.sentBack),
-    passed: scores === null ? null : defects.length === 0,
+    passed: scores === null ? null : passesCritic(scores),
     error: scores === null ? (typeof run?.error === 'string' && run.error !== '' ? run.error : 'the critic gave no scores') : null,
     costUsd: typeof run?.costUsd === 'number' ? run.costUsd : null,
   };
@@ -81,7 +86,7 @@ export function criticRefused(message, jobView = null) {
 /** A recorded critic in a few words, for the log. */
 export function verdictLine(critic) {
   if (critic?.passed === true) return `passed, mean ${critic.mean.toFixed(2)}`;
-  if (critic?.passed === false) return `failed, ${critic.defects.length} defect${critic.defects.length === 1 ? '' : 's'}, mean ${critic.mean.toFixed(2)}`;
+  if (critic?.passed === false) return `failed, mean ${critic.mean.toFixed(2)}, ${critic.defects.length} defect${critic.defects.length === 1 ? '' : 's'}`;
   return `gave no verdict: ${critic?.error ?? 'no critic'}`;
 }
 
