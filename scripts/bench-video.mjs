@@ -19,7 +19,11 @@
 //   dry-run --tool TOOL [--only a,b] [--label NAME] [--shots] [--critic] [--json]
 //                                  what run would post; no network, nothing started
 //
-// A run and a score spend money: they start paid agent sessions. --cap has no default.
+// A run and a score spend money: they start paid agent sessions. --cap has no
+// default. It is the most this one command may spend: a run label in total (a
+// --resume counts what the label already spent), or one score pass. The
+// command asks the runner what the home has already spent in the last 24
+// hours and starts the runner with that plus --cap as its own rolling-day cap.
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -30,9 +34,10 @@ import { parseArgs } from 'node:util';
 import { isAgentModel } from '@hermes/schema/shared';
 
 import { BENCH_TOOLS, FALLBACK_CHARS_PER_SECOND, jobBody, loadBriefs, loadTopics, predictedSeconds, runSlug, selectBriefs } from './lib/bench-video/briefs.mjs';
+import { capEnvValue } from './lib/bench-video/budget.mjs';
 import { compareRuns, formatCompare } from './lib/bench-video/compare.mjs';
 import { DEFAULT_PORT, homePaths, homeRefusal, parseCap, readMarker, runnerEnv, setupHome, STUDIO_PORT } from './lib/bench-video/home.mjs';
-import { readJobFiles, sourceMetrics } from './lib/bench-video/metrics.mjs';
+import { queuedJobIds, readJobFiles, sourceMetrics } from './lib/bench-video/metrics.mjs';
 import { readRun, runBench } from './lib/bench-video/run.mjs';
 import { call, portFree, startRunner, stopTree } from './lib/bench-video/runner.mjs';
 import { scoreRun } from './lib/bench-video/score.mjs';
@@ -185,7 +190,7 @@ function signals(port) {
 
 /** `--cap` and `--port` as `run` and `score` take them, checked. */
 function capAndPort(values) {
-  if (values.cap === undefined) throw new Usage('--cap is required: the most this home may spend in a rolling day, in US dollars, such as --cap 10');
+  if (values.cap === undefined) throw new Usage('--cap is required: the most this command may spend, in US dollars, such as --cap 10');
   const cap = parseCap(values.cap);
   if (cap === null) throw new Usage(`--cap must be a number of dollars above zero, written as digits (10 or 7.50), not "${values.cap}"`);
   const port = values.port === undefined ? DEFAULT_PORT : Number(values.port);
@@ -214,11 +219,12 @@ async function verbScore(args) {
   const run = await scoreRun(
     { home, label: name, cap, port, only: only(values.only), again: values.again === true, runFile },
     {
-      envFor: (options) => runnerEnv(process.env, { home: options.home, port: options.port, cap: values.cap.trim() }),
+      envFor: (options) => runnerEnv(process.env, { home: options.home, port: options.port, cap: capEnvValue(options.runnerCapUsd) }),
       start: (env) => startRunner({ root: ROOT, env, port, logFile: join(paths.runs, `${name}.score.runner.log`), onSpawn: (pid) => (state.runnerPid = pid) }),
       call,
       portFree,
       readJob: (jobId) => readJobFiles(paths.studio, jobId),
+      queuedJobs: () => queuedJobIds(paths.studio),
       log: (line) => process.stdout.write(`${line}\n`),
       stopped: () => state.interrupted,
       onJob: (jobId) => (state.currentJob = jobId),
@@ -286,11 +292,12 @@ async function verbRun(args) {
       runFile,
     },
     {
-      envFor: (options) => runnerEnv(process.env, { home: options.home, port: options.port, cap: values.cap.trim() }),
+      envFor: (options) => runnerEnv(process.env, { home: options.home, port: options.port, cap: capEnvValue(options.runnerCapUsd) }),
       start: (env) => startRunner({ root: ROOT, env, port, logFile: join(paths.runs, `${name}.runner.log`), onSpawn: (pid) => (state.runnerPid = pid) }),
       call,
       portFree,
       readJob: (jobId) => readJobFiles(paths.studio, jobId),
+      queuedJobs: () => queuedJobIds(paths.studio),
       metrics: (jobId) => sourceMetrics(paths.studio, jobId, chosen, libraryNames),
       log: (line) => process.stdout.write(`${line}\n`),
       stopped: () => state.interrupted,
@@ -327,6 +334,11 @@ const USAGE = `usage: npm run bench:video -- <verb>
   score --home DIR --label NAME --cap USD [--port N] [--only id,id] [--again]
   compare --home DIR <labelA> <labelB> [--json]
   dry-run --tool ${BENCH_TOOLS.join('|')} [--only id,id] [--label NAME] [--shots] [--critic] [--json]
+
+--cap is the most this one command may spend, not a limit on the whole home. A run
+counts what its label already spent (on --resume) against it; a score pass starts
+from zero. The runner's own 24-hour cap is set to what the home has already spent
+plus --cap, and the command prints both numbers when it starts.
 
 docs/STUDIO-BENCH.md has the rest. A run and a score start paid agent sessions.`;
 

@@ -6,9 +6,11 @@
 //
 // The guards are `run`'s, minus the tool's doctor, which reading kept sheets
 // does not need: the port must be free, the runner must report the cap it
-// was given and find the claude CLI, and the home's rolling day must be under
-// that cap. During the scoring the runner refuses a check at the cap (429),
-// and the bench stops once what this scoring spent reaches the cap.
+// was given (what the home had spent in its rolling day plus `--cap`, see
+// budget.mjs) and find the claude CLI, and the home's rolling day must be
+// under that cap. During the scoring the runner refuses a check at its cap
+// (429), and the bench stops once what this scoring spent reaches `--cap`.
+import { capLine, capPlan, measureHomeSpend } from './budget.mjs';
 import { criticCurrent, criticFromView, verdictLine } from './critic.mjs';
 import { writeJsonAtomic } from './home.mjs';
 import { criticCostOf } from './metrics.mjs';
@@ -55,7 +57,7 @@ export async function scoreRun(options, deps) {
   }
 
   const byId = new Map(run.results.map((result, at) => [result.id, at]));
-  const scoring = { startedAt: new Date(now()).toISOString(), endedAt: null, capUsd: cap, spentUsd: 0 };
+  const scoring = { startedAt: new Date(now()).toISOString(), endedAt: null, capUsd: cap, spentUsd: 0, homeSpentUsd: null, runnerCapUsd: null };
   let begun = false;
   const save = () => {
     run.scoring = { ...scoring };
@@ -69,13 +71,21 @@ export async function scoreRun(options, deps) {
   let runner = null;
   let stopReason = null;
   try {
-    runner = await deps.start(deps.envFor(options));
+    // What the home has spent in the runner's rolling day, asked of a runner
+    // that is stopped again before the one the scoring uses is started.
+    const homeSpentUsd = await measureHomeSpend(deps, options);
+    if (stopped()) throw new Stop('stopped before the first check');
+    const plan = capPlan({ cap, homeSpentUsd });
+    Object.assign(scoring, { homeSpentUsd: plan.homeSpentUsd, runnerCapUsd: plan.runnerCapUsd });
+    log(capLine(plan, 'scoring', run.label));
+
+    runner = await deps.start(deps.envFor({ ...options, runnerCapUsd: plan.runnerCapUsd }));
     const base = runner.base;
     if (stopped()) throw new Stop('stopped before the first check');
-    checkSpendGuards(await call(base, 'GET', '/api/health', undefined, { timeoutMs: 60_000 }), cap);
+    checkSpendGuards(await call(base, 'GET', '/api/health', undefined, { timeoutMs: 60_000 }), plan.runnerCapUsd);
     begun = true;
     save();
-    log(`bench: scoring ${targets.length} video${targets.length === 1 ? '' : 's'} of ${run.label}, cap $${cap.toFixed(2)} for this home's rolling day`);
+    log(`bench: scoring ${targets.length} video${targets.length === 1 ? '' : 's'} of ${run.label}`);
 
     for (const target of targets) {
       if (stopped()) throw new Stop('stopped');
