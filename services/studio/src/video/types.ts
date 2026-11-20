@@ -2,7 +2,7 @@ import type { JobState } from "@hermes/schema";
 import type { JobReview, JobRunAttempt } from "@hermes/schema/shared";
 
 import type { AgentAuth } from "../config";
-import type { CostSource } from "../cost";
+import type { CostSource, SpendEntry } from "../cost";
 import type { GateStep } from "../data/store";
 import type { ValidVideoBrief } from "./brief";
 import type { CriticRun } from "./critic";
@@ -160,6 +160,14 @@ export interface VideoJobRecord {
    * The attempt's scores alone go on `attempts[n].critic` for the run record.
    */
   critic?: CriticRun[];
+  /**
+   * What every critic run of this job spent, for the rolling window behind
+   * `STUDIO_DAILY_USD`: an entry per run that cost something, dropped only
+   * once it ended before the window, never by the history's trim
+   * (`withCriticSpend` in critic.ts). Absent on a record from before it,
+   * whose spend is read from `critic`.
+   */
+  criticSpend?: SpendEntry[];
   /**
    * The build kept when a picture check sent defects back (`keepPassedBuild`
    * in runner.ts): that attempt's gate result and line changes, its gate's

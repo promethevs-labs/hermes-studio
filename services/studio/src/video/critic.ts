@@ -135,10 +135,43 @@ export function criticSummary(run: CriticRun): JobRunCritic | null {
 }
 
 /** Every critic run's spend across the records, for the rolling day the cap counts. */
-export function criticSpend(records: readonly Pick<VideoJobRecord, "critic">[]): SpendEntry[] {
+export function criticSpend(records: readonly Pick<VideoJobRecord, "critic" | "criticSpend">[]): SpendEntry[] {
   return records.flatMap((record) =>
-    (record.critic ?? []).map((run) => ({ startedAt: run.startedAt, finishedAt: run.finishedAt, costUsd: run.costUsd })),
+    // The spend list, which no history trim touches; a record from before it has only its runs.
+    (record.criticSpend ?? (record.critic ?? []).map((run) => ({ startedAt: run.startedAt, finishedAt: run.finishedAt, costUsd: run.costUsd }))).map((entry) => ({ ...entry })),
   );
+}
+
+/**
+ * A job's critic spend with one more run on it: every run that cost
+ * something, each dropped only once it ended before the rolling window.
+ * Kept apart from the run history, which is trimmed by count, so repeated
+ * checks of one job never fall out of the cap's sum while they still count.
+ */
+export function withCriticSpend(
+  record: Pick<VideoJobRecord, "critic" | "criticSpend">,
+  run: CriticRun,
+  windowMs: number,
+  now: number = Date.now(),
+): SpendEntry[] {
+  const entry = { startedAt: run.startedAt, finishedAt: run.finishedAt, costUsd: run.costUsd };
+  const all = [...criticSpend([record]), ...(run.costUsd === null || run.costUsd <= 0 ? [] : [entry])];
+  return all.filter((spent) => spent.costUsd !== null && spent.costUsd > 0 && Date.parse(spent.finishedAt ?? spent.startedAt ?? "") >= now - windowMs);
+}
+
+/**
+ * The run history with one more run on it, capped at `CRITIC_RUNS_KEPT`.
+ * Only standalone runs are ever dropped, oldest first: an attempt's own run
+ * is the record of what each build was told, and after a fallback the only
+ * place the restored build's sheets are named, so every one is kept (a job
+ * has at most five attempts).
+ */
+export function keptCriticRuns(runs: readonly CriticRun[], run: CriticRun): CriticRun[] {
+  const all = [...runs, run];
+  const attempts = all.filter((entry) => !entry.standalone).length;
+  const standalone = all.filter((entry) => entry.standalone);
+  const keep = new Set(standalone.slice(Math.max(0, standalone.length - Math.max(1, CRITIC_RUNS_KEPT - attempts))));
+  return all.filter((entry) => !entry.standalone || keep.has(entry));
 }
 
 /** One line of a retry's findings, per defect sent back. */
@@ -716,6 +749,12 @@ export interface CriticView {
   attempt: number;
   /** How many attempts the job ran. */
   attempts: number;
+  /** The attempt whose build is in review. */
+  build: number;
+  /** Whether the scores are of that build; false when its own check gave no answer and these are an earlier build's. */
+  current: boolean;
+  /** Why the build in review has no scores of its own, when it has none. */
+  unscoredReason: string | null;
   scores: Record<CriticDimension, number>;
   defects: CriticDefect[];
   notes: string[];
@@ -730,27 +769,36 @@ export interface CriticView {
  */
 export function criticView(record: Pick<VideoJobRecord, "critic" | "attempt" | "fallback">): CriticView | null {
   const runs = record.critic ?? [];
-  // After a fallback the build in review is the earlier attempt's, so its
-  // run is the one shown, and its defects are open: none was fixed.
+  // The build in review: after a fallback the earlier attempt's, whose
+  // defects are open since none was fixed; else the last attempt a critic
+  // was asked about. A standalone run always judged the build in review.
   const fallback = record.fallback ?? null;
+  const asked = runs.filter((run) => !run.standalone && run.attempt !== null).map((run) => run.attempt as number);
+  const build = fallback?.attempt ?? (asked.length > 0 ? Math.max(...asked) : record.attempt);
   let latestAt = -1;
   runs.forEach((run, at) => {
     if (run.scores !== null && (fallback === null || run.standalone || run.attempt === fallback.attempt)) latestAt = at;
   });
   const latest = runs[latestAt];
   if (latest === undefined || latest.scores === null) return null;
-  const attempt = latest.attempt ?? record.attempt;
-  const sentBack = runs
-    .slice(0, latestAt)
-    .filter((run) => run.sentBack && run.attempt !== null && run.attempt < attempt)
-    .flatMap((run) => run.defects.map((defect) => ({ ...defect })));
+  const attempt = latest.attempt ?? build;
+  const current = latest.standalone || attempt === build;
+  const earlier = runs.slice(0, latestAt).filter((run) => run.sentBack && run.attempt !== null && run.attempt < attempt);
+  // Scores of an earlier build than the one in review: its defects went
+  // back to the agent, so they are sent back, not open, and the view says
+  // the build in review was not scored, with why.
+  const stale = !current && latest.sentBack;
+  const unscored = current ? null : runs.filter((run) => !run.standalone && run.attempt === build).at(-1);
   return {
     attempt,
     attempts: Math.max(record.attempt, attempt),
+    build,
+    current,
+    unscoredReason: current ? null : (unscored?.error ?? "no critic read it"),
     scores: { ...latest.scores },
-    defects: latest.defects.map((defect) => ({ ...defect })),
+    defects: stale ? [] : latest.defects.map((defect) => ({ ...defect })),
     notes: [...latest.notes],
-    sentBack,
+    sentBack: [...earlier, ...(stale ? [latest] : [])].flatMap((run) => run.defects.map((defect) => ({ ...defect }))),
   };
 }
 

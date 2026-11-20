@@ -46,8 +46,9 @@ import {
 } from "./config";
 import { safeCopy, safeRead } from "./copy";
 import {
-  CRITIC_RUNS_KEPT,
   criticSpend,
+  keptCriticRuns,
+  withCriticSpend,
   criticSummary,
   defectFinding,
   fallbackSheet,
@@ -1348,9 +1349,10 @@ export class VideoRunner {
    */
   private async keepCriticRun(id: string, run: CriticRun): Promise<VideoJobRecord> {
     const current = this.store.get(id);
-    const runs = [...(current?.critic ?? []), run].slice(-CRITIC_RUNS_KEPT);
+    const runs = keptCriticRuns(current?.critic ?? [], run);
+    const spend = withCriticSpend(current ?? {}, run, DAILY_WINDOW_MS);
     const attempts = run.attempt !== null && run.calls > 0 ? withAttemptCritic(current?.attempts, run.attempt, criticSummary(run)) : current?.attempts;
-    return this.store.update(id, { critic: runs, ...(attempts === undefined ? {} : { attempts }) });
+    return this.store.update(id, { critic: runs, criticSpend: spend, ...(attempts === undefined ? {} : { attempts }) });
   }
 
   /** The sheets a critic reads for a job: each from where it is now, the kept copy first. */
@@ -1358,7 +1360,10 @@ export class VideoRunner {
     const sources: CriticSource[] = [];
     for (const sheet of backend.sheets(paths, record.classes)) {
       const kept = path.join(paths.job, "sheets", sheet.kept);
-      const candidates = keptFirst ? [kept, sheet.file] : [sheet.file];
+      // After a fallback the render's sheets are the failed retry's: the
+      // critic's own copy of the restored attempt's is the build in review.
+      const restored = fallbackSheet(record, sheet.id);
+      const candidates = [...(restored === undefined ? [] : [restored]), ...(keptFirst ? [kept, sheet.file] : [sheet.file])];
       for (const from of candidates) {
         // Only whether something is there: the copy is what checks what it is.
         if ((await lstat(from).catch(() => null)) === null) continue;
@@ -1520,20 +1525,32 @@ export class VideoRunner {
     if (!["awaiting_review", "accepted", "discarded"].includes(record.state)) {
       throw new JobRefused(409, `job ${id} is ${record.state}; a picture check is run on a video in review, accepted or discarded`);
     }
-    if (this.standaloneCritics.has(id)) throw new JobRefused(409, `a picture check of job ${id} is already running`);
     if (this.draining) throw new JobRefused(503, "the runner is shutting down, so no critic was run");
-    const backend = backendFor(briefTool(record.brief));
-    const paths = await backend.paths(record.id, record.slug);
-    const sources = await this.criticSources(record, backend, paths, true);
-    if (sources.length === 0) throw new JobRefused(409, `job ${id} has no contact sheet left to read`, { reason: "no-sheets" });
-    const capped = this.criticCapReason();
-    if (capped !== null) throw new JobRefused(429, capped, { reason: "daily-cap" });
+    if (this.standaloneCritics.has(id)) throw new JobRefused(409, `a picture check of job ${id} is already running`);
+    // Reserved before the first await, so a second press refuses here rather
+    // than starting a second paid call; released on every way out below.
     const holder: { call: CriticCall | null; cancelled: boolean } = { call: null, cancelled: false };
     this.standaloneCritics.set(id, holder);
+    const release = (): void => {
+      if (this.standaloneCritics.get(id) === holder) this.standaloneCritics.delete(id);
+    };
+    let sources: CriticSource[];
+    try {
+      const backend = backendFor(briefTool(record.brief));
+      const paths = await backend.paths(record.id, record.slug);
+      sources = await this.criticSources(record, backend, paths, true);
+      if (sources.length === 0) throw new JobRefused(409, `job ${id} has no contact sheet left to read`, { reason: "no-sheets" });
+      const capped = this.criticCapReason();
+      if (capped !== null) throw new JobRefused(429, capped, { reason: "daily-cap" });
+    } catch (error) {
+      release();
+      throw error;
+    }
     const label = `standalone-${(record.critic ?? []).filter((run) => run.standalone).length + 1}-${Date.now()}`;
     const done = (async () => {
       let run: CriticRun;
       try {
+        if (holder.cancelled) throw new Error("the runner is shutting down");
         run = await runCritic({
           jobId: id,
           label,
@@ -1564,7 +1581,7 @@ export class VideoRunner {
     try {
       return await done;
     } finally {
-      this.standaloneCritics.delete(id);
+      release();
       if (this.standaloneSettled.get(id) === settled) this.standaloneSettled.delete(id);
     }
   }

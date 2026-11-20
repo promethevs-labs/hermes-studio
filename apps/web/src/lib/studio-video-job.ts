@@ -152,6 +152,11 @@ export interface VideoCritic {
   /** The attempt the scores judged, and how many the job ran. */
   attempt: number;
   attempts: number;
+  /** The attempt whose build is in review, and whether the scores are of it. Optional: a runner one version behind sends neither. */
+  build?: number;
+  current?: boolean;
+  /** Why the build in review has no scores of its own, when it has none. */
+  unscoredReason?: string | null;
   scores: Record<CriticDimension, number>;
   defects: CriticDefect[];
   notes: string[];
@@ -942,7 +947,7 @@ export interface CriticLine {
 export function pictureCheck(
   job: Pick<VideoJob, "critic" | "classes" | "brief">,
   chapters: readonly VideoChapter[] | null = null,
-): { attempt: string; tiles: CriticTile[]; lines: CriticLine[] } | null {
+): { attempt: string; unscored: string | null; tiles: CriticTile[]; lines: CriticLine[] } | null {
   const critic = job.critic ?? null;
   if (critic === null) return null;
   const tiles = CRITIC_DIMENSIONS.map((dimension): CriticTile => {
@@ -952,8 +957,14 @@ export function pictureCheck(
   const defect =
     (kind: CriticLine["kind"]) =>
     (entry: CriticDefect): CriticLine => ({ kind, text: `${sceneTitle(job, entry.scene, chapters)}: ${entry.problem}` });
+  // Scores of an earlier build than the one in review say so plainly.
+  const unscored =
+    critic.current === false
+      ? `Attempt ${critic.build ?? critic.attempts}, the build in review, was not scored${critic.unscoredReason ? ` (${critic.unscoredReason})` : ""}. These scores are attempt ${critic.attempt}'s.`
+      : null;
   return {
     attempt: `attempt ${critic.attempt} of ${critic.attempts}`,
+    unscored,
     tiles,
     lines: [
       ...critic.sentBack.map(defect("sent back")),

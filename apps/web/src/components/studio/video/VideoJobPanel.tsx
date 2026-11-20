@@ -847,6 +847,7 @@ export function PictureCheck({ job, chapters }: { job: VideoJob; chapters: Video
         </h3>
         <span className="text-[12px] text-text3">{capitalised(check.attempt)}</span>
       </div>
+      {check.unscored !== null && <p className="mt-1 text-[13px] leading-5 text-warn-text">{check.unscored}</p>}
       <ul className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-5">
         {check.tiles.map((tile) => (
           <li key={tile.dimension} className="flex min-w-0 flex-col gap-0.5 rounded-xl bg-surface2 px-3 py-2">

@@ -349,7 +349,17 @@ describe("the picture check in the job loop", () => {
     expect(done.costUsd).toBe(0.01);
     expect(runner.spend().totalUsd).toBeCloseTo(0.014, 6);
     expect(done.steps.find((step) => step.name === "critic")).toMatchObject({ state: "done", rounds: 1 });
-    expect(videoView(done).critic).toEqual({ attempt: 1, attempts: 1, scores: SCORES, defects: [], notes: ["the two scenes share one layout"], sentBack: [] });
+    expect(videoView(done).critic).toEqual({
+      attempt: 1,
+      attempts: 1,
+      build: 1,
+      current: true,
+      unscoredReason: null,
+      scores: SCORES,
+      defects: [],
+      notes: ["the two scenes share one layout"],
+      sentBack: [],
+    });
   });
 
   it("sends defects back once, as the next attempt's findings, and never again", async () => {
@@ -431,6 +441,25 @@ describe("the picture check in the job loop", () => {
     expect(done.attempts![0]!.critic).toBeNull();
     expect(checkJobRun(JSON.parse(await readFile(lastRunFile(done.id)!, "utf8"))).ok).toBe(true);
     expect(videoView(done).critic).toBeNull();
+  });
+
+  it("shows defects sent back as sent back, and says the build in review was not scored, when the retry's own check gives nothing", async () => {
+    process.env.STUDIO_VIDEO_CRITIC_TIMEOUT_MS = "1000";
+    await plans([{}, {}], [{ reply: reply({ defects: [DEFECT] }) }, { reply: reply(), hangMs: 30_000 }]);
+    const done = await runToEnd();
+
+    expect(done.critic!.map((run) => [run.attempt, run.scores === null])).toEqual([
+      [1, false],
+      [2, true],
+    ]);
+    expect(videoView(done).critic).toMatchObject({
+      attempt: 1,
+      build: 2,
+      current: false,
+      unscoredReason: "the critic did not answer within 1 s",
+      defects: [],
+      sentBack: [DEFECT],
+    });
   });
 
   it("stops a critic that does not answer in time", async () => {
@@ -613,6 +642,22 @@ describe("falling back to the build that passed", () => {
     expect(videoView(done).critic).toMatchObject({ attempt: 2, sentBack: [DEFECT], defects: [] });
   });
 
+  it("has a standalone check read the restored build's sheets, not the failed retry's", async () => {
+    await plans([{}, {}, {}], [{ reply: reply({ defects: [DEFECT] }) }, { reply: reply({ notes: [] }) }]);
+    gateMock.verdicts = [true, false, false];
+    const done = await runToEnd();
+    expect(done.fallback).toMatchObject({ attempt: 1 });
+    // The render's sheets now show the retry, and no verdict has kept any yet.
+    const retry = Buffer.concat([PNG, Buffer.from(" of the retry")]);
+    for (const scene of CLASSES) await writeFile(job(done.id, "render", "sheets", `${scene}.sheet.png`), retry);
+    expect(existsSync(job(done.id, "sheets"))).toBe(false);
+
+    const run = await runner.criticRun(done.id);
+    expect(run.error).toBeNull();
+    for (const sheet of run.sheets) expect(await readFile(sheet.file)).toEqual(PNG);
+    expect(videoView(store.get(done.id)!).critic).toMatchObject({ attempt: 1, build: 1, current: true, notes: [] });
+  });
+
   it("changes nothing for a job whose critic sent nothing back", async () => {
     await plans([{}], [{ reply: reply() }]);
     const done = await runToEnd();
@@ -747,6 +792,39 @@ describe("copying the sheets", () => {
   });
 });
 
+describe("the history and the spend", () => {
+  const at = (msAgo: number) => new Date(Date.now() - msAgo).toISOString();
+  const standalone = (n: number, msAgo = 60_000) =>
+    critic.skippedRun(null, "", { error: null, scores: SCORES, calls: 1, costUsd: 0.01, startedAt: at(msAgo + 1_000), finishedAt: at(msAgo), notes: [`run ${n}`] });
+
+  it("trims only standalone runs, so an attempt's run and the restored build's sheets stay", () => {
+    const attempt = critic.skippedRun(1, "", { error: null, scores: SCORES, calls: 1, sheets: [{ id: "TB1_WhyItMatters", title: null, scenes: [], file: "/kept/01.png" }] });
+    let runs = [attempt];
+    for (let n = 0; n < critic.CRITIC_RUNS_KEPT + 10; n += 1) runs = critic.keptCriticRuns(runs, standalone(n));
+    expect(runs).toHaveLength(critic.CRITIC_RUNS_KEPT);
+    expect(runs[0]).toBe(attempt);
+    expect(runs.at(-1)!.notes).toEqual([`run ${critic.CRITIC_RUNS_KEPT + 9}`]);
+    expect(critic.fallbackSheet({ critic: runs, fallback: { attempt: 1, retryErrorKind: "gate", retryError: null, at: at(0) } }, "TB1_WhyItMatters")).toBe("/kept/01.png");
+  });
+
+  it("keeps every run's spend inside the window however many the history drops, and only those", () => {
+    const window = 24 * 3_600_000;
+    let record: { critic: import("../src/video/critic").CriticRun[]; criticSpend?: SpendEntryT[] } = { critic: [] };
+    const total = critic.CRITIC_RUNS_KEPT + 10;
+    for (let n = 0; n < total; n += 1) {
+      const run = standalone(n);
+      record = { critic: critic.keptCriticRuns(record.critic, run), criticSpend: critic.withCriticSpend(record, run, window) };
+    }
+    expect(record.critic.length).toBeLessThanOrEqual(critic.CRITIC_RUNS_KEPT);
+    const sum = critic.criticSpend([record]).reduce((usd, entry) => usd + (entry.costUsd ?? 0), 0);
+    expect(sum).toBeCloseTo(0.01 * total, 6);
+    // One that ended before the window goes; a record from before the list reads its runs.
+    const old = critic.withCriticSpend(record, standalone(0, window + 60_000), window);
+    expect(old).toHaveLength(total);
+    expect(critic.criticSpend([{ critic: [standalone(1)] }])).toHaveLength(1);
+  });
+});
+
 describe("reading a reply", () => {
   const scenes = [
     { class: "TB1_WhyItMatters", name: "why_it_matters" },
@@ -833,6 +911,21 @@ describe("the standalone route", () => {
     // Never on an attempt: it judged no attempt the job ran.
     expect(Object.hasOwn(record.attempts![0]!, "critic")).toBe(false);
     expect(videoView(record).critic).toMatchObject({ attempt: 1, attempts: 1, defects: [DEFECT], sentBack: [] });
+  });
+
+  it("lets only one of two checks pressed together through, and frees the job once it ends", async () => {
+    const job = await acceptedJob();
+    await plans([{}], [{ reply: reply(), hangMs: 300 }]);
+    const [first, second] = await Promise.allSettled([runner.criticRun(job.id), runner.criticRun(job.id)]);
+
+    expect(first.status).toBe("fulfilled");
+    expect(second).toMatchObject({ status: "rejected", reason: { status: 409 } });
+    expect(await criticCalls()).toHaveLength(1);
+    expect(runner.criticRunning(job.id)).toBe(false);
+    // A refusal before the first paid call frees the job as well.
+    process.env.STUDIO_DAILY_USD = "0.001";
+    await expect(runner.criticRun(job.id)).rejects.toMatchObject({ status: 429 });
+    expect(runner.criticRunning(job.id)).toBe(false);
   });
 
   it("answers 503 when the critic is off, 409 with no sheet left or for a job still running, and 429 under the cap", async () => {

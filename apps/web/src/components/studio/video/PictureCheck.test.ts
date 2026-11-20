@@ -116,6 +116,28 @@ describe("PictureCheck", () => {
     expect(lines).toEqual(["OpenWhy it matters: The title overlaps the axis label."]);
   });
 
+  it("says the build in review was not scored when the scores are an earlier attempt's, its defects sent back", async () => {
+    const stale: VideoCritic = {
+      ...CRITIC,
+      attempt: 1,
+      attempts: 2,
+      build: 2,
+      current: false,
+      unscoredReason: "the critic did not answer within 180 s",
+      defects: [],
+      notes: [],
+    };
+    const host = await mount(job({ critic: stale }));
+    const warning = host.querySelector("p");
+    expect(warning?.textContent).toBe("Attempt 2, the build in review, was not scored (the critic did not answer within 180 s). These scores are attempt 1's.");
+    expect(warning?.className).toContain("text-warn-text");
+    const lines = [...host.querySelectorAll("ul")[1]!.querySelectorAll("li")].map((line) => line.textContent);
+    expect(lines).toEqual(["Sent backWhy it matters: The title overlaps the axis label."]);
+    // Scores of the build in review need no such line.
+    const fresh = await mount(job({ critic: { ...CRITIC, build: 2, current: true, unscoredReason: null } }));
+    expect(fresh.querySelector("p")).toBeNull();
+  });
+
   it("leaves out the line list when the critic found nothing", async () => {
     const host = await mount(job({ critic: { ...CRITIC, defects: [], notes: [], sentBack: [] } }));
     expect(host.querySelectorAll("ul")).toHaveLength(1);

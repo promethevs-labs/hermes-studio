@@ -1155,7 +1155,13 @@ every attempt with its own gate and critic. A cancel never falls back.
 **Where it is kept.** The attempt's entry in the run record carries the
 scores, the model, the cost and the counts (`withAttemptCritic`). The job's
 `job.json` keeps every run in `critic`: each defect's scene, problem and
-fix, the notes, the sheets it read, the ones it skipped and any error.
+fix, the notes, the sheets it read, the ones it skipped and any error. That
+history keeps every attempt's run and the latest standalone ones, up to 20
+in all. What each run spent goes in `criticSpend` beside it, dropped only
+once it ends before the rolling day, so the cap never loses a run the
+history trimmed. When the build in review was not scored (its check timed
+out, say) and the shown scores are an earlier attempt's, the job view says
+so, and that attempt's defects show as sent back.
 
 **Cost and the cap.** A critic's cost is its own: it is never added to the
 job's `cost_usd`. Each run still counts in the rolling day behind
