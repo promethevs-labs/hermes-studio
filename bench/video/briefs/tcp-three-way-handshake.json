@@ -1,0 +1,117 @@
+{
+  "id": "tcp-three-way-handshake",
+  "needs": "A sequence over time: messages cross between two timelines in a fixed order.",
+  "brief": {
+    "title": "The TCP three-way handshake",
+    "topic": "computer-networks",
+    "slug": "tcp-three-way-handshake",
+    "mode": "new",
+    "idea": "Before any data flows, TCP opens a connection with three messages, SYN, SYN-ACK and ACK, so both sides agree on the numbers their bytes start from.",
+    "audience": "familiar",
+    "targetSeconds": 65,
+    "voice": "af_heart",
+    "scenes": [
+      {
+        "name": "two_timelines",
+        "beats": [
+          {
+            "say": "A laptop wants a page from a server. Before any data moves, T C P opens a connection.",
+            "show": "Two vertical lines appear, the laptop on the left and the server on the right, with time running downward.",
+            "labels": [
+              "Client",
+              "Server"
+            ]
+          },
+          {
+            "say": "It takes three messages, and along the way each side picks a starting number for counting its bytes.",
+            "show": "Three empty arrow slots appear between the two lines, stacked downward in time.",
+            "labels": [
+              "3 messages"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "three_messages",
+        "beats": [
+          {
+            "say": "First the client sends S Y N, which says, let us talk, and my bytes start at one thousand.",
+            "show": "An arrow labelled SYN, seq 1000 travels down and across from the client to the server.",
+            "labels": [
+              "SYN",
+              "seq = 1000"
+            ]
+          },
+          {
+            "say": "The server answers S Y N A C K. It acknowledges one thousand and one, and its own bytes start at five thousand.",
+            "show": "An arrow labelled SYN-ACK travels back from the server to the client, lower on the timeline.",
+            "labels": [
+              "SYN-ACK",
+              "ack = 1001",
+              "seq = 5000"
+            ]
+          },
+          {
+            "say": "Last, the client sends A C K, acknowledging five thousand and one. Both sides now agree.",
+            "show": "A third arrow labelled ACK travels from the client to the server, lower still.",
+            "labels": [
+              "ACK",
+              "ack = 5001"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "a_round_trip_spent",
+        "beats": [
+          {
+            "say": "If one trip across takes twenty milliseconds, the client waits forty before it can send its request.",
+            "show": "A bracket on the client line spans from the SYN leaving to the SYN-ACK arriving, labelled 40 ms.",
+            "labels": [
+              "20 ms each way",
+              "40 ms"
+            ]
+          },
+          {
+            "say": "A server on the far side of the world, a hundred and fifty milliseconds away, makes the client wait three hundred.",
+            "show": "A second, longer pair of timelines shows a distant server, with its bracket labelled 300 ms.",
+            "labels": [
+              "150 ms each way",
+              "300 ms"
+            ]
+          },
+          {
+            "say": "Then the request goes out right behind the final A C K, and the page starts to flow back.",
+            "show": "A fourth arrow labelled GET follows just below the ACK, then a thicker arrow of data returns.",
+            "labels": [
+              "GET /"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "syn_synack_ack",
+        "beats": [
+          {
+            "say": "Three messages: S Y N, S Y N A C K, and A C K.",
+            "show": "The three arrows are highlighted one after another on the two timelines.",
+            "labels": [
+              "SYN",
+              "SYN-ACK",
+              "ACK"
+            ]
+          },
+          {
+            "say": "Each one carries a number, so both sides know exactly where the bytes of the other begin.",
+            "show": "The numbers 1000 and 5000 are circled on the arrows that first carried them.",
+            "labels": [
+              "1000",
+              "5000"
+            ]
+          }
+        ]
+      }
+    ],
+    "concepts": []
+  }
+}

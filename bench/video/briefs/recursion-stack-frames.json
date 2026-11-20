@@ -1,0 +1,111 @@
+{
+  "id": "recursion-stack-frames",
+  "needs": "A memory view: stack frames pile up and unwind as recursive calls run.",
+  "brief": {
+    "title": "Stack frames during recursion",
+    "topic": "computer-systems",
+    "slug": "recursion-stack-frames",
+    "mode": "new",
+    "idea": "Each recursive call gets its own stack frame holding its own n; frames pile up until the base case, then unwind one by one as each call returns.",
+    "audience": "familiar",
+    "targetSeconds": 68,
+    "voice": "af_heart",
+    "scenes": [
+      {
+        "name": "one_short_function",
+        "beats": [
+          {
+            "say": "This function computes a factorial by calling itself. Factorial of three is three times two times one.",
+            "show": "The function appears: if n is 1, return 1; otherwise return n times fact of n minus 1.",
+            "labels": [
+              "fact(3) = 3 × 2 × 1"
+            ]
+          },
+          {
+            "say": "To see how it runs, watch the stack, the part of memory where each call keeps its own variables.",
+            "show": "An empty column labelled stack appears to the right of the code.",
+            "labels": [
+              "stack"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "frames_pile_up",
+        "beats": [
+          {
+            "say": "Calling fact of three adds a frame holding n equals three. It cannot finish: it needs fact of two.",
+            "show": "A frame labelled fact(3), n = 3 appears at the bottom of the stack, with an empty result slot.",
+            "labels": [
+              "fact(3)",
+              "n = 3"
+            ]
+          },
+          {
+            "say": "So a second frame goes on top, with its own n equals two, waiting on fact of one.",
+            "show": "A frame labelled fact(2), n = 2 is placed on top of the first.",
+            "labels": [
+              "fact(2)",
+              "n = 2"
+            ]
+          },
+          {
+            "say": "The third frame has n equals one, the base case. It returns one without calling anything.",
+            "show": "A frame labelled fact(1), n = 1 lands on top and its result slot fills with 1.",
+            "labels": [
+              "fact(1)",
+              "returns 1"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "frames_unwind",
+        "beats": [
+          {
+            "say": "The top frame is removed, and its one goes down to fact of two, which returns two times one, two.",
+            "show": "The fact(1) frame lifts off; the 1 drops into fact(2), whose result slot fills with 2.",
+            "labels": [
+              "2 × 1 = 2"
+            ]
+          },
+          {
+            "say": "Then fact of two is removed, and fact of three returns three times two, six.",
+            "show": "The fact(2) frame lifts off; the 2 drops into fact(3), whose result slot fills with 6.",
+            "labels": [
+              "3 × 2 = 6"
+            ]
+          },
+          {
+            "say": "The last frame is removed and the stack is empty again. The answer, six, goes back to whoever called.",
+            "show": "The fact(3) frame lifts off and 6 appears beside the code as the final result.",
+            "labels": [
+              "6"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "three_frames_deep",
+        "beats": [
+          {
+            "say": "At its deepest the stack held three frames, one for each call, each with its own n and its own place to wait.",
+            "show": "The tallest moment returns: three frames stacked, with n = 3, 2 and 1.",
+            "labels": [
+              "3 frames"
+            ]
+          },
+          {
+            "say": "Factorial of ten thousand would need ten thousand frames, which is how deep recursion overflows the stack.",
+            "show": "The stack column stretches upward past the top of its space, and a warning reads stack overflow.",
+            "labels": [
+              "10,000 frames",
+              "stack overflow"
+            ]
+          }
+        ]
+      }
+    ],
+    "concepts": []
+  }
+}

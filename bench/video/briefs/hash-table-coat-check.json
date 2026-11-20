@@ -1,0 +1,110 @@
+{
+  "id": "hash-table-coat-check",
+  "needs": "A metaphor: a coat check with numbered hooks stands in for a hash table, then is relabelled.",
+  "brief": {
+    "title": "A hash table is a coat check",
+    "topic": "algorithms-and-data-structures",
+    "slug": "hash-table-coat-check",
+    "mode": "new",
+    "idea": "A hash table works like a coat check: a rule turns each key into a hook number, so finding a value means going straight to one hook instead of searching every coat.",
+    "audience": "familiar",
+    "targetSeconds": 68,
+    "voice": "af_heart",
+    "scenes": [
+      {
+        "name": "ten_numbered_hooks",
+        "beats": [
+          {
+            "say": "A coat check has ten numbered hooks. Hand over a coat with your name, and the attendant hangs it on one.",
+            "show": "A row of ten hooks numbered 0 to 9 appears behind a counter.",
+            "labels": [
+              "hooks 0 to 9"
+            ]
+          },
+          {
+            "say": "The trick is the rule for choosing a hook: add up the places of the letters in the alphabet, and keep the last digit.",
+            "show": "A card shows the rule: letter positions are added, and the last digit is kept.",
+            "labels": [
+              "sum of letters, last digit"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "names_become_hooks",
+        "beats": [
+          {
+            "say": "Leo is twelve, five and fifteen, which adds to thirty two, so his coat goes on hook two.",
+            "show": "The name Leo splits into 12, 5 and 15, the sum 32 appears, and a coat moves onto hook 2.",
+            "labels": [
+              "Leo → 32 → hook 2"
+            ]
+          },
+          {
+            "say": "Ana is one, fourteen and one, which adds to sixteen, so her coat goes on hook six.",
+            "show": "The name Ana becomes 16, and a coat moves onto hook 6.",
+            "labels": [
+              "Ana → 16 → hook 6"
+            ]
+          },
+          {
+            "say": "When Leo comes back, the attendant runs the same rule, gets two, and walks straight to that hook.",
+            "show": "The name Leo turns into 2 again and the attendant goes directly to hook 2, passing the others.",
+            "labels": [
+              "straight to hook 2"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "two_coats_one_hook",
+        "beats": [
+          {
+            "say": "Zoe adds to forty six, which also ends in six. Two names, one hook: that is a collision.",
+            "show": "The name Zoe becomes 46, and her coat heads for hook 6, where the coat of Ana already hangs.",
+            "labels": [
+              "Zoe → 46 → hook 6",
+              "collision"
+            ]
+          },
+          {
+            "say": "The attendant hangs both coats on hook six and reads the tags there, still only two to check.",
+            "show": "Both coats hang together on hook 6, each with its name tag showing.",
+            "labels": [
+              "2 tags to check"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "keys_slots_and_hash",
+        "beats": [
+          {
+            "say": "In a program the names are keys, the hooks are slots in an array, and the rule is the hash function.",
+            "show": "The labels change: names become keys, hooks become array slots 0 to 9, and the rule card becomes hash().",
+            "labels": [
+              "key",
+              "hash(key)",
+              "slot"
+            ]
+          },
+          {
+            "say": "So finding a value takes one quick calculation and one slot, not a search through every coat.",
+            "show": "One key is hashed and a single slot lights up, while the other slots stay dark.",
+            "labels": [
+              "one slot, not all"
+            ]
+          },
+          {
+            "say": "That is why finding one name among a million keys takes about as long as finding it among ten.",
+            "show": "The row of slots stretches to a million, and still a single slot lights up.",
+            "labels": [
+              "1,000,000 keys, 1 slot"
+            ]
+          }
+        ]
+      }
+    ],
+    "concepts": []
+  }
+}

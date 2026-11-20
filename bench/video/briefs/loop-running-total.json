@@ -1,0 +1,126 @@
+{
+  "id": "loop-running-total",
+  "needs": "A code walk: lines of a short loop light up while one variable changes value.",
+  "brief": {
+    "title": "Walking through a loop, one line at a time",
+    "topic": "algorithms-and-data-structures",
+    "slug": "loop-running-total",
+    "mode": "new",
+    "idea": "A loop runs the same lines again and again, and following one variable through each pass shows exactly how a running total is built.",
+    "audience": "familiar",
+    "targetSeconds": 66,
+    "voice": "af_heart",
+    "scenes": [
+      {
+        "name": "five_lines_of_python",
+        "beats": [
+          {
+            "say": "Here are five lines of Python that add up three prices: four, seven and two.",
+            "show": "Five lines of code appear: prices = [4, 7, 2], total = 0, for p in prices:, total = total + p, print(total).",
+            "labels": [
+              "prices = [4, 7, 2]"
+            ]
+          },
+          {
+            "say": "The list holds the prices. The loop will visit each one, in order, exactly once.",
+            "show": "The list on line one is highlighted, with its three values marked in order.",
+            "labels": [
+              "4",
+              "7",
+              "2"
+            ]
+          },
+          {
+            "say": "We will follow one variable, total, and watch its value change as the lines run.",
+            "show": "An empty box labelled total appears beside the code.",
+            "labels": [
+              "total"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "before_the_loop",
+        "beats": [
+          {
+            "say": "The second line sets total to zero, before anything at all has been added to it.",
+            "show": "Line two is highlighted and the total box shows 0.",
+            "labels": [
+              "total = 0"
+            ]
+          },
+          {
+            "say": "The loop line picks the first price from the list, so p is now four.",
+            "show": "Line three is highlighted and a box labelled p appears showing 4.",
+            "labels": [
+              "p = 4"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "three_passes",
+        "beats": [
+          {
+            "say": "Line four adds p to total. Zero plus four makes four, so total is now four.",
+            "show": "Line four is highlighted; the total box changes from 0 to 4.",
+            "labels": [
+              "0 + 4 = 4"
+            ]
+          },
+          {
+            "say": "Back to the loop line. p becomes seven, and total goes from four to eleven.",
+            "show": "Line three, then line four, is highlighted; p shows 7 and total changes from 4 to 11.",
+            "labels": [
+              "p = 7",
+              "4 + 7 = 11"
+            ]
+          },
+          {
+            "say": "One more pass. p becomes two, and total goes from eleven to thirteen.",
+            "show": "Lines three and four are highlighted again; p shows 2 and total changes from 11 to 13.",
+            "labels": [
+              "p = 2",
+              "11 + 2 = 13"
+            ]
+          },
+          {
+            "say": "No prices are left, so the loop ends, and the last line prints thirteen.",
+            "show": "Line five is highlighted and 13 appears in an output panel below the code.",
+            "labels": [
+              "13"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "the_values_total_held",
+        "beats": [
+          {
+            "say": "Line by line, total held zero, then four, then eleven, then thirteen.",
+            "show": "A short history beside the total box lists 0, 4, 11, 13 in order.",
+            "labels": [
+              "0",
+              "4",
+              "11",
+              "13"
+            ]
+          },
+          {
+            "say": "Each pass ran the same line, but with a new p, and the total that the last pass left behind.",
+            "show": "The three passes are shown one above the other, each pairing a value of p with total before and after.",
+            "labels": []
+          },
+          {
+            "say": "Give the list five prices and nothing else in the code changes. The loop simply runs five times.",
+            "show": "The list grows to five values and a counter beside the loop line reads 5 passes.",
+            "labels": [
+              "5 prices, 5 passes"
+            ]
+          }
+        ]
+      }
+    ],
+    "concepts": []
+  }
+}

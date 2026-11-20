@@ -1,0 +1,107 @@
+{
+  "id": "memory-hierarchy-layers",
+  "needs": "A layered or physical structure: memory as stacked layers from small and fast to large and slow.",
+  "brief": {
+    "title": "The memory hierarchy, layer by layer",
+    "topic": "computer-systems",
+    "slug": "memory-hierarchy-layers",
+    "mode": "new",
+    "idea": "A computer stacks memory in layers, from tiny fast registers to huge slow drives, and keeps the data it is using in the small fast layers near the processor.",
+    "audience": "familiar",
+    "targetSeconds": 68,
+    "voice": "af_heart",
+    "scenes": [
+      {
+        "name": "a_stack_of_layers",
+        "beats": [
+          {
+            "say": "Memory in a computer is not one thing. It is a stack of layers, each bigger and slower than the one above.",
+            "show": "A narrow layer appears at the top and wider layers stack below it, forming a pyramid.",
+            "labels": [
+              "faster",
+              "bigger"
+            ]
+          },
+          {
+            "say": "At the top, inside the processor, are the registers: a few hundred bytes, read in under a nanosecond.",
+            "show": "The top layer is labelled registers, with its size and speed.",
+            "labels": [
+              "Registers",
+              "< 1 ns"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "three_caches",
+        "beats": [
+          {
+            "say": "Below them sit three caches. The first holds sixty four kilobytes and answers in about one nanosecond.",
+            "show": "A layer labelled L1 cache appears with 64 KB and 1 ns.",
+            "labels": [
+              "L1: 64 KB",
+              "1 ns"
+            ]
+          },
+          {
+            "say": "The next two hold one megabyte and thirty two megabytes, and take four and twelve nanoseconds.",
+            "show": "Layers L2 and L3 appear below L1 with their sizes and times.",
+            "labels": [
+              "L2: 1 MB, 4 ns",
+              "L3: 32 MB, 12 ns"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "ram_and_the_drive",
+        "beats": [
+          {
+            "say": "Main memory holds sixteen gigabytes, but one read takes about a hundred nanoseconds, a hundred times slower than the first cache.",
+            "show": "A much wider layer labelled RAM appears with 16 GB and 100 ns.",
+            "labels": [
+              "RAM: 16 GB",
+              "100 ns"
+            ]
+          },
+          {
+            "say": "At the bottom, the drive holds a terabyte and takes about a hundred microseconds, a thousand times slower again.",
+            "show": "The widest layer, SSD, appears at the base with 1 TB and 100 µs.",
+            "labels": [
+              "SSD: 1 TB",
+              "100 µs"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "one_value_moving_up",
+        "beats": [
+          {
+            "say": "When the processor needs a value, it checks each layer from the top and stops at the first that has it.",
+            "show": "A marker drops from the registers through L1, L2 and L3, and finds the value in RAM.",
+            "labels": [
+              "miss",
+              "miss",
+              "miss",
+              "hit"
+            ]
+          },
+          {
+            "say": "That value is copied up into the caches, so the next read takes one nanosecond instead of a hundred.",
+            "show": "The value travels back up, leaving a copy in L3, L2 and L1.",
+            "labels": [
+              "copied up"
+            ]
+          },
+          {
+            "say": "Small and fast at the top, big and slow at the bottom, and what a program uses most stays near the top.",
+            "show": "The whole pyramid is shown with the processor at its tip and the copied value highlighted in L1.",
+            "labels": []
+          }
+        ]
+      }
+    ],
+    "concepts": []
+  }
+}
