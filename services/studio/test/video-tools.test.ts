@@ -9,7 +9,7 @@ import { describeVideoBriefEdit, EDITABLE_VIDEO_FIELDS } from "../src/drafts/dra
 import { PLANNER_VIDEO_FIELDS } from "../src/drafts/planner";
 import { changingSummary, combinedPrompt, toolsBlock } from "../src/drafts/planner-prompt";
 import { TOOL_REASON_MAX, validateVideoBrief } from "../src/video/brief";
-import { briefTool, notInStudio, toolsHealth, VIDEO_TOOL_CAPABILITIES, VIDEO_TOOL_NAMES, VIDEO_TOOL_ROUTES, VIDEO_TOOLS } from "../src/video/tools";
+import { briefTool, DEFAULT_VIDEO_TOOL, notInStudio, toolsHealth, VIDEO_TOOL_CAPABILITIES, VIDEO_TOOL_NAMES, VIDEO_TOOL_ROUTES, VIDEO_TOOLS } from "../src/video/tools";
 
 import { testVocabulary } from "./vocabulary";
 
@@ -59,6 +59,47 @@ describe("the routing rows", () => {
 
   it("name only the three tools, bar the series row", () => {
     for (const route of VIDEO_TOOL_ROUTES.slice(1)) expect(VIDEO_TOOL_NAMES).toContain(route.tool);
+  });
+
+  it("send a video no other row claims to remotionkc, while a brief with no tool stays manimkc's (D112, D72)", () => {
+    // D112 of docs/STUDIO-LOOK.md moved the routing default; D72's default is
+    // how an old brief with no `tool` keeps its meaning, so it does not move.
+    expect(VIDEO_TOOL_ROUTES.at(-1)?.tool).toBe("remotionkc");
+    expect(VIDEO_TOOL_ROUTES[0]?.need).toContain("series");
+    expect(DEFAULT_VIDEO_TOOL).toBe("manimkc");
+  });
+
+  it("send a silent video to manimkc before the default row, as the brief's validator does", () => {
+    // remotionkc and revideokc refuse a brief whose voice is none, so a silent
+    // video of boxes and text must not fall through to the remotionkc row.
+    const silent = VIDEO_TOOL_ROUTES.findIndex((route) => route.need.startsWith("A silent video"));
+    expect(silent).toBe(1);
+    expect(VIDEO_TOOL_ROUTES[silent]?.tool).toBe("manimkc");
+    expect(VIDEO_TOOL_CAPABILITIES.find((row) => row.capability === "Silent video (captions, no voice)")).toMatchObject({
+      manimkc: expect.stringMatching(/^yes/),
+      remotionkc: expect.stringMatching(/^no/),
+      revideokc: expect.stringMatching(/^no/),
+    });
+    expect(toolsBlock()).toContain(`${VIDEO_TOOL_ROUTES[silent]!.need} | manimkc |`);
+    const line = "A request starts at the client and ends at the database, and every step between is one box.";
+    const scenes = [
+      { name: "two_boxes", beats: [{ say: line, show: "two boxes", labels: [], seconds: 8 }, { say: line, show: "an arrow", labels: [], seconds: 8 }] },
+      { name: "recap", beats: [{ say: line, show: "a recap", labels: [], seconds: 8 }, { say: line, show: "the two boxes again", labels: [], seconds: 8 }] },
+    ];
+    const silentBrief = {
+      title: "Two boxes",
+      topic: "tcp-congestion-control",
+      slug: "two-boxes",
+      mode: "new",
+      idea: "A request crosses an API.",
+      audience: "familiar",
+      targetSeconds: 60,
+      voice: "none",
+      scenes: [...scenes, { name: "close", beats: [{ say: line, show: "a closing card", labels: [], seconds: 8 }, { say: line, show: "the end", labels: [], seconds: 6 }, { say: line, show: "fade out", labels: [], seconds: 6 }] }],
+      concepts: [],
+    };
+    expect(validateVideoBrief({ ...silentBrief, tool: "manimkc" }, testVocabulary()).tool).toBe("manimkc");
+    expect(() => validateVideoBrief({ ...silentBrief, tool: VIDEO_TOOL_ROUTES.at(-1)!.tool }, testVocabulary())).toThrow(/narrated videos only/);
   });
 });
 
@@ -121,7 +162,7 @@ describe("the TOOLS block", () => {
       expect(next).toBeGreaterThan(at);
       at = next;
     }
-    expect(block).toContain("use manimkc.");
+    expect(block).toContain("When no row above the last fits, use remotionkc.");
     for (const row of VIDEO_TOOL_CAPABILITIES) {
       const next = block.indexOf(`${row.capability} | ${row.manimkc} | ${row.remotionkc} | ${row.revideokc}`, at);
       expect(next).toBeGreaterThan(at);

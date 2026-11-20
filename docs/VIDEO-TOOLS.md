@@ -13,6 +13,23 @@ The `video-router` skill (`.claude/skills/video-router/`) runs the procedure
 at the end of this page before any tool-specific skill. This page is its
 source of truth: change routing here, and the skill follows.
 
+## What stays fixed and what must vary
+
+A series is a course code (CS3230, CS4223, CS4225). A viewer should know
+two videos of a series belong together, and still see new pictures in each.
+D111 of [STUDIO-LOOK.md](STUDIO-LOOK.md) splits the look in two:
+
+| | Fixed for a whole series | Varies from scene to scene and from video to video |
+| --- | --- | --- |
+| What | Palette, typeface, heading position, voice, deliverable format | Shot type, layout, motion, transitions |
+| The mistake | A new palette or typeface partway through a series | Two neighbouring scenes with the same layout, or a week that repeats last week's shots |
+
+The twelve shot types of D115 are the words for what varies: title,
+build-up diagram, code walk, data chart, comparison, timeline, array or
+memory view, tree or graph, equation, 3D object, metaphor and recap map.
+Give each planned scene one, and vary them. A video outside a series uses
+its tool's default theme.
+
 ## The four tools
 
 | | manimkc | remotionkc | revideokc | blenderkc |
@@ -21,7 +38,7 @@ source of truth: change routing here, and the skill follows.
 | Language | Python | TypeScript and React | TypeScript, generator timelines on a canvas | Python 3.13, one `build(shot)` per scene |
 | Scene model | Mobjects and `self.play` animations, narration blocks | A React component per frame, cued on spoken words | One generator per topic on a 2D canvas with signals and flexbox, cued on spoken words | A 3D scene per narration scene from a kit of parts and materials, camera moves and 2D labels cued on spoken words, labels composited after the render |
 | Skill | `manimkc-video` | `remotionkc-video` | `revideokc-video` | None yet: [tools/blenderkc/docs/DESIGN.md](../tools/blenderkc/docs/DESIGN.md) |
-| Capability doc | [tools/manimkc/docs/CAPABILITIES.md](../tools/manimkc/docs/CAPABILITIES.md) | Remotion's own skills, vendored in `tools/remotionkc/.claude/skills/` | [tools/revideokc/docs/CAPABILITIES.md](../tools/revideokc/docs/CAPABILITIES.md) | [tools/blenderkc/docs/KIT.md](../tools/blenderkc/docs/KIT.md) |
+| Capability doc | [tools/manimkc/docs/CAPABILITIES.md](../tools/manimkc/docs/CAPABILITIES.md) | `tools/remotionkc/docs/SHOTS.md` when present, and Remotion's own skills (not vendored: [REMOTION-SKILLS.md](../tools/remotionkc/.claude/skills/REMOTION-SKILLS.md) says how to install them) | [tools/revideokc/docs/CAPABILITIES.md](../tools/revideokc/docs/CAPABILITIES.md) | [tools/blenderkc/docs/KIT.md](../tools/blenderkc/docs/KIT.md) |
 | The studio can drive it | On macOS (the video runner, [STUDIO-VIDEOS.md](STUDIO-VIDEOS.md)); off on Linux until its sandbox is measured there, and anywhere with `STUDIO_VIDEO_KIND=off` | On macOS, as manimkc ([STUDIO-VIDEO-TOOLS.md](STUDIO-VIDEO-TOOLS.md)) | On macOS, as manimkc | No: not offered by the studio, made at a terminal only |
 | Licence | MIT | Remotion License: free for a person or a company of up to three, a company licence above that | MIT | A private repository; Blender's API is GPL, which binds blenderkc's code only if it is ever distributed ([proposal](proposals/blenderkc.md), D103) |
 
@@ -32,7 +49,8 @@ higher up wins.
 
 | The video mainly needs | Tool | Why | Proven in |
 | --- | --- | --- | --- |
-| A new week of a series that already exists (CS3230, CS4223, CS4225 lecture videos) | the series' tool, usually manimkc | Viewers watch a series in order; a change of look between weeks reads as a mistake | the week folders under `tools/manimkc/topics/` |
+| A new week of a series that already exists (CS3230, CS4223, CS4225 lecture videos) | the series' tool, usually manimkc | The series' palette, typeface, heading position and voice stay the same from week to week (D111 of STUDIO-LOOK.md); its layouts, shot types and motion must not repeat week after week | the week folders under `tools/manimkc/topics/` |
+| A silent video: a caption on screen for each beat, no voice | manimkc | It is the only tool here with a silent mode (a caption per beat); remotionkc's and revideokc's builds refuse a video with no sound, and the studio refuses such a brief | manimkc's silent cuts (`tools/manimkc/topics/examples/hello-manimkc/`), and `validateVideoBrief` in `services/studio/src/video/brief.ts` |
 | A physical object shown photoreal (a chip package, a die stack, a board), with real materials, depth of field and lighting | blenderkc | Cycles path-traces it, so it looks like a camera filmed it; labels and equations are 2D on top. At a terminal only: the studio has no blenderkc backend, so a studio job takes the next row that fits | `computer-architecture/gpu-architecture/hbm-how-it-is-built` (written, not yet rendered) |
 | Continuous maths: function plots, areas, Riemann sums, geometric proofs, linear maps, vector fields | manimkc | `Axes`, `get_graph`, `NumberPlane` with `ApplyMatrix`, `VectorField` and `StreamLines` exist and are exact; nothing else here has them | manimkc CAPABILITIES.md, "Graphs and plots" (built; no topic yet) |
 | An equation whose symbols slide into their new places (a derivation, a recurrence being unrolled) | manimkc | `TransformMatchingTex` moves glyphs; Revideo's `Latex` is an image that only cross-fades, and remotionkc's label-to-label morph is weaker than manim's glyph transforms | manimkc CAPABILITIES.md (built; not yet rendered in a topic) |
@@ -45,11 +63,37 @@ higher up wins.
 | Depth and light: layers stacked in perspective, a spotlight following the story, soft shadows, glass cards | revideokc | A three.js scene inside the 2D stage, with 2D titles, code and formulas drawn over it; filters dim or blur the stage behind a panel | `computer-architecture/cache-basics/memory-hierarchy-in-depth` |
 | Code that is edited in place while the voice explains the change (a loop from `a[i]` to `a[16 * i]`), with the other lines dimmed | revideokc | `Code` reflows lines around an insert or a replace and tweens a selection; this is its strongest 2D feature | both revideokc topics |
 | Hand-choreographed diagram motion: things that spring into place, masks and reveals, light that adds over a diagram | revideokc | Springs, `compositeOperation`, `cache` masks, radial gradients, flexbox layout, signals binding one node to another | the showcase topic |
-| Boxes, tables and arrows with nothing above | manimkc | It is the house style of every series so far, and the studio can already make it | every manimkc topic |
+| Nothing above: boxes, tables, arrows, a diagram that builds up, text | remotionkc | It lays out with CSS and has charts, code, a terminal, KaTeX and three.js to vary the shots with, and the studio can make it (D112 of STUDIO-LOOK.md) | `growth-rates-on-a-chart`, the one remotionkc video a studio job has made |
 
-When nothing in the video needs more than the last row, use manimkc: on macOS the
-studio can make it without a person at the terminal, and it matches every
-video made so far.
+The last row is the studio's. When no row above it fits, a studio job goes
+to remotionkc (D112), and a video made at a terminal goes to manimkc, as
+before. The planner's TOOLS block carries the row exactly as written here,
+so the terminal default lives in this paragraph instead.
+
+D112 of [STUDIO-LOOK.md](STUDIO-LOOK.md) moved the studio's default from
+manimkc on 2026-11-20, after an audit found the videos look alike and the old default
+sending every plain diagram video to manimkc was one cause. On the owner's
+catalog that day, manimkc's 153 videos scored 0.69 for variety, its top five
+helpers made 94% of its helper calls, fades were 81% of its animation calls,
+and none of them had 3D. The one remotionkc video a studio job has made,
+"How fast functions grow" (`growth-rates-on-a-chart`, 60 seconds, $1.94),
+used a line chart, a bar comparison, a formula with a share bar and a
+crossing plot. That is one job, so the benchmark in STUDIO-LOOK.md is what
+tests the decision.
+
+manimkc keeps the series it already has and the rows above that only it
+can draw (function plots, glyph-level equation morphs, vector fields, 3D
+maths surfaces). revideokc keeps code edited in place and its lit 3D stage;
+blenderkc is unchanged. The terminal default is unchanged too: D112 covers
+videos the studio makes, and the owner has not decided the terminal yet.
+Whichever tool makes a video, "What stays fixed and what must vary" and the
+shot types apply to it.
+
+The studio still reads a brief that names no tool as a manimkc brief (D72 of
+[STUDIO-VIDEO-TOOLS.md](STUDIO-VIDEO-TOOLS.md)). That default is unchanged
+on purpose: it keeps every brief, job and video from before D71 meaning what
+it meant. The planner writes `tool` in every new brief, so D72 never routes
+a new video.
 
 ## The capability matrix
 
@@ -68,6 +112,7 @@ missing or poor.
 | Boolean shape ops (Venn, overlaps) | built | via SVG paths | no | no |
 | Data charts from real data | built (`BarChart`, `Axes`) | yes | possible, untested | no |
 | Word-level captions | no | yes | no | no |
+| Silent video (captions, no voice) | yes (silent cuts; `CaptionBar` in the studio) | no (its build refuses a video with no sound) | no (its build refuses a video with no sound) | not documented |
 | Code panel with syntax highlighting | built (`Code`, Pango) | yes | yes (Lezer) | no |
 | Code edited in place with reflow | no | by hand | yes | no |
 | Terminal and UI mock-ups | by hand | yes | by hand | no |
@@ -130,9 +175,17 @@ come before preferences, so a later step can never undo an earlier one.
    among the four as they would at a terminal.
 2. **The user named a tool.** Use it, and stop.
 3. **Series.** Is this a week or a part of an existing series? Use that
-   series' tool, and stop.
-4. **Name the main visual.** Write one sentence: what is on screen for most
-   of the video? Find it in "Pick by what the video needs", top row first.
+   series' tool, and stop. The tool carries the series' palette, typeface,
+   heading position and voice (D111); the new week still picks its own shot
+   types and layouts, and repeats none of last week's.
+4. **Name the main visual.** A silent video (a caption per beat, no voice)
+   is manimkc's, the second row, whatever it shows: remotionkc's and
+   revideokc's builds refuse a video with no sound. Otherwise write one
+   sentence: what is on screen for most of the video? Find it in "Pick by
+   what the video needs", top row first.
+   When no row above the last fits, a studio job goes to remotionkc (the
+   last row, D112) and a video made at a terminal goes to manimkc, as
+   before.
 5. **Check the second visual.** If a second beat needs something the chosen
    tool cannot do (the capability matrix says "no"), prefer the tool that can
    do both; if none can, keep the main visual's tool and simplify that beat.
@@ -147,13 +200,17 @@ flowchart TD
   U -- no --> N{User named a tool?}
   N -- yes --> T[That tool]
   N -- no --> B{Part of an existing series?}
-  B -- yes --> S[That series' tool]
-  B -- no --> C{Main visual}
+  B -- yes --> S[That series' tool, keeping its palette and type, with new shots]
+  B -- no --> Z{Silent, a caption per beat and no voice?}
+  Z -- yes --> M
+  Z -- no --> C{Main visual}
   C -- a physical object, photoreal --> K[blenderkc]
   C -- plots, equation morphs, 3D maths --> M[manimkc]
   C -- real data, captions, editor and terminal, footage --> R[remotionkc]
   C -- depth and light, code edited in place, choreographed motion --> V[revideokc]
-  C -- boxes, tables, arrows --> M
+  C -- none of the above, such as boxes, tables, arrows, text --> W{Made by the studio, unattended?}
+  W -- yes, a studio job --> R
+  W -- no, at a terminal --> M
   M --> D{Does a second beat need what it lacks?}
   R --> D
   V --> D

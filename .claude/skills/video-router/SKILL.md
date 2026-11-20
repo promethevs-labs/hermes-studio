@@ -30,40 +30,67 @@ undoes an earlier one.
 2. **The user named a tool** ("use Revideo", "make it in Remotion")? Use it.
    Skip to step 6.
 3. **Series first.** If the video is a week or a part of a series that
-   already exists (the CS3230, CS4223 and CS4225 lecture videos, or any
+   already exists (a course code such as CS3230, CS4223 or CS4225, or any
    topic folder with siblings), use the tool that series was made with and
-   skip to step 6. `npm run --silent catalog -- video list` and the
-   `topics/` folders under each tool show which tool made what.
+   skip to step 6. The tool keeps the series' palette, typeface, heading
+   position and voice the same (D111 of `docs/STUDIO-LOOK.md`); the new
+   week still picks its own shot types and layouts, and repeats none of
+   last week's. `npm run --silent catalog -- video list` and the `topics/`
+   folders under each tool show which tool made what.
 4. **Name the main visual** in one sentence: what is on screen for most of
    the video. Find it in the table, top row first. Roughly:
+   - a silent video (a caption per beat, no voice), whatever it shows:
+     **manimkc**, the only tool with a silent mode; remotionkc's and
+     revideokc's builds refuse a video with no sound
    - a physical object shown photoreal (a chip package, a die stack, a
      board), with real materials, depth of field and lighting: **blenderkc**
-   - continuous maths, plots, equation morphs, 3D maths objects, or plain
-     boxes, tables and arrows: **manimkc**
+   - continuous maths, plots, equation morphs, 3D maths objects:
+     **manimkc**
    - real data on a chart, word-level captions, a code editor with a
      terminal, footage or screen recordings, a template or a live player:
      **remotionkc**
    - depth and light (layers in perspective, a spotlight, shadows), code
      edited in place, springy choreographed diagram motion: **revideokc**
+   - none of the above (boxes, tables, arrows, a diagram that builds up,
+     text): **manimkc**, as before at a terminal (the studio's default for
+     the same video is remotionkc, D112 of `docs/STUDIO-LOOK.md`)
 5. **Check the second visual.** If another beat needs something the chosen
    tool's column in the capability matrix marks "no", prefer the tool that
    does both; if none does, keep the choice and simplify that beat.
 6. **Say it in two lines** before starting, so the owner can overrule it in a
    word:
    `Tool: revideokc (row: "Depth and light"). Runner-up: remotionkc.`
-   Then invoke that tool's skill (`manimkc-video`, `remotionkc-video` or
+   Under them, the shot plan from "Plan the shots before handing over"
+   below. Then invoke that tool's skill (`manimkc-video`, `remotionkc-video` or
    `revideokc-video`) and follow it from its first step. blenderkc has no
    skill yet: follow `tools/blenderkc/docs/DESIGN.md` (its verbs, `new`,
    `narrate`, `still`, `build --host home`) and `docs/KIT.md`. The catalog topic
    slug each of them needs comes from `npm run --silent catalog -- topic ls`.
 
-## Push past the defaults
+## Plan the shots before handing over
 
-Whichever tool wins, read its capability doc at storyboard time
-(`tools/manimkc/docs/CAPABILITIES.md`, Remotion's skills under
-`tools/remotionkc/.claude/skills/`, `tools/revideokc/docs/CAPABILITIES.md`,
-`tools/blenderkc/docs/KIT.md`)
-and plan at least one beat with something the older videos never used.
+This step is required. Before step 6 hands over, list the planned scenes
+and give each one shot type from the twelve in D115 of
+`docs/STUDIO-LOOK.md`: title, build-up diagram, code walk, data chart,
+comparison, timeline, array or memory view, tree or graph, equation, 3D
+object, metaphor, recap map. Then check two things:
+
+- No shot type covers more than half of the scenes.
+- No two neighbouring scenes share a layout.
+
+If either fails, change the plan before writing any scene code. Write the
+list under the two lines of step 6, one line a scene.
+
+Then read the chosen tool's capability doc at storyboard time and plan at
+least one beat with something the older videos never used:
+
+| Tool | Read |
+| --- | --- |
+| manimkc | `tools/manimkc/docs/CAPABILITIES.md` |
+| remotionkc | `tools/remotionkc/docs/SHOTS.md` when present, and Remotion's own skills (`tools/remotionkc/.claude/skills/REMOTION-SKILLS.md` says how to install them) |
+| revideokc | `tools/revideokc/docs/CAPABILITIES.md` |
+| blenderkc | `tools/blenderkc/docs/KIT.md` |
+
 The docs mark what has been rendered and what has only been read about; a
 beat built on an unrendered feature needs a still of it before the rest of
 the video is written.
