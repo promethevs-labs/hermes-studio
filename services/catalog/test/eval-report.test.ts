@@ -329,4 +329,60 @@ describe.skipIf(!reachable.ok)("catalog eval report", () => {
       expect((await runEvalReport({})).report.totals.staleRatings).toBe(after.totals.staleRatings + 1);
     });
   });
+
+  describe("a critic on a job's attempts", () => {
+    const F = "manimkc:out/demo/f/f.mp4";
+    const critic = (accuracy: number, pacing: number) => ({
+      model: "claude-opus-5-5",
+      costUsd: 0.02,
+      scores: { accuracy, layout: 4, relevance: 4, variety: 3, pacing },
+      defects: 1,
+      notes: 2,
+    });
+    const JUDGED: JobRun = {
+      ...RUN,
+      model: { passed: "c", resolved: "model-c" },
+      manualHash: "cccccccc00000000",
+      attempts: [
+        { ...RUN.attempts[0]!, critic: critic(1, 1) },
+        { ...RUN.attempts[1]!, critic: critic(5, 4) },
+        // A last attempt the critic did not judge leaves attempt 2's standing.
+        { n: 3, startedAt: null, endedAt: null, turns: 2, costUsd: 0.1, gate: null, critic: null },
+      ],
+    };
+    let before: Awaited<ReturnType<typeof runEvalReport>>["report"];
+
+    beforeAll(async () => {
+      before = (await runEvalReport({})).report;
+      await video(F);
+      const made = await ready("f-judged", { run: JUDGED, costUsd: 1, turns: 10 });
+      await link(F, made);
+      await runAccept({ jobId: made });
+      // A discarded job with a critic counts too, under its own model.
+      const dropped = await ready("f-dropped", { run: { ...JUDGED, attempts: [{ ...RUN.attempts[0]!, critic: critic(2, 2) }] }, costUsd: 0.5 });
+      await runDiscard({ jobId: dropped, tags: ["same-look"] });
+    });
+
+    it("is absent from every report before any job has one", () => {
+      expect(before.totals.critic).toEqual({
+        n: 0,
+        mean: null,
+        scores: { accuracy: null, layout: null, relevance: null, variety: null, pacing: null },
+      });
+      expect(formatEval({ ok: true, command: "eval report", owner: "x", libraryFound: true, report: before })).not.toContain("Critic");
+    });
+
+    it("takes each job's last judged attempt, over the video's job and the discarded one", async () => {
+      const result = await runEvalReport({});
+      const c = result.report.byModel.find((g) => g.key === "model-c")!;
+      // Attempt 2 of the accepted job (5, 4, 4, 3, 4: mean 4) and the discarded job's one (2, 4, 4, 3, 2: mean 3).
+      expect(c.critic).toEqual({ n: 2, mean: 3.5, scores: { accuracy: 3.5, layout: 4, relevance: 4, variety: 3, pacing: 3 } });
+      expect(result.report.totals.critic).toMatchObject({ n: 2, mean: 3.5 });
+      const json = JSON.parse(JSON.stringify(result)) as typeof result;
+      expect(json.report.totals.critic).toEqual(result.report.totals.critic);
+      const text = formatEval(result);
+      expect(text).toContain("  Critic                      3.5 over 2 jobs (accuracy 3.5, layout 4.0");
+      for (const line of text.split("\n")) expect(line.length).toBeLessThanOrEqual(100);
+    });
+  });
 });

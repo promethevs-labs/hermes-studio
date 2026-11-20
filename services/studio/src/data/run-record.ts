@@ -9,6 +9,7 @@ import {
   type JobReview,
   type JobRun,
   type JobRunAttempt,
+  type JobRunCritic,
   type JobRunGate,
   type JobVerdict,
   type RatingTagDown,
@@ -103,6 +104,22 @@ export function appendAttempt(attempts: readonly JobRunAttempt[] | undefined, at
 /** `attempts` with attempt `n`'s gate set. An attempt the list does not hold is left out of it. */
 export function withAttemptGate(attempts: readonly JobRunAttempt[] | undefined, n: number, gate: JobRunGate): JobRunAttempt[] {
   return (attempts ?? []).map((attempt) => (attempt.n === n ? { ...attempt, gate } : attempt));
+}
+
+/**
+ * `attempts` with attempt `n`'s critic set: a vision critic's scores on that
+ * attempt's contact sheets, or null for a critic that ran and gave none. An
+ * attempt the list does not hold is left out of it, as `withAttemptGate`
+ * leaves it. The scores are copied, so the record never shares an object
+ * with the caller.
+ */
+export function withAttemptCritic(
+  attempts: readonly JobRunAttempt[] | undefined,
+  n: number,
+  critic: JobRunCritic | null,
+): JobRunAttempt[] {
+  const copy = critic === null ? null : { ...critic, scores: { ...critic.scores } };
+  return (attempts ?? []).map((attempt) => (attempt.n === n ? { ...attempt, critic: copy } : attempt));
 }
 
 /** How many times the job called each wrapper verb, from its `calls.ndjson`. */

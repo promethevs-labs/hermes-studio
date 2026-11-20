@@ -224,6 +224,30 @@ are `JobRun` and `JobReview` in `@hermes/schema/shared`, and `checkJobRun` and
 `job accept` and `job discard`. `transcriptPath` in a run is relative to the
 runner's `STUDIO_HOME` and an absolute one is refused, as `candidate_path` is.
 
+An attempt in a run may carry `critic`, a vision critic's read of that
+attempt's contact sheets (`JobRunCritic`). It is the one attempt key that may
+be left out, so a run stored before critics existed is read and stored as it
+was; the other six keys are required. A critic is null, or an object with
+these fields and no others:
+
+| Field | What it holds |
+| --- | --- |
+| `model` | The model that judged, when the stream named one, else null. |
+| `costUsd` | What the critic's own call cost, a number 0 or more, or null. |
+| `scores` | A whole number from 1 (poor) to 5 (good) for each of the five dimensions below, all five required. |
+| `defects` | How many pointable defects it sent back to the agent. |
+| `notes` | How many remarks it only reported. |
+
+| Dimension | A 5 means |
+| --- | --- |
+| `accuracy` | The picture shows what the words say. |
+| `layout` | Nothing overlaps, is cut off or is crowded. |
+| `relevance` | The picture helps explain the idea and is not decoration. |
+| `variety` | Scenes differ in shot and layout. |
+| `pacing` | The screen changes with the voice, with no long held frames. |
+
+Adding `critic` needed no migration, since `job.run` is a JSON column.
+
 They are columns rather than tables because each is one record per job, read
 with the job and never joined on. A run's attempts and a review's tags live
 inside the JSON, since nothing queries across jobs by them yet; a report that
@@ -317,6 +341,7 @@ What the numbers mean:
 | Helper top five share | Of the calls a video makes to its tool's library helpers, the share that go to its five most-called ones. 100% means five helpers do all the work. |
 | Fade share | Fade in and fade out calls over every animation call. High means the video mostly fades things in and out. |
 | Variety | How evenly the calls spread over the distinct helpers and animations the video uses, from 0 (one name does it all) to 1 (every name equally often). Empty with fewer than two names. |
+| Critic | A vision critic's scores from 1 to 5, read from each job's run: the last attempt that has a critic, so a retry the critic did not judge leaves the earlier verdict standing. The column is the mean of the five dimensions, averaged over the jobs in the group that have a critic, both a video's job and the other finished jobs; `-` when none has one. The Totals line, shown only when some job has a critic, adds each dimension's mean. A rating that names another job does not move a critic: it stays with its own job's model and prompt version. |
 
 The three look numbers are averaged over videos that have a scan. Variety and
 the top five share are cheap signs of videos that look alike; none of them says
