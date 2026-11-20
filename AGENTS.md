@@ -1072,14 +1072,38 @@ not have to be worked out again.
   (`services/catalog/test/scratch-database.ts`), and the end-to-end one
   imports `seed/`, a small real slice cut with `catalog export --subset`
   (seed/README.md), since the phase 3 cut-over removed `content/` and
-  `learn/`. A database of your own to look at is `CATALOG_DB=<file> npm run
-  catalog -- migrate`, then `MANIMKC_ROOT=/nonexistent
+  `learn/`. A database of your own to look at is `CATALOG_DB=<file>
+  HERMES_HOME=<scratch dir> npm run catalog -- migrate`, then `MANIMKC_ROOT=/nonexistent
   REMOTIONKC_ROOT=/nonexistent REVIDEOKC_ROOT=/nonexistent
   BLENDERKC_ROOT=/nonexistent npm run catalog -- import seed`, then
   `catalog flip` for topics, tags, concepts, sessions, courses and diagrams in
   that order (`scripts/lib/flip-order.mjs`; README.md, "Install"), all with
-  the same `CATALOG_DB`. `npm run e2e` builds exactly that database on its
-  own.
+  the same `CATALOG_DB` and `HERMES_HOME`, both under a temp directory (the
+  next gotcha says why `HERMES_HOME` is there). `npm run e2e` builds exactly
+  that database on its own.
+- **A scratch catalog needs its own `HERMES_HOME`, or its import writes into
+  your real blob store.** `CATALOG_DB` moves only the database file. The blob
+  root is `$HERMES_HOME/blobs` (default `~/.hermes/blobs`; `defaultBlobRoot` in
+  `packages/blob/src/fs.ts`, `dataHome()` in `packages/blob/src/home.ts`), so
+  `CATALOG_DB=/tmp/x.db npm run catalog -- import seed` stores the seed's
+  images and SVGs under the real store, `<owner_id>/<sha256>.<ext>`. The
+  write also goes through `assertWritable` in
+  `services/catalog/src/content/blob-owner.ts`: a root with no `.owner`
+  marker is claimed for the database that writes first, here the scratch one,
+  and from then on the real catalog is refused its own blobs ("belongs to
+  database ... Give this database its own store with HERMES_HOME") until the
+  marker is put right. A root already claimed by the real database refuses the
+  scratch import instead, naming nothing uploaded. That happened on
+  2026-11-20. Set `HERMES_HOME` to a temp directory on every command of a
+  scratch recipe, next to `CATALOG_DB`. Keep both: `HERMES_HOME` alone moves
+  the database to `$HERMES_HOME/catalog.db` only when neither `CATALOG_DB` nor
+  a `DATABASE_URL` that names a file is set in the shell or in
+  `services/catalog/.env` (`databaseUrl()` reads those first), so on its own
+  it can still open the real database. `npm run e2e` in its default
+  seed mode already does this (`SEED_HOME` in `scripts/e2e.mjs`), and
+  `scripts/worktree-setup.sh` only migrates its scratch file, which writes no
+  blob; a hand-written recipe, a doc or a script that imports with only
+  `CATALOG_DB` set does not.
 - **A suite that wants every migration takes `migratedScratchDatabase()`,
   not `createScratchDatabase()` plus `applyMigrations`.** vitest's global
   setup (`services/catalog/test/migrated-template.ts`) migrates one template

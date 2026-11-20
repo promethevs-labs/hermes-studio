@@ -149,6 +149,19 @@ export const ONCE_ONLY_SHOTS: readonly ShotType[] = ["title", "recap-map"];
 export const SHOT_VARIETY_FROM = 4;
 
 /**
+ * One shot text field against every rule it has: non-empty, one line with no
+ * control character, no straight double quote or backslash, and within `max`
+ * characters. `field` is the dotted name, as in `scenes[2].shot.layout`. The
+ * art director's reply passes `Infinity` to check everything but the length
+ * before it forgives a length.
+ */
+export function validateShotText(value: unknown, field: string, max: number): string {
+  const checked = text(value, field, 1, max);
+  if (/["\\]/.test(checked)) throw new BriefError(field, `"${field}" cannot hold a straight double quote or a backslash`);
+  return checked;
+}
+
+/**
  * One scene's `shot`, checked and rebuilt, or a refusal naming the field:
  * `scenes[2].shot.layout`. Plain words on one line, with no straight double
  * quote or backslash, the same stance as the brief's other text.
@@ -159,11 +172,7 @@ export function validateShot(value: unknown, at: string): VideoShot {
   }
   const raw = value as Record<string, unknown>;
   const type = oneOf(raw.type, `${at}.type`, SHOT_TYPES);
-  const field = (name: "layout" | "motion" | "emphasis"): string => {
-    const value = text(raw[name], `${at}.${name}`, 1, SHOT_TEXT_LIMITS[name]);
-    if (/["\\]/.test(value)) throw new BriefError(`${at}.${name}`, `"${at}.${name}" cannot hold a straight double quote or a backslash`);
-    return value;
-  };
+  const field = (name: "layout" | "motion" | "emphasis"): string => validateShotText(raw[name], `${at}.${name}`, SHOT_TEXT_LIMITS[name]);
   return { type, layout: field("layout"), motion: field("motion"), emphasis: field("emphasis") };
 }
 
