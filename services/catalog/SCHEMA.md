@@ -373,10 +373,11 @@ model the account cannot use, an exhausted quota), which is a job that never
 ran. But the check reads the last attempt only, so a job whose first attempt
 did real work and failed the gate, and whose second attempt then met a refused
 login, also ends as `agent`. The report tells them apart from the row, not the
-error text: an `agent` failure is infrastructure when the job has no turns
-(null or 0), no cost (null or 0) and no recorded attempt that reached the gate
-(`job.run.attempts[].gate`). Any one of those makes it quality, because the
-agent ran.
+error text: an `agent` failure is infrastructure when the job has at most one
+turn (null, 0 or 1: a refused first request can report one, and the runners'
+own check is one turn or fewer), no cost (null or 0) and no recorded attempt
+that reached the gate (`job.run.attempts[].gate`). A second turn, any cost or
+a gated attempt makes it quality, because the agent ran.
 
 Each group row shows `quality` and `infra` counts. The Totals section adds one
 line, Infrastructure failures, with the count by kind when there are any, so a

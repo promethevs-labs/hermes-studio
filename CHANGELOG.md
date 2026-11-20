@@ -18,8 +18,8 @@ This project is continuously deployed and not versioned; entries are grouped by 
   and `wrote-outside` are quality failures; `timeout`, `spawn`, `toolchain`,
   `internal`, `interrupted`, `cancelled`, `not-claimed`, a missing kind and an
   unknown one are infrastructure; `agent` is infrastructure when the job had
-  no turns, no cost and no attempt at the gate, and quality otherwise. The
-  rate is accepted over accepted, discarded and quality failures (75% for the
+  at most one turn (a refused first request can report one), no cost and no
+  attempt at the gate, and quality otherwise. The rate is accepted over accepted, discarded and quality failures (75% for the
   shape above). Group rows show `quality` and `infra` counts, the Totals gain
   an Infrastructure failures line by kind, and the JSON keeps `failed` and adds
   `failedQuality`, `failedInfra` and `failuresByKind`. The table's `up share`

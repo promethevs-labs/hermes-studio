@@ -76,6 +76,9 @@ export const FAILURE_KINDS: Readonly<Record<string, KindRule>> = {
 /** The kinds the classifier knows by name: the table, and `agent`. */
 export const CLASSIFIED_KINDS: readonly string[] = [...Object.keys(FAILURE_KINDS), "agent"];
 
+/** The most turns a job whose first request was refused can report, as the runners read it. */
+export const REFUSED_REQUEST_TURNS = 1;
+
 function none(x: number | null | undefined): boolean {
   return x === null || x === undefined || x <= 0;
 }
@@ -90,14 +93,18 @@ function none(x: number | null | undefined): boolean {
  * alone: a job whose first attempt did real work and failed the gate, and whose
  * second attempt then met a refused login, also ends as `agent`. The row tells
  * the two apart without reading the error text: the job did no work when it has
- * no turns, no cost, and no attempt that reached the gate. Any one of those is
- * the sign of an agent that ran, and the job counts as quality.
+ * at most one turn, no cost, and no attempt that reached the gate. One turn is
+ * not work: a refused first request can report `turns: 1`, which is why both
+ * runners' own check is `(outcome.turns ?? 0) <= 1` (`REFUSED_REQUEST_TURNS`
+ * here). A second turn, any cost or a gated attempt is the sign of an agent
+ * that ran, and the job counts as quality.
  */
 export function classifyFailure(evidence: FailureEvidence): FailureClass {
   const raw = evidence.errorKind;
   const kind = raw === null || raw === undefined || raw.trim() === "" ? NO_ERROR_KIND : raw;
   if (kind === "agent") {
-    const neverRan = none(evidence.turns) && none(evidence.costUsd) && none(evidence.gatedAttempts);
+    const neverRan =
+      (evidence.turns ?? 0) <= REFUSED_REQUEST_TURNS && none(evidence.costUsd) && none(evidence.gatedAttempts);
     return { kind, cause: neverRan ? "infrastructure" : "quality", classified: true };
   }
   const rule = Object.hasOwn(FAILURE_KINDS, kind) ? FAILURE_KINDS[kind] : undefined;

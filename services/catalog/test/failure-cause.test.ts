@@ -29,12 +29,15 @@ describe("classifyFailure", () => {
   });
 
   describe("agent", () => {
-    it("is infrastructure when the job had no turns, no cost and no attempt at the gate", () => {
+    it("is infrastructure when the job had at most one turn, no cost and no attempt at the gate", () => {
       for (const evidence of [
         {},
         { turns: null, costUsd: null },
         { turns: 0, costUsd: 0, gatedAttempts: 0 },
         { turns: null, costUsd: 0, gatedAttempts: null },
+        // A refused first request can report one turn, which the runners read as no work.
+        { turns: 1, costUsd: null },
+        { turns: 1, costUsd: 0, gatedAttempts: 0 },
       ]) {
         expect(classifyFailure({ errorKind: "agent", ...evidence })).toEqual({
           kind: "agent",
@@ -44,8 +47,9 @@ describe("classifyFailure", () => {
       }
     });
 
-    it("is quality when the job took a turn, spent money or reached the gate", () => {
-      expect(classifyFailure({ errorKind: "agent", turns: 1, costUsd: null }).cause).toBe("quality");
+    it("is quality when the job took a second turn, spent money or reached the gate", () => {
+      expect(classifyFailure({ errorKind: "agent", turns: 2, costUsd: null }).cause).toBe("quality");
+      expect(classifyFailure({ errorKind: "agent", turns: 1, costUsd: 0.02 }).cause).toBe("quality");
       expect(classifyFailure({ errorKind: "agent", turns: null, costUsd: 0.02 }).cause).toBe("quality");
       // An earlier attempt reached the gate, then a later request was refused.
       expect(classifyFailure({ errorKind: "agent", turns: 1, costUsd: 0, gatedAttempts: 1 }).cause).toBe("quality");
