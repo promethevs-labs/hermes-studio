@@ -210,9 +210,7 @@ flowchart TD
   C -- plots, equation morphs, 3D maths --> M[manimkc]
   C -- real data, captions, editor and terminal, footage --> R[remotionkc]
   C -- depth and light, code edited in place, choreographed motion --> V[revideokc]
-  C -- none of the above, such as boxes, tables, arrows, text --> W{Made by the studio, unattended?}
-  W -- yes, a studio job --> R
-  W -- no, at a terminal --> M
+  C -- none of the above, such as boxes, tables, arrows, text --> R
   M --> D{Does a second beat need what it lacks?}
   R --> D
   V --> D
